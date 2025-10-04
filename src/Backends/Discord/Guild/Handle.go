@@ -8,7 +8,7 @@ import (
 )
 
 // Handle all events from guild.
-func Handle(client *discordgo.Session, db *Database.DB) {
+func Handle(client *discordgo.Session, db *Database.DB, injectHandlers ...any) {
 	/******************** Interfaces ********************/
 	// Slash := slash.Guild{
 	// 	Client: client,
@@ -75,4 +75,9 @@ func Handle(client *discordgo.Session, db *Database.DB) {
 	client.AddHandler(func(s *discordgo.Session, m *discordgo.GuildBanRemove) {
 		Log.Warn.Printf("G:%v > A:BAN_REMOVE > U:%v", m.GuildID, m.User.ID)
 	})
+
+	/****************** Inject Handlers ******************/
+	for _, handler := range injectHandlers {
+		client.AddHandler(handler)
+	}
 }

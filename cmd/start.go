@@ -4,6 +4,8 @@ Copyright © 2025 ANTEGRAL <antegral@antegral.net>
 package cmd
 
 import (
+	"os"
+
 	"github.com/spf13/cobra"
 	discord "github.com/thirdscam/chatanium/src/Backends/Discord"
 	"github.com/thirdscam/chatanium/src/Database"
@@ -17,6 +19,8 @@ var startCmd = &cobra.Command{
 	Short: "Start the modules",
 	Long:  `Start the modules`,
 	Run: func(cmd *cobra.Command, args []string) {
+		defer os.Exit(0) // defer using stack, so it will be executed after the function ends.
+
 		// Init the logging system
 		Log.Init()
 

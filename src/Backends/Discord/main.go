@@ -59,18 +59,17 @@ func (t *Backend) Start() {
 	SlashGuildMgr.Start()
 	t.client = client
 
-	// 4. Add handlers
-	client.AddHandler(func(s *discordgo.Session, g *discordgo.GuildCreate) {
-		SlashGuildMgr.OnGuildCreated(g.ID) // Register slash commands
-	})
+	// 5. Add handlers
+	Guild.Handle(client, t.Database,
+		func(s *discordgo.Session, g *discordgo.GuildCreate) {
+			SlashGuildMgr.OnGuildCreated(g.ID) // Register slash commands
+		},
+		func(s *discordgo.Session, g *discordgo.GuildDelete) {
+			SlashGuildMgr.OnGuildDeleted(g.ID) // Remove slash commands
+		},
+	)
 
-	client.AddHandler(func(s *discordgo.Session, g *discordgo.GuildDelete) {
-		SlashGuildMgr.OnGuildDeleted(g.ID) // Remove slash commands
-	})
-	Guild.Handle(client, t.Database)
-	// DM.Handle(client, db) // TODO: DM (Direct Message) Handler
-
-	// 5. Start Discord session
+	// 6. Start Discord session
 	if err := client.Open(); err != nil {
 		Log.Error.Fatalf("Failed to start Discord session: %v", err)
 	}
