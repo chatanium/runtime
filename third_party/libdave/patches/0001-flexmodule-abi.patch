@@ -1,0 +1,344 @@
+Subject: [PATCH] Preserve FlexModule native DAVE ABI and bounded MLS state
+
+Reason: The existing native voice transport requires explicit proposal limits,
+pending-group media activation, roster reset, and bounded proposal processing.
+Origin: Copied from tools/native/libdave.patch in published SDK v0.30.0,
+commit f2d1806d4599ff674163be703c0d62a23d4bb524. The code hunks below
+are unchanged; only this provenance header is added.
+Base: https://github.com/discord/libdave.git
+      6396c90aedbb9a6ee117ea9ce1ce9832af6a3375
+Upstream-Status: Downstream; no upstream submission or acceptance is recorded
+by this patch's source. This header makes no authorship or review claim.
+
+--- a/cpp/src/mls/session.h
++++ b/cpp/src/mls/session.h
+@@ -81,6 +81,10 @@
+       std::string const& userId,
+       PairwiseFingerprintCallback callback) const noexcept override;
+ 
++    // Host-only extension: activate pending-group media without establishing MLS.
++    bool ActivatePendingGroup() noexcept;
++    bool SetProposalLimits(size_t maxCount, size_t maxBytes) noexcept;
++
+ private:
+     void InitLeafNode(std::string const& selfUserId,
+                       std::shared_ptr<::mlspp::SignaturePrivateKey>& transientKey) noexcept;
+@@ -118,6 +122,7 @@
+     std::unique_ptr<::mlspp::ExternalSender> externalSender_;
+ 
+     std::unique_ptr<::mlspp::State> pendingGroupState_;
++    bool pendingMediaActivated_{false};
+ 
+     std::unique_ptr<::mlspp::MLSMessage> outboundCommit_;
+     std::unique_ptr<::mlspp::State> outboundCachedGroupState_;
+@@ -127,6 +132,10 @@
+ 
+     std::unique_ptr<::mlspp::State> stateWithProposals_;
+     std::list<QueuedProposal> proposalQueue_;
++    // The host must configure positive finite limits before processing proposals.
++    size_t proposalCountLimit_{0};
++    size_t proposalBytesLimit_{0};
++    size_t proposalBytes_{0};
+ 
+     MLSFailureCallback onMLSFailureCallback_{};
+ };
+--- a/cpp/src/mls/session.cpp
++++ b/cpp/src/mls/session.cpp
+@@ -32,6 +32,7 @@
+ struct QueuedProposal {
+     ::mlspp::ValidatedContent content;
+     ::mlspp::bytes_ns::bytes ref;
++    size_t serializedBytes;
+ };
+ 
+ std::unique_ptr<ISession> CreateSession(KeyPairContextType context,
+@@ -84,6 +85,9 @@
+     ClearPendingState();
+ 
+     currentState_.reset();
++    // ReplaceState returns a delta; a new group must not diff against a former
++    // group's roster (persistent member signature keys may legitimately match).
++    roster_.clear();
+ 
+     protocolVersion_ = 0;
+     groupId_.clear();
+@@ -139,6 +143,12 @@
+   std::vector<uint8_t> proposals,
+   std::set<std::string> const& recognizedUserIDs) noexcept
+ try {
++    if (proposalCountLimit_ == 0 || proposalBytesLimit_ == 0) {
++        throw std::logic_error("Proposal limits not configured");
++    }
++    if (proposals.size() > proposalBytesLimit_) {
++        throw std::length_error("Proposal message byte limit exceeded");
++    }
+     if (!pendingGroupState_ && !currentState_) {
+         DISCORD_LOG(LS_ERROR)
+           << "Cannot process proposals without any pending or established MLS group state";
+@@ -164,24 +174,37 @@
+ 
+     const auto suite = stateWithProposals_->cipher_suite();
+ 
++    // Decode this list once using the official TLS parser. Avoid allocating an
++    // unbounded vector of messages before enforcing the native queue limits.
++    if (inStream.empty()) {
++        throw std::invalid_argument("Missing proposal list header");
++    }
++    uint64_t listBytes = 0;
++    ::mlspp::tls::varint::decode(inStream, listBytes);
++    if (listBytes != inStream.size()) {
++        throw std::invalid_argument("Invalid proposal list framing");
++    }
++
+     if (isRevoke) {
+-        std::vector<::mlspp::bytes_ns::bytes> refs;
+-        inStream >> refs;
+-
+-        for (const auto& ref : refs) {
++        size_t revoked = 0;
++        while (!inStream.empty()) {
++            if (revoked++ >= proposalCountLimit_) {
++                throw std::length_error("Proposal revocation count limit exceeded");
++            }
++            ::mlspp::bytes_ns::bytes ref;
++            inStream >> ref;
+             bool found = false;
+             for (auto it = proposalQueue_.begin(); it != proposalQueue_.end(); it++) {
+                 if (it->ref == ref) {
+                     found = true;
++                    proposalBytes_ -= it->serializedBytes;
+                     proposalQueue_.erase(it);
+                     break;
+                 }
+             }
+ 
+             if (!found) {
+-                DISCORD_LOG(LS_ERROR) << "Cannot revoke unrecognized proposal ref";
+-                TRACK_MLS_ERROR("Unrecognized proposal revocation");
+-                return std::nullopt;
++                throw std::invalid_argument("Unrecognized proposal revocation");
+             }
+         }
+ 
+@@ -194,16 +217,23 @@
+         }
+     }
+     else {
+-        std::vector<::mlspp::MLSMessage> messages;
+-        inStream >> messages;
+-
+-        for (const auto& proposalMessage : messages) {
++        while (!inStream.empty()) {
++            if (proposalQueue_.size() >= proposalCountLimit_) {
++                throw std::length_error("Proposal queue count limit exceeded");
++            }
++            const auto before = inStream.size();
++            ::mlspp::MLSMessage proposalMessage;
++            inStream >> proposalMessage;
++            const auto serializedBytes = before - inStream.size();
++            if (serializedBytes == 0 || serializedBytes > proposalBytesLimit_ - proposalBytes_) {
++                throw std::length_error("Proposal queue byte limit exceeded");
++            }
+             auto validatedMessage = stateWithProposals_->unwrap(proposalMessage);
+ 
+             if (!ValidateProposalMessage(validatedMessage.authenticated_content(),
+                                          *stateWithProposals_,
+                                          recognizedUserIDs)) {
+-                return std::nullopt;
++                throw std::invalid_argument("Invalid proposal message");
+             }
+ 
+             // success will queue the proposal, failure will throw
+@@ -214,8 +244,17 @@
+             proposalQueue_.push_back({
+               std::move(validatedMessage),
+               std::move(ref),
++              serializedBytes,
+             });
+-        }
++            proposalBytes_ += serializedBytes;
++        }
++    }
++
++    // The protocol only requests a commit when one or more proposals remain.
++    if (proposalQueue_.empty()) {
++        outboundCommit_.reset();
++        outboundCachedGroupState_.reset();
++        return std::nullopt;
+     }
+ 
+     // generate a commit
+@@ -253,6 +292,13 @@
+ }
+ catch (const std::exception& e) {
+     DISCORD_LOG(LS_ERROR) << "Failed to parse MLS proposals: " << e.what();
++    // Never expose a partial commit or retain a stale candidate after a rejected
++    // batch. Keep current/pending MLS and the latest join package untouched.
++    stateWithProposals_.reset();
++    proposalQueue_.clear();
++    proposalBytes_ = 0;
++    outboundCommit_.reset();
++    outboundCachedGroupState_.reset();
+     TRACK_MLS_ERROR(e.what());
+     return std::nullopt;
+ }
+@@ -681,6 +727,7 @@
+ 
+     auto ciphersuite = CiphersuiteForProtocolVersion(protocolVersion_);
+ 
++    pendingMediaActivated_ = false;
+     pendingGroupState_ = std::make_unique<::mlspp::State>(
+       groupId_,
+       ciphersuite,
+@@ -716,9 +763,50 @@
+     return {};
+ }
+ 
++bool Session::SetProposalLimits(size_t maxCount, size_t maxBytes) noexcept
++{
++    if (maxCount == 0 || maxBytes == 0 || !proposalQueue_.empty()) {
++        return false;
++    }
++    proposalCountLimit_ = maxCount;
++    proposalBytesLimit_ = maxBytes;
++    return true;
++}
++
++bool Session::ActivatePendingGroup() noexcept
++try {
++    if (protocolVersion_ == 0 || protocolVersion_ > MaxSupportedProtocolVersion() ||
++        currentState_ || !pendingGroupState_ || !joinKeyPackage_ ||
++        !joinInitPrivateKey_ || !selfSigPrivateKey_ || !externalSender_) {
++        return false;
++    }
++    const auto& state = *pendingGroupState_;
++    const auto& roster = state.roster();
++    if (state.epoch() != 0 || roster.size() != 1 ||
++        state.cipher_suite().cipher_suite() != CiphersuiteIDForProtocolVersion(protocolVersion_) ||
++        state.extensions().extensions.size() != 1 ||
++        roster.front().credential.type() != ::mlspp::CredentialType::basic ||
++        roster.front().signature_key.data != selfSigPrivateKey_->public_key.data ||
++        !VerifyWelcomeState(state, std::set<std::string>{selfUserId_})) {
++        return false;
++    }
++    // This authorizes only media export for a verified transition zero. Do NOT
++    // call ReplaceState: the local MLS group remains unestablished and can still
++    // accept another member's winning welcome and its original join key package.
++    pendingMediaActivated_ = true;
++    return true;
++}
++catch (const std::exception&) {
++    return false;
++}
++
+ std::unique_ptr<IKeyRatchet> Session::GetKeyRatchet(std::string const& userId) const noexcept
+ {
+-    if (!currentState_) {
++    const auto* mediaState = currentState_.get();
++    if (!mediaState && pendingMediaActivated_ && userId == selfUserId_) {
++        mediaState = pendingGroupState_.get();
++    }
++    if (!mediaState) {
+         DISCORD_LOG(LS_INFO) << "Cannot get key ratchet without an established MLS group";
+         return nullptr;
+     }
+@@ -729,12 +817,12 @@
+     memcpy(userIdBytes.data(), &u64userId, sizeof(u64userId));
+ 
+     // generate the base secret for the hash ratchet
+-    auto baseSecret = currentState_->do_export(
++    auto baseSecret = mediaState->do_export(
+       std::string(Session::USER_MEDIA_KEY_BASE_LABEL), userIdBytes, kAesGcm128KeyBytes);
+ 
+     // this assumes the MLS ciphersuite produces a kAesGcm128KeyBytes sized key
+     // would need to be updated to a different ciphersuite if there's a future mismatch
+-    return std::make_unique<MlsKeyRatchet>(currentState_->cipher_suite(), std::move(baseSecret));
++    return std::make_unique<MlsKeyRatchet>(mediaState->cipher_suite(), std::move(baseSecret));
+ }
+ 
+ void Session::GetPairwiseFingerprint(uint16_t version,
+@@ -824,6 +912,7 @@
+ void Session::ClearPendingState()
+ {
+     pendingGroupState_.reset();
++    pendingMediaActivated_ = false;
+ 
+     outboundCommit_.reset();
+     outboundCachedGroupState_.reset();
+@@ -837,6 +926,7 @@
+ 
+     stateWithProposals_.reset();
+     proposalQueue_.clear();
++    proposalBytes_ = 0;
+ }
+ 
+ } // namespace mls
+--- a/cpp/src/bindings_capi.cpp
++++ b/cpp/src/bindings_capi.cpp
+@@ -1,4 +1,5 @@
+ #include <dave/dave_interfaces.h>
++#include <dave/flex_dave_ext.h>
+ 
+ #include <atomic>
+ #include <cstdint>
+@@ -10,6 +11,7 @@
+ #include <dave/version.h>
+ 
+ #include "mls_key_ratchet.h"
++#include "mls/session.h"
+ 
+ #define ARG_CHECK(arg)                                \
+     if (arg == nullptr) {                             \
+@@ -103,6 +105,28 @@
+     auto session =
+       discord::dave::mls::CreateSession(contextType, authSessionIdStr, mlsFailureCallback);
+     return reinterpret_cast<DAVESessionHandle>(session.release());
++}
++
++bool flexDaveSessionSetProposalLimits(DAVESessionHandle sessionHandle,
++                                       size_t maxCount,
++                                       size_t maxBytes)
++{
++    if (!sessionHandle) {
++        return false;
++    }
++    auto session = static_cast<discord::dave::mls::Session*>(
++      reinterpret_cast<discord::dave::mls::ISession*>(sessionHandle));
++    return session->SetProposalLimits(maxCount, maxBytes);
++}
++
++bool flexDaveSessionActivatePendingGroup(DAVESessionHandle sessionHandle)
++{
++    if (!sessionHandle) {
++        return false;
++    }
++    auto session = static_cast<discord::dave::mls::Session*>(
++      reinterpret_cast<discord::dave::mls::ISession*>(sessionHandle));
++    return session->ActivatePendingGroup();
+ }
+ 
+ void daveSessionDestroy(DAVESessionHandle sessionHandle)
+--- /dev/null
++++ b/cpp/includes/dave/flex_dave_ext.h
+@@ -0,0 +1,21 @@
++/* Chatanium host-only source extensions to pinned libdave v1.2.2/cpp.
++ * Base commit: 6396c90aedbb9a6ee117ea9ce1ce9832af6a3375.
++ * This is a source-patched fork, not the unmodified upstream release ABI.
++ */
++#pragma once
++#include <dave/dave.h>
++#ifdef __cplusplus
++extern "C" {
++#endif
++/* Configure finite limits before any ProcessProposals call. Limits survive
++ * session Reset/Init; current queued bytes are cleared with pending state. */
++DAVE_EXPORT bool flexDaveSessionSetProposalLimits(DAVESessionHandle session,
++                                                  size_t maxCount,
++                                                  size_t maxBytes);
++/* Authorize media export from a local pending group only after verified gateway
++ * transition zero. Does not establish MLS, consume the join key package, choose
++ * a winning commit, or expose/serialize any private state. */
++DAVE_EXPORT bool flexDaveSessionActivatePendingGroup(DAVESessionHandle session);
++#ifdef __cplusplus
++}
++#endif

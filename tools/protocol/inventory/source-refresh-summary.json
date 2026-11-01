@@ -1,0 +1,1086 @@
+{
+  "upstreamBaseCommit": "f43dd94faaacd5b163e9e783f14b5bd8be639fc9",
+  "sourceRevision": "f43dd94faaacd5b163e9e783f14b5bd8be639fc9+local-P3-Gateway+local-P5-native-voice",
+  "sourceTypes": 413,
+  "historicalGeneratedTypes": 306,
+  "nestedTypes": 326,
+  "methods": 240,
+  "canonicalOperations": 152,
+  "aliases": 43,
+  "events": 74,
+  "moduleFacingEvents": 67,
+  "apiTypeRoots": 59,
+  "apiTypeClosure": 204,
+  "eventTypeClosure": 228,
+  "combinedTypeClosure": 282,
+  "componentVariants": 13,
+  "interactionVariants": 3,
+  "delta": {
+    "baselineCommit": "6e8fa27c7917ea54d8b9ec26f126becae59058d2",
+    "addedMethods": [
+      "GuildRole",
+      "GuildRoleMemberCounts",
+      "UserVoiceState"
+    ],
+    "removedMethods": [],
+    "changedMethodSignatures": [
+      "ChannelMessagesPinned"
+    ],
+    "changedMethodBodies": [
+      "ChannelMessagesPinned",
+      "GuildMembers",
+      "Open",
+      "RequestWithLockedBucket"
+    ],
+    "addedTypes": [
+      "ChannelMessagePinsList",
+      "ComponentInteractionDataResolved",
+      "FileUpload",
+      "Label",
+      "MessagePin",
+      "MessageReactionRemoveEmoji",
+      "UserPrimaryGuild",
+      "messageReactionRemoveEmojiEventHandler"
+    ],
+    "removedTypes": [
+      "MessageComponentInteractionDataResolved"
+    ],
+    "addedEvents": [
+      "MESSAGE_REACTION_REMOVE_EMOJI"
+    ],
+    "removedEvents": [],
+    "legacySchemaMessagesPreserved": 154,
+    "legacySchemaEnumsPreserved": 23,
+    "parserCorrections": "Exact fixed arrays, channels, anonymous structures, function/interface method syntax replace incomplete historical ?/slice approximations; old source comparison remains in historical baseline. Embedded fields now use actual unqualified Go identifiers (ThreadMember for *ThreadMember; RWMutex for sync.RWMutex), with pointer/qualification retained in Type and Embedded metadata.",
+    "embeddedIdentifierCorrections": [
+      {
+        "type": "AddedThreadMember",
+        "from": "*ThreadMember",
+        "to": "ThreadMember",
+        "sourceType": "*ThreadMember",
+        "exported": true
+      },
+      {
+        "type": "ApplicationCommandPermissionsUpdate",
+        "from": "*GuildApplicationCommandPermissions",
+        "to": "GuildApplicationCommandPermissions",
+        "sourceType": "*GuildApplicationCommandPermissions",
+        "exported": true
+      },
+      {
+        "type": "AutoModerationRuleCreate",
+        "from": "*AutoModerationRule",
+        "to": "AutoModerationRule",
+        "sourceType": "*AutoModerationRule",
+        "exported": true
+      },
+      {
+        "type": "AutoModerationRuleDelete",
+        "from": "*AutoModerationRule",
+        "to": "AutoModerationRule",
+        "sourceType": "*AutoModerationRule",
+        "exported": true
+      },
+      {
+        "type": "AutoModerationRuleUpdate",
+        "from": "*AutoModerationRule",
+        "to": "AutoModerationRule",
+        "sourceType": "*AutoModerationRule",
+        "exported": true
+      },
+      {
+        "type": "Bucket",
+        "from": "sync.Mutex",
+        "to": "Mutex",
+        "sourceType": "sync.Mutex",
+        "exported": true
+      },
+      {
+        "type": "ChannelCreate",
+        "from": "*Channel",
+        "to": "Channel",
+        "sourceType": "*Channel",
+        "exported": true
+      },
+      {
+        "type": "ChannelDelete",
+        "from": "*Channel",
+        "to": "Channel",
+        "sourceType": "*Channel",
+        "exported": true
+      },
+      {
+        "type": "ChannelUpdate",
+        "from": "*Channel",
+        "to": "Channel",
+        "sourceType": "*Channel",
+        "exported": true
+      },
+      {
+        "type": "EntitlementCreate",
+        "from": "*Entitlement",
+        "to": "Entitlement",
+        "sourceType": "*Entitlement",
+        "exported": true
+      },
+      {
+        "type": "EntitlementDelete",
+        "from": "*Entitlement",
+        "to": "Entitlement",
+        "sourceType": "*Entitlement",
+        "exported": true
+      },
+      {
+        "type": "EntitlementUpdate",
+        "from": "*Entitlement",
+        "to": "Entitlement",
+        "sourceType": "*Entitlement",
+        "exported": true
+      },
+      {
+        "type": "GuildAuditLogEntryCreate",
+        "from": "*AuditLogEntry",
+        "to": "AuditLogEntry",
+        "sourceType": "*AuditLogEntry",
+        "exported": true
+      },
+      {
+        "type": "GuildCreate",
+        "from": "*Guild",
+        "to": "Guild",
+        "sourceType": "*Guild",
+        "exported": true
+      },
+      {
+        "type": "GuildDelete",
+        "from": "*Guild",
+        "to": "Guild",
+        "sourceType": "*Guild",
+        "exported": true
+      },
+      {
+        "type": "GuildMemberAdd",
+        "from": "*Member",
+        "to": "Member",
+        "sourceType": "*Member",
+        "exported": true
+      },
+      {
+        "type": "GuildMemberRemove",
+        "from": "*Member",
+        "to": "Member",
+        "sourceType": "*Member",
+        "exported": true
+      },
+      {
+        "type": "GuildMemberUpdate",
+        "from": "*Member",
+        "to": "Member",
+        "sourceType": "*Member",
+        "exported": true
+      },
+      {
+        "type": "GuildRoleCreate",
+        "from": "*GuildRole",
+        "to": "GuildRole",
+        "sourceType": "*GuildRole",
+        "exported": true
+      },
+      {
+        "type": "GuildRoleUpdate",
+        "from": "*GuildRole",
+        "to": "GuildRole",
+        "sourceType": "*GuildRole",
+        "exported": true
+      },
+      {
+        "type": "GuildScheduledEventCreate",
+        "from": "*GuildScheduledEvent",
+        "to": "GuildScheduledEvent",
+        "sourceType": "*GuildScheduledEvent",
+        "exported": true
+      },
+      {
+        "type": "GuildScheduledEventDelete",
+        "from": "*GuildScheduledEvent",
+        "to": "GuildScheduledEvent",
+        "sourceType": "*GuildScheduledEvent",
+        "exported": true
+      },
+      {
+        "type": "GuildScheduledEventUpdate",
+        "from": "*GuildScheduledEvent",
+        "to": "GuildScheduledEvent",
+        "sourceType": "*GuildScheduledEvent",
+        "exported": true
+      },
+      {
+        "type": "GuildUpdate",
+        "from": "*Guild",
+        "to": "Guild",
+        "sourceType": "*Guild",
+        "exported": true
+      },
+      {
+        "type": "IntegrationCreate",
+        "from": "*Integration",
+        "to": "Integration",
+        "sourceType": "*Integration",
+        "exported": true
+      },
+      {
+        "type": "IntegrationUpdate",
+        "from": "*Integration",
+        "to": "Integration",
+        "sourceType": "*Integration",
+        "exported": true
+      },
+      {
+        "type": "InteractionCreate",
+        "from": "*Interaction",
+        "to": "Interaction",
+        "sourceType": "*Interaction",
+        "exported": true
+      },
+      {
+        "type": "InviteCreate",
+        "from": "*Invite",
+        "to": "Invite",
+        "sourceType": "*Invite",
+        "exported": true
+      },
+      {
+        "type": "MessageComponent",
+        "from": "json.Marshaler",
+        "to": "Marshaler",
+        "sourceType": "json.Marshaler",
+        "exported": true
+      },
+      {
+        "type": "MessageCreate",
+        "from": "*Message",
+        "to": "Message",
+        "sourceType": "*Message",
+        "exported": true
+      },
+      {
+        "type": "MessageDelete",
+        "from": "*Message",
+        "to": "Message",
+        "sourceType": "*Message",
+        "exported": true
+      },
+      {
+        "type": "MessageReactionAdd",
+        "from": "*MessageReaction",
+        "to": "MessageReaction",
+        "sourceType": "*MessageReaction",
+        "exported": true
+      },
+      {
+        "type": "MessageReactionRemove",
+        "from": "*MessageReaction",
+        "to": "MessageReaction",
+        "sourceType": "*MessageReaction",
+        "exported": true
+      },
+      {
+        "type": "MessageReactionRemoveAll",
+        "from": "*MessageReaction",
+        "to": "MessageReaction",
+        "sourceType": "*MessageReaction",
+        "exported": true
+      },
+      {
+        "type": "MessageReactionRemoveEmoji",
+        "from": "*MessageReaction",
+        "to": "MessageReaction",
+        "sourceType": "*MessageReaction",
+        "exported": true
+      },
+      {
+        "type": "MessageUpdate",
+        "from": "*Message",
+        "to": "Message",
+        "sourceType": "*Message",
+        "exported": true
+      },
+      {
+        "type": "RateLimit",
+        "from": "*TooManyRequests",
+        "to": "TooManyRequests",
+        "sourceType": "*TooManyRequests",
+        "exported": true
+      },
+      {
+        "type": "RateLimitError",
+        "from": "*RateLimit",
+        "to": "RateLimit",
+        "sourceType": "*RateLimit",
+        "exported": true
+      },
+      {
+        "type": "RateLimiter",
+        "from": "sync.Mutex",
+        "to": "Mutex",
+        "sourceType": "sync.Mutex",
+        "exported": true
+      },
+      {
+        "type": "Session",
+        "from": "sync.RWMutex",
+        "to": "RWMutex",
+        "sourceType": "sync.RWMutex",
+        "exported": true
+      },
+      {
+        "type": "StageInstanceEventCreate",
+        "from": "*StageInstance",
+        "to": "StageInstance",
+        "sourceType": "*StageInstance",
+        "exported": true
+      },
+      {
+        "type": "StageInstanceEventDelete",
+        "from": "*StageInstance",
+        "to": "StageInstance",
+        "sourceType": "*StageInstance",
+        "exported": true
+      },
+      {
+        "type": "StageInstanceEventUpdate",
+        "from": "*StageInstance",
+        "to": "StageInstance",
+        "sourceType": "*StageInstance",
+        "exported": true
+      },
+      {
+        "type": "State",
+        "from": "sync.RWMutex",
+        "to": "RWMutex",
+        "sourceType": "sync.RWMutex",
+        "exported": true
+      },
+      {
+        "type": "SubscriptionCreate",
+        "from": "*Subscription",
+        "to": "Subscription",
+        "sourceType": "*Subscription",
+        "exported": true
+      },
+      {
+        "type": "SubscriptionDelete",
+        "from": "*Subscription",
+        "to": "Subscription",
+        "sourceType": "*Subscription",
+        "exported": true
+      },
+      {
+        "type": "SubscriptionUpdate",
+        "from": "*Subscription",
+        "to": "Subscription",
+        "sourceType": "*Subscription",
+        "exported": true
+      },
+      {
+        "type": "ThreadCreate",
+        "from": "*Channel",
+        "to": "Channel",
+        "sourceType": "*Channel",
+        "exported": true
+      },
+      {
+        "type": "ThreadDelete",
+        "from": "*Channel",
+        "to": "Channel",
+        "sourceType": "*Channel",
+        "exported": true
+      },
+      {
+        "type": "ThreadMemberUpdate",
+        "from": "*ThreadMember",
+        "to": "ThreadMember",
+        "sourceType": "*ThreadMember",
+        "exported": true
+      },
+      {
+        "type": "ThreadUpdate",
+        "from": "*Channel",
+        "to": "Channel",
+        "sourceType": "*Channel",
+        "exported": true
+      },
+      {
+        "type": "UserUpdate",
+        "from": "*User",
+        "to": "User",
+        "sourceType": "*User",
+        "exported": true
+      },
+      {
+        "type": "VoiceConnection",
+        "from": "sync.RWMutex",
+        "to": "RWMutex",
+        "sourceType": "sync.RWMutex",
+        "exported": true
+      },
+      {
+        "type": "VoiceStateUpdate",
+        "from": "*VoiceState",
+        "to": "VoiceState",
+        "sourceType": "*VoiceState",
+        "exported": true
+      },
+      {
+        "type": "discordgo/restapi.go:2759:anonymous@discordgo/restapi.go:2759",
+        "from": "*ThreadStart",
+        "to": "ThreadStart",
+        "sourceType": "*ThreadStart",
+        "exported": true
+      }
+    ],
+    "localSourceBoundary": {
+      "base": "pinned upstream f43dd94 plus local P3/P5 patches",
+      "addedMethods": [
+        "ChannelVoiceJoinContext",
+        "ChannelVoiceJoinManualContext",
+        "ConfigureGatewayIngress",
+        "OpenContext",
+        "RequestGuildMembersContext",
+        "RequestGuildMembersListContext",
+        "SetDispatchObserver",
+        "UpdateStatusComplexContext",
+        "VoiceGatewayDispatch"
+      ],
+      "removedMethods": [
+        "ChannelVoiceJoin"
+      ],
+      "changedMethodSource": [
+        "AddHandler",
+        "ChannelVoiceJoinManual",
+        "Close",
+        "CloseWithCode",
+        "GatewayWriteStruct",
+        "HeartbeatLatency",
+        "Open",
+        "RequestGuildMembers",
+        "RequestGuildMembersBatch",
+        "RequestGuildMembersBatchList",
+        "RequestGuildMembersList",
+        "UpdateStatusComplex"
+      ],
+      "addedTypes": [
+        "OpusSubmission",
+        "OpusWriteResult",
+        "VoiceConfig",
+        "gatewayMutex",
+        "handoffResult",
+        "nativeVoice",
+        "opusHandoff",
+        "snapshotVisit",
+        "voiceEngine",
+        "voiceEnvelope",
+        "voiceHeartbeatData",
+        "voiceMessage",
+        "voicePrepareEpoch",
+        "voicePrepareTransition",
+        "voiceResumeData",
+        "voiceTransition"
+      ],
+      "removedTypes": [
+        "VoiceSpeakingUpdate",
+        "VoiceSpeakingUpdateHandler",
+        "voiceHeartbeatOp",
+        "voiceOP2",
+        "voiceOP4",
+        "voiceUDPD",
+        "voiceUDPData",
+        "voiceUDPOp"
+      ],
+      "changedTypes": [
+        "Packet",
+        "Session",
+        "VoiceConnection",
+        "requestGuildMembersData"
+      ],
+      "renamedSourceEvents": {
+        "STAGE_INSTANCE_EVENT_CREATE": "STAGE_INSTANCE_CREATE",
+        "STAGE_INSTANCE_EVENT_DELETE": "STAGE_INSTANCE_DELETE",
+        "STAGE_INSTANCE_EVENT_UPDATE": "STAGE_INSTANCE_UPDATE"
+      },
+      "retiredDispositions": {
+        "methods": {
+          "ChannelVoiceJoin": {
+            "sourceSHA256": "d8748a4fa8e5489fa943674f568d190aa60b95fc4e0b220057bf893b98054634",
+            "metadata": {
+              "protoOperation": null,
+              "classification": "backend_internal_control_helper",
+              "reason": "공유 VoiceConnection 및 Gateway opcode 4는 P5 voice 소유권/작업 스케줄러 내부에서만 사용합니다. raw join/수동 voice handshake RPC 또는 VoiceConnection DTO를 노출하지 않습니다.",
+              "requiredCredential": {
+                "kind": "none",
+                "scope": []
+              },
+              "defaults": {},
+              "notes": [
+                "기능 대응: 재생은 CreatePlaybackJob + StreamPlayback, 수신은 SubscribeVoice/UnsubscribeVoice로 소유하며 마지막 job과 subscription이 끝나야 연결을 해제합니다. mute/deaf 설정은 P5의 승인된 연결 정책으로 적용하고 다른 채널 이동 요청을 우회하지 못합니다.",
+                "ChannelVoiceJoinManual의 빈 cID에 의한 연결 해제는 P5 소유 작업/구독 취소로만 대체합니다."
+              ],
+              "officialEvidence": [],
+              "transportKind": "gateway",
+              "exposed": false
+            },
+            "review": "Signature/body/defaults unchanged; classification and metadata retained. Documentation comes from the actual AST-attached comment group, not preceding unrelated section banners."
+          }
+        },
+        "types": {
+          "VoiceSpeakingUpdate": {
+            "classification": "domain-source-struct",
+            "shapeSHA256": "4ba669a65ebc649679977f29c62deadbe6f9f5b2d3281eeb33a7aa33b0cda66c",
+            "fields": {
+              "UserID": {
+                "classification": "typed-source-field",
+                "sourceType": "string",
+                "sourceTag": "`json:\"user_id\"`",
+                "decision": "Unchanged historical source shape; preserve actual SDK field type/tag. Source inventory is not a wire conversion implementation."
+              },
+              "SSRC": {
+                "classification": "typed-source-field",
+                "sourceType": "int",
+                "sourceTag": "`json:\"ssrc\"`",
+                "decision": "Unchanged historical source shape; preserve actual SDK field type/tag. Source inventory is not a wire conversion implementation."
+              },
+              "Speaking": {
+                "classification": "typed-source-field",
+                "sourceType": "bool",
+                "sourceTag": "`json:\"speaking\"`",
+                "decision": "Unchanged historical source shape; preserve actual SDK field type/tag. Source inventory is not a wire conversion implementation."
+              }
+            },
+            "interfaceMethods": {},
+            "review": "Historical declaration retained; source parser now records complete Go syntax without ? placeholders or fixed-array flattening."
+          },
+          "VoiceSpeakingUpdateHandler": {
+            "classification": "runtime-only-source",
+            "shapeSHA256": "8042389dc98717eed116bdb3d2722edff8113db720e3b68f2bfb62bd5b1cf5f8",
+            "fields": {},
+            "interfaceMethods": {},
+            "review": "Historical declaration retained; source parser now records complete Go syntax without ? placeholders or fixed-array flattening."
+          },
+          "voiceHeartbeatOp": {
+            "classification": "runtime-only-source",
+            "shapeSHA256": "405985aa82d731848efb04c4b15e64be843446c9de1a7a1eceaaac0a0bd14bb9",
+            "fields": {
+              "Op": {
+                "classification": "runtime-only",
+                "sourceType": "int",
+                "sourceTag": "`json:\"op\"`",
+                "decision": "Unchanged historical source shape; preserve actual SDK field type/tag. Source inventory is not a wire conversion implementation."
+              },
+              "Data": {
+                "classification": "runtime-only",
+                "sourceType": "int",
+                "sourceTag": "`json:\"d\"`",
+                "decision": "Unchanged historical source shape; preserve actual SDK field type/tag. Source inventory is not a wire conversion implementation."
+              }
+            },
+            "interfaceMethods": {},
+            "review": "Historical declaration retained; source parser now records complete Go syntax without ? placeholders or fixed-array flattening."
+          },
+          "voiceOP2": {
+            "classification": "runtime-only-source",
+            "shapeSHA256": "0bc8ecb6cacc43a94f72e1de3c1162ddb5d3090158138cbceb425e901ca93fa4",
+            "fields": {
+              "SSRC": {
+                "classification": "runtime-only",
+                "sourceType": "uint32",
+                "sourceTag": "`json:\"ssrc\"`",
+                "decision": "Unchanged historical source shape; preserve actual SDK field type/tag. Source inventory is not a wire conversion implementation."
+              },
+              "Port": {
+                "classification": "runtime-only",
+                "sourceType": "int",
+                "sourceTag": "`json:\"port\"`",
+                "decision": "Unchanged historical source shape; preserve actual SDK field type/tag. Source inventory is not a wire conversion implementation."
+              },
+              "Modes": {
+                "classification": "runtime-only",
+                "sourceType": "[]string",
+                "sourceTag": "`json:\"modes\"`",
+                "decision": "Unchanged historical source shape; preserve actual SDK field type/tag. Source inventory is not a wire conversion implementation."
+              },
+              "HeartbeatInterval": {
+                "classification": "runtime-only",
+                "sourceType": "time.Duration",
+                "sourceTag": "`json:\"heartbeat_interval\"`",
+                "decision": "Unchanged historical source shape; preserve actual SDK field type/tag. Source inventory is not a wire conversion implementation."
+              },
+              "IP": {
+                "classification": "runtime-only",
+                "sourceType": "string",
+                "sourceTag": "`json:\"ip\"`",
+                "decision": "Unchanged historical source shape; preserve actual SDK field type/tag. Source inventory is not a wire conversion implementation."
+              }
+            },
+            "interfaceMethods": {},
+            "review": "Historical declaration retained; source parser now records complete Go syntax without ? placeholders or fixed-array flattening."
+          },
+          "voiceOP4": {
+            "classification": "runtime-only-source",
+            "shapeSHA256": "d9a62259a1d6137080a4594d437bdbb54cfa11a36f1e2c1ab69cbf146873d40a",
+            "fields": {
+              "SecretKey": {
+                "classification": "runtime-only",
+                "sourceType": "[32]byte",
+                "sourceTag": "`json:\"secret_key\"`",
+                "decision": "Exact [32]byte secret key, correcting historical extractor slice approximation; host-only transport secret."
+              },
+              "Mode": {
+                "classification": "runtime-only",
+                "sourceType": "string",
+                "sourceTag": "`json:\"mode\"`",
+                "decision": "Unchanged historical source shape; preserve actual SDK field type/tag. Source inventory is not a wire conversion implementation."
+              }
+            },
+            "interfaceMethods": {},
+            "review": "Historical declaration retained; source parser now records complete Go syntax without ? placeholders or fixed-array flattening."
+          },
+          "voiceUDPD": {
+            "classification": "runtime-only-source",
+            "shapeSHA256": "8c7879dc384fbda42e16ffc280dd4df3bae0f14603c3bfb94e82b5e92a36754f",
+            "fields": {
+              "Protocol": {
+                "classification": "runtime-only",
+                "sourceType": "string",
+                "sourceTag": "`json:\"protocol\"`",
+                "decision": "Unchanged historical source shape; preserve actual SDK field type/tag. Source inventory is not a wire conversion implementation."
+              },
+              "Data": {
+                "classification": "runtime-only",
+                "sourceType": "voiceUDPData",
+                "sourceTag": "`json:\"data\"`",
+                "decision": "Unchanged historical source shape; preserve actual SDK field type/tag. Source inventory is not a wire conversion implementation."
+              }
+            },
+            "interfaceMethods": {},
+            "review": "Historical declaration retained; source parser now records complete Go syntax without ? placeholders or fixed-array flattening."
+          },
+          "voiceUDPData": {
+            "classification": "runtime-only-source",
+            "shapeSHA256": "2254c893b0721071d844728de54000c9e435f7c16878f6f84fddb79cb2ec6bd8",
+            "fields": {
+              "Address": {
+                "classification": "runtime-only",
+                "sourceType": "string",
+                "sourceTag": "`json:\"address\"`",
+                "decision": "Unchanged historical source shape; preserve actual SDK field type/tag. Source inventory is not a wire conversion implementation."
+              },
+              "Port": {
+                "classification": "runtime-only",
+                "sourceType": "uint16",
+                "sourceTag": "`json:\"port\"`",
+                "decision": "Unchanged historical source shape; preserve actual SDK field type/tag. Source inventory is not a wire conversion implementation."
+              },
+              "Mode": {
+                "classification": "runtime-only",
+                "sourceType": "string",
+                "sourceTag": "`json:\"mode\"`",
+                "decision": "Unchanged historical source shape; preserve actual SDK field type/tag. Source inventory is not a wire conversion implementation."
+              }
+            },
+            "interfaceMethods": {},
+            "review": "Historical declaration retained; source parser now records complete Go syntax without ? placeholders or fixed-array flattening."
+          },
+          "voiceUDPOp": {
+            "classification": "runtime-only-source",
+            "shapeSHA256": "ebb48f37ec45129f4e6a1ebcee39ceacf7801c06994a503fe62df93752c0d43f",
+            "fields": {
+              "Op": {
+                "classification": "runtime-only",
+                "sourceType": "int",
+                "sourceTag": "`json:\"op\"`",
+                "decision": "Unchanged historical source shape; preserve actual SDK field type/tag. Source inventory is not a wire conversion implementation."
+              },
+              "Data": {
+                "classification": "runtime-only",
+                "sourceType": "voiceUDPD",
+                "sourceTag": "`json:\"d\"`",
+                "decision": "Unchanged historical source shape; preserve actual SDK field type/tag. Source inventory is not a wire conversion implementation."
+              }
+            },
+            "interfaceMethods": {},
+            "review": "Historical declaration retained; source parser now records complete Go syntax without ? placeholders or fixed-array flattening."
+          }
+        }
+      },
+      "publicModuleOperations": 153,
+      "publicModuleEvents": 67,
+      "evidence": "Reviewed source syntax and classification only; not compiled/executed behavior.",
+      "nestedIdentityCorrection": "Anonymous and named nested declarations include source column. Multiple anonymous interfaces/structs on one source line are retained separately rather than silently colliding in policy maps.",
+      "additionalSourceCorrections": [
+        {
+          "method": "RequestWithLockedBucket",
+          "source": "discordgo/restapi.go:307",
+          "change": "Parent-approved literal %s format for ErrUnauthorized informational logging; no public shape or canonical behavior change. Test-only t.Error(err) corrections are outside this non-test package census."
+        },
+        {
+          "method": "Message.UnmarshalJSON",
+          "source": "discordgo/message.go:167-188",
+          "change": "Parent-assigned cache presence correction: allocate Components only for non-nil RawComponents; omitted remains nil, present [] remains non-nil empty. No type/public module shape change. message_partial_test.go is outside this non-test source census; no checks run by inventory owner."
+        },
+        {
+          "sourceFiles": [
+            "discordgo/voice_gateway.go",
+            "discordgo/voice_transport.go"
+          ],
+          "change": "Parent-assigned P5 crypto review: separate reset/proposal/prepared-ID deadline scopes; native Wire-empty retires only proposal deadline; ignored commits preserve reset deadline and prior prepared IDs; explicit epoch1/generation/version/successful26 authorization with deferred25 support and lifecycle revocation. Host-only nativeVoice fields updated; no public SDK/module API shape or native crypto ABI/patch change. Source review only; fixtures and checks remain owner/parent responsibility."
+        }
+      ],
+      "finalFormattedSourceReview": {
+        "changedFileSincePriorReviewedBoundary": "discordgo/voice_transport.go",
+        "change": "Parent-applied alignment formatting; package type shapes, Session method signature/body/documentation fingerprints, public declaration count, and source event identities unchanged. Previously reviewed P3 omitted-component and P5 deadline/reset source corrections remain included.",
+        "newPrivateTypes": [],
+        "sourceTypes": 413,
+        "nestedDeclarations": 324,
+        "sessionMethods": 240,
+        "sourceEvents": 74,
+        "logicalExportedDeclarations": 403,
+        "moduleOperations": 153,
+        "moduleEvents": 67,
+        "evidence": "Source census and classification only; no compiled/executed behavior claim.",
+        "nestedColumnChanges": "Formatter alignment moved inline anonymous struct columns inside nativeVoice; per-file/per-line shape multisets are identical, with no omitted or new nested declarations."
+      }
+    }
+  },
+  "sourceProvenance": {
+    "sdkCommit": "f43dd94faaacd5b163e9e783f14b5bd8be639fc9",
+    "sdkVersion": "v0.29.1-0.20260214123928-f43dd94faaac",
+    "officialSource": "https://github.com/bwmarrin/discordgo/tree/f43dd94faaacd5b163e9e783f14b5bd8be639fc9",
+    "sourceImport": "Pinned upstream f43dd94 plus deliberate local P3 context-bound Gateway, strict ingress, ordered observer and official Stage registration patches, and local P5 bounded native DAVE voice cutover. NOT unmodified upstream or a claimed upstream release. Independent module/example manifest edits are outside this SDK-package census.",
+    "catalogKind": "Reviewed source inventory only; not protobuf/converter/runtime verification",
+    "sdkUpstreamTree": "40cefda1705b8dad207b3cf9b9888348eca865a7",
+    "sourceRevision": "f43dd94faaacd5b163e9e783f14b5bd8be639fc9+local-P3-Gateway+local-P5-native-voice",
+    "sdkCommitScope": "sdkCommit/sdkVersion/sdkUpstreamTree identify the pinned upstream base only, not the patched local source tree.",
+    "localSourcePatches": {
+      "P3": "Context-aware shared Gateway lifecycle/writers; bounded ingress and callback join; ordered raw host observer and detached Before snapshots; uppercase STAGE_INSTANCE_* registration; corrected API/voice endpoint initialization. Parent-approved Go1.27 vet correction uses a literal %s format for ErrUnauthorized informational logging in RequestWithLockedBucket; no module API/behavior change. Parent-assigned Message.UnmarshalJSON partial-components correction preserves omitted nil versus present empty slice, avoiding implicit cache component deletion on partial MESSAGE_UPDATE.",
+      "P5": "Bounded context-native voice API/engine with DAVE under voice+cgo; ordinary unsupported backend; private credential dispatch and immutable Opus handoff; removed legacy ChannelVoiceJoin/speaking/channel/UDP paths. Parent-assigned crypto review separates reset/proposal/prepared-ID deadlines and binds pending-reset authorization to authenticated opcode24 epoch1 plus current generation/version/successful opcode26 write; deferred opcode25 may complete matching unconsumed authorization. Native crypto ABI/patch remains unchanged."
+    },
+    "canonicalModule": "github.com/bwmarrin/discordgo; the original upstream module version is required by each consuming go.mod, with upstream archive and go.mod checksum authority in third_party/discordgo/upstream.sum. The maintained third_party/discordgo/patches stack prepares the SDK; extracted sdkModule provenance records Path, Version, Sum, GoModSum, PatchSHA256 and SourceSHA256, excluding machine-specific Dir.",
+    "canonicalImportReview": "voice_gateway.go and voice_transport.go retain the original github.com/bwmarrin/discordgo/internal/dave imports instead of the published fork namespace. These import-only changes update the active source hashes; upstream-base identity and historical baseline/audit records are unchanged. discordgo/ source identities remain stable inventory labels, not prepared-generation paths.",
+    "publicationSourceReview": "Historical published v0.30.0 incorporated gofmt doc-comment layout changes in logging.go and oauth2.go; its five reviewed Application method documentation fingerprints followed those comments without changing signatures, bodies, defaults or classifications. The maintained patch stack excludes those comment-only reflows and the active fingerprints now follow the original upstream comment layout. voice.go remains byte-identical to the reviewed published source and main commit 3158838b78dd92cb8220673cc4887d009204ef1a. Historical snapshots and audits remain unchanged.",
+    "retirementSourceReview": "The published voice.go matches existing main source but active inventories lagged its retirement handshake. VoiceConnection.leaveAck and leaveConfirmed are private runtime-only state: ordered null-channel observation closes the acknowledgement; DisconnectContext waits within CloseTimeout, joins confirmation errors, and retains the reservation until cleanup and confirmation. Two extra anonymous empty struct channel types are implementation-local. Other nested identity changes and public declaration fingerprints are source-position shifts plus the separately reviewed OAuth documentation formatting; no module exposure changes.",
+    "sourcePackageSHA256": "f991276a836876b3840d4599ac530afe2cfd80f2fc4baeba0e6f7fceb762c336",
+    "sourceFormatting": "The prepared SDK preserves pinned upstream f43dd94 comment and blank-line layout while applying the maintained functional P3/P5 patch stack. Comment/blank-only fork reflows in discord.go, event.go, state.go, wsapi.go, logging.go, oauth2.go and discord_test.go are excluded; discord_test.go is outside this non-test package census. Exact reviewed hashes cover the eight changed non-test source files, position-only declaration shifts, whitespace-only documentation changes and blank-line-only method body changes. No type shapes, classifications, exposure decisions or module contract totals change. PatchSHA256 identifies the ordered maintained patch inputs and SourceSHA256 identifies the prepared source, recorded in extracted sdkModule provenance.",
+    "sdkModule": {
+      "GoModSum": "h1:JsaNXATZGUDc+uiR1/TGW4Aq4IKc2Hh/O8LhsBiSIBs=",
+      "PatchSHA256": "2905d7c43cd8ff11fb37194de26655190b53bae10856199eca7c9510c42b42c3",
+      "Path": "github.com/bwmarrin/discordgo",
+      "SourceSHA256": "edd4b32f167a045a0b95d5ea6c5090bbe70bc3b6238725aa033fd48abbd4662c",
+      "Sum": "h1:W9t/lhAHWwtLHME/ceUE5c49Wl+5jnOVcEezmjlJ0Fc=",
+      "Version": "v0.29.1-0.20260214123928-f43dd94faaac"
+    },
+    "extraction": "go run -mod=readonly tools/protocol/extract-source.go -out tools/protocol/inventory/source-extracted.json",
+    "refresh": "python3 tools/protocol/refresh-inventory.py",
+    "sourceFiles": [
+      {
+        "path": "discordgo/components.go",
+        "sha256": "c6a81575ef04f16b8afeb0a49086be9390313f459d76f4f51df090a8f5f738b9",
+        "buildConstraint": "",
+        "buildProfiles": [
+          "native_voice",
+          "ordinary"
+        ]
+      },
+      {
+        "path": "discordgo/discord.go",
+        "sha256": "f204bfacf24cc6ba0c1559b5060fd007c92901811b07db713f7b5642d9537af9",
+        "buildConstraint": "",
+        "buildProfiles": [
+          "native_voice",
+          "ordinary"
+        ]
+      },
+      {
+        "path": "discordgo/endpoints.go",
+        "sha256": "5f496f57ad583a8a5e8073690103e3eb77d2dec12787a79d71f4d969b8db494f",
+        "buildConstraint": "",
+        "buildProfiles": [
+          "native_voice",
+          "ordinary"
+        ]
+      },
+      {
+        "path": "discordgo/event.go",
+        "sha256": "950b9716d0f61c944ff70c947c48925a9611fed28a6b636db3e1675ca4aae6e3",
+        "buildConstraint": "",
+        "buildProfiles": [
+          "native_voice",
+          "ordinary"
+        ]
+      },
+      {
+        "path": "discordgo/eventhandlers.go",
+        "sha256": "11e720d86f3eb457206adde87b585e5d8fec5e5b67bd06f61732d2ef334111b7",
+        "buildConstraint": "",
+        "buildProfiles": [
+          "native_voice",
+          "ordinary"
+        ]
+      },
+      {
+        "path": "discordgo/events.go",
+        "sha256": "b4998b7b303b3aa9291d93b3177115a45756d58f8e409cc8fe57260c9431c123",
+        "buildConstraint": "",
+        "buildProfiles": [
+          "native_voice",
+          "ordinary"
+        ]
+      },
+      {
+        "path": "discordgo/gateway_context.go",
+        "sha256": "4cccbe39e0bb7e175ed2fd4ed89649f93668134e00f1fade2eaa989852958c71",
+        "buildConstraint": "",
+        "buildProfiles": [
+          "native_voice",
+          "ordinary"
+        ]
+      },
+      {
+        "path": "discordgo/gateway_dispatch.go",
+        "sha256": "d2bb7736498513b99a0085bba11a76c2f1273cf2d88d0ea8bf7db8d6628af52f",
+        "buildConstraint": "",
+        "buildProfiles": [
+          "native_voice",
+          "ordinary"
+        ]
+      },
+      {
+        "path": "discordgo/gateway_ingress.go",
+        "sha256": "379b96636bbfa4bf574e039fd05332a6289bfa8879ae129a786a068e735158d0",
+        "buildConstraint": "",
+        "buildProfiles": [
+          "native_voice",
+          "ordinary"
+        ]
+      },
+      {
+        "path": "discordgo/gateway_payload.go",
+        "sha256": "443ff2e9c6df3aa13c295ff9450abbd7811652ee7bd26483f46122200f409496",
+        "buildConstraint": "",
+        "buildProfiles": [
+          "native_voice",
+          "ordinary"
+        ]
+      },
+      {
+        "path": "discordgo/interactions.go",
+        "sha256": "fafd9ef3fb5396df8cb273537bc284250052cde804c968f46d0d6e65756f3a71",
+        "buildConstraint": "",
+        "buildProfiles": [
+          "native_voice",
+          "ordinary"
+        ]
+      },
+      {
+        "path": "discordgo/locales.go",
+        "sha256": "e84d174a37df048769ade0c068732e4f0c5aaae23cbfa6dba061815510052d9f",
+        "buildConstraint": "",
+        "buildProfiles": [
+          "native_voice",
+          "ordinary"
+        ]
+      },
+      {
+        "path": "discordgo/logging.go",
+        "sha256": "29ea884fcd257ab51afe81dbf6e37bce10b23bd011748fafaf9f6bca05f36c79",
+        "buildConstraint": "",
+        "buildProfiles": [
+          "native_voice",
+          "ordinary"
+        ]
+      },
+      {
+        "path": "discordgo/message.go",
+        "sha256": "b1b29d909be56f9daf87ef095a9315491e666afc943fb743586bafdfea9a0471",
+        "buildConstraint": "",
+        "buildProfiles": [
+          "native_voice",
+          "ordinary"
+        ]
+      },
+      {
+        "path": "discordgo/oauth2.go",
+        "sha256": "546db3dd8c5f39d69d743452b37504a29ca949550341b82f1cef275932b2eabc",
+        "buildConstraint": "",
+        "buildProfiles": [
+          "native_voice",
+          "ordinary"
+        ]
+      },
+      {
+        "path": "discordgo/ratelimit.go",
+        "sha256": "d0fdceee0dbb764bbad5c7a2c998d502d918204384d637a5e9605a2de7abe1d1",
+        "buildConstraint": "",
+        "buildProfiles": [
+          "native_voice",
+          "ordinary"
+        ]
+      },
+      {
+        "path": "discordgo/restapi.go",
+        "sha256": "44664bc0e12355514ce2635cf189e91752f61ffa9c505e41e7d9853f94329afb",
+        "buildConstraint": "",
+        "buildProfiles": [
+          "native_voice",
+          "ordinary"
+        ]
+      },
+      {
+        "path": "discordgo/state.go",
+        "sha256": "1658028a4b80d3d2d46e9c354e9a145e22574363c962ff36de33fb13bf087baf",
+        "buildConstraint": "",
+        "buildProfiles": [
+          "native_voice",
+          "ordinary"
+        ]
+      },
+      {
+        "path": "discordgo/structs.go",
+        "sha256": "8aff34dc9d04d4e5bd6cbcd50efa7c47aeddcfa89e0010822b8b5fbb1c2112a0",
+        "buildConstraint": "",
+        "buildProfiles": [
+          "native_voice",
+          "ordinary"
+        ]
+      },
+      {
+        "path": "discordgo/user.go",
+        "sha256": "630fafca4237f15bba22cf452879cfbcab30e59c9934069f11fcd0c469d75ed4",
+        "buildConstraint": "",
+        "buildProfiles": [
+          "native_voice",
+          "ordinary"
+        ]
+      },
+      {
+        "path": "discordgo/util.go",
+        "sha256": "99641a9261c2be5dd74fd717c889f076150164647c99a70aae64fdbdd800807f",
+        "buildConstraint": "",
+        "buildProfiles": [
+          "native_voice",
+          "ordinary"
+        ]
+      },
+      {
+        "path": "discordgo/voice.go",
+        "sha256": "b3761bff6cd5a700053d7267bca3ee1fd35809cedaabb9bac3531c247a9d700f",
+        "buildConstraint": "",
+        "buildProfiles": [
+          "native_voice",
+          "ordinary"
+        ]
+      },
+      {
+        "path": "discordgo/voice_disabled.go",
+        "sha256": "ccda5e563a220bc2077c698dd19b00d9a0f539f030d921e0acf6f2e2d3d0d346",
+        "buildConstraint": "!voice",
+        "buildProfiles": [
+          "ordinary"
+        ]
+      },
+      {
+        "path": "discordgo/voice_gateway.go",
+        "sha256": "9a73b5456ba271fa70578c0caf981409e306ad2dfa8537f0051cd033166f150c",
+        "buildConstraint": "voice && cgo",
+        "buildProfiles": [
+          "native_voice"
+        ]
+      },
+      {
+        "path": "discordgo/voice_nocgo.go",
+        "sha256": "b880d0316f0801a76ca3b97b961e8ca71ffb0af382a989ff45412bd7d591abad",
+        "buildConstraint": "voice && !cgo",
+        "buildProfiles": []
+      },
+      {
+        "path": "discordgo/voice_opus.go",
+        "sha256": "64d3cbc3d8ce521da88c2536b1c26603009e724d55d2b2b72fdb1f9b650553b0",
+        "buildConstraint": "",
+        "buildProfiles": [
+          "native_voice",
+          "ordinary"
+        ]
+      },
+      {
+        "path": "discordgo/voice_packet.go",
+        "sha256": "f742bbca0c00e12c9a9e292fe07d4cf3114c20252b12fc71faecf216dfab04a4",
+        "buildConstraint": "",
+        "buildProfiles": [
+          "native_voice",
+          "ordinary"
+        ]
+      },
+      {
+        "path": "discordgo/voice_protocol.go",
+        "sha256": "dcd87f9d22000318711cb233a579e0c5448c574d46e432024cafccf1cae4d2ac",
+        "buildConstraint": "",
+        "buildProfiles": [
+          "native_voice",
+          "ordinary"
+        ]
+      },
+      {
+        "path": "discordgo/voice_transport.go",
+        "sha256": "a9abf83f778622350072899987520d306eeeebb0749c919b22236b221fb15982",
+        "buildConstraint": "voice && cgo",
+        "buildProfiles": [
+          "native_voice"
+        ]
+      },
+      {
+        "path": "discordgo/voice_udp.go",
+        "sha256": "d53b5401844b898dc989bc81913ee07d650b692a8a21acd609f06a864cfdb759",
+        "buildConstraint": "voice && cgo",
+        "buildProfiles": [
+          "native_voice"
+        ]
+      },
+      {
+        "path": "discordgo/webhook.go",
+        "sha256": "dcec5083aa0c411e26d6f64c09ca0c4cb6a75747a72ca99d8cebcaee38acdce6",
+        "buildConstraint": "",
+        "buildProfiles": [
+          "native_voice",
+          "ordinary"
+        ]
+      },
+      {
+        "path": "discordgo/wsapi.go",
+        "sha256": "29463af8932851a0e5991c5dd357d14e64382c657c3e653b10236e3dc3a1742c",
+        "buildConstraint": "",
+        "buildProfiles": [
+          "native_voice",
+          "ordinary"
+        ]
+      }
+    ],
+    "rawSHA256": "dabc75e5db563a2d4d7f28181031d1a2c29089a6eb2c2be038e077576590fea0",
+    "historicalBaseline": "source-baseline-v0.29.0.json",
+    "legacyConversionAudit": "legacy-conversion-coverage.json (unchanged historical audit)"
+  },
+  "publicSDKDeclarations": 403,
+  "buildProfileCounts": {
+    "ordinary": {
+      "sourceFiles": 28,
+      "packageTypes": 409,
+      "publicDeclarations": 403,
+      "sessionMethods": 240
+    },
+    "native_voice": {
+      "sourceFiles": 30,
+      "packageTypes": 413,
+      "publicDeclarations": 403,
+      "sessionMethods": 240
+    }
+  },
+  "moduleOperationsIncludingState": 153
+}

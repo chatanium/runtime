@@ -1,0 +1,38 @@
+Subject: [PATCH] Preserve the SDK toolchain and transport dependencies
+
+Reason: Keep Go 1.27.0, gorilla/websocket v1.5.3, x/crypto v0.58.0 and x/sys v0.49.0 required by the preserved implementation, without changing the upstream module identity.
+Origin: Extracted from published Chatanium DiscordGo SDK v0.30.0,
+commit f2d1806d4599ff674163be703c0d62a23d4bb524, relative to upstream
+f43dd94faaacd5b163e9e783f14b5bd8be639fc9.
+Upstream-Status: Downstream; no upstream submission or acceptance is recorded
+by this patch's source. No additional authorship or review is asserted.
+Module: github.com/bwmarrin/discordgo (upstream identity retained)
+
+diff --git a/go.mod b/go.mod
+--- a/go.mod
++++ b/go.mod
+@@ -1,5 +1,10 @@
+ module github.com/bwmarrin/discordgo
+ 
+-go 1.13
++go 1.27.0
+ 
+-require github.com/gorilla/websocket v1.4.2
++require (
++	github.com/gorilla/websocket v1.5.3
++	golang.org/x/crypto v0.58.0
++)
++
++require golang.org/x/sys v0.49.0 // indirect
+diff --git a/go.sum b/go.sum
+--- a/go.sum
++++ b/go.sum
+@@ -1,2 +1,6 @@
+-github.com/gorilla/websocket v1.4.2 h1:+/TMaTYc4QFitKJxsQ7Yye35DkWvkdLcvGKqM+x0Ufc=
+-github.com/gorilla/websocket v1.4.2/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
++github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=
++github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
++golang.org/x/crypto v0.58.0 h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=
++golang.org/x/crypto v0.58.0/go.mod h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w=
++golang.org/x/sys v0.49.0 h1:XbzkgYJHdqh/8m2Uu0W/dQv8nktxx4BFHp1M0gROTXA=
++golang.org/x/sys v0.49.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=

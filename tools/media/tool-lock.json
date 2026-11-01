@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "platform": "linux/amd64",
+  "deno_source_commit": "fe7ed012d92c642fd8e5607ac5a45d517538b5c5",
+  "yt_dlp_source_commit": "f264a6cbd1f630894da0f368df00f8aae50140e0",
+  "base_image": "docker.io/library/debian@sha256:1e1a22175fbf1b32157ddaf0219e1db4e5401fab2b94ed285add64d18587cd2d",
+  "debian_snapshot": "https://snapshot.debian.org/archive/debian/20261028T000000Z",
+  "debian_release_sha256": "ed56aac47e7911e65ee63aae8d67e29f20e023f840e49f8ed037043a33de138a",
+  "debian_security_snapshot": "https://snapshot.debian.org/archive/debian-security/20261028T000000Z",
+  "debian_security_release_sha256": "01476fcf0edacd5675787aa3b5c2003099f0ed3dee76bbb8632b4b8cf80a2e00",
+  "debian_security_amd64_packages_sha256": "cbc4bef76e3c37ead4980674b88d8b1cd971e3ef018f45488da6b988f55946f3",
+  "tls_packages": {
+    "version": "3.5.7-1~deb13u3",
+    "repository": "debian_security_snapshot",
+    "libssl-dev": {"filename": "pool/updates/main/o/openssl/libssl-dev_3.5.7-1~deb13u3_amd64.deb", "sha256": "c5f5f0383cac45209fefe85b3c3308e5ef6743663597d89bedcb96aaa06b8342"},
+    "libssl3t64": {"filename": "pool/updates/main/o/openssl/libssl3t64_3.5.7-1~deb13u3_amd64.deb", "sha256": "ff16bc048bcd7d1b256094450b79c77947d8e76fe2a24bd99b91021d591fa074"},
+    "openssl-provider-legacy": {"filename": "pool/updates/main/o/openssl/openssl-provider-legacy_3.5.7-1~deb13u3_amd64.deb", "sha256": "c12e0266c4780749a4702b8959ac979689f4182e18eed85a8a5eb90ed0e16eab"}
+  },
+  "prefix": "/opt/flexmodule",
+  "ffmpeg": {"version": "9.0.2", "repository": "https://git.ffmpeg.org/ffmpeg.git", "commit": "946fcce07b6dcd0331c8cc609192aeff5e1924f8", "tag_object": "ce8f11b9fac4cd7ccfb41ca7c01bc17f5cda8cc3", "path": "/opt/flexmodule/bin/ffmpeg", "ffprobe_path": "/opt/flexmodule/bin/ffprobe", "license": "LGPL-3.0-or-later; corresponding source retained"},
+  "opus": {"version": "1.6.1", "url": "https://downloads.xiph.org/releases/opus/opus-1.6.1.tar.gz", "sha256": "6ffcb593207be92584df15b32466ed64bbec99109f007c82205f0194572411a1"},
+  "yt_dlp": {"version": "2026.10.26", "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp_linux.zip", "sha256": "f34053415136e55073dd64ba5326d161ecc23ce0e98c081d8752867b37809450", "path": "/opt/flexmodule/yt-dlp/yt-dlp", "distribution": "complete official onedir, including interpreter, EJS and third-party notices", "license": "combined standalone GPL-3.0-or-later"},
+  "ejs": {"version": "0.8.0", "bundled_in": "yt_dlp", "url": "https://github.com/yt-dlp/ejs/releases/download/0.8.0/yt_dlp_ejs-0.8.0-py3-none-any.whl", "sha256": "79300e5fca7f937a1eeede11f0456862c1b41107ce1d726871e0207424f4bdb4"},
+  "deno": {"version": "2.9.8", "url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-x86_64-unknown-linux-gnu.zip", "sha256": "e890975bc2549807bbcc0b584ffafda72cc7c93349dd99c80483dd784f6c4609", "path": "/opt/flexmodule/bin/deno"},
+  "runtime_updates": false,
+  "remote_components": false
+}

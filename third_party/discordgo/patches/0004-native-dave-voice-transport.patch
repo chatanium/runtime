@@ -1,0 +1,6130 @@
+Subject: [PATCH] Preserve native DAVE voice transport and regression coverage
+
+Reason: Keep explicit bounded voice configuration, context-aware joins and handoff, native MLS/media ownership, authenticated UDP transport, Opus submission/receive contracts and behavioral tests. Keep the root airhorn example on the implemented voice API.
+Origin: Extracted from published Chatanium DiscordGo SDK v0.30.0,
+commit f2d1806d4599ff674163be703c0d62a23d4bb524, relative to upstream
+f43dd94faaacd5b163e9e783f14b5bd8be639fc9.
+Upstream-Status: Downstream; no upstream submission or acceptance is recorded
+by this patch's source. No additional authorship or review is asserted.
+Module: github.com/bwmarrin/discordgo (upstream identity retained)
+
+diff --git a/examples/airhorn/main.go b/examples/airhorn/main.go
+--- a/examples/airhorn/main.go
++++ b/examples/airhorn/main.go
+@@ -1,7 +1,9 @@
+ package main
+ 
+ import (
++	"context"
+ 	"encoding/binary"
++	"encoding/json"
+ 	"flag"
+ 	"fmt"
+ 	"io"
+@@ -9,31 +11,48 @@
+ 	"os/signal"
+ 	"strings"
+ 	"syscall"
+-	"time"
+ 
+ 	"github.com/bwmarrin/discordgo"
+ )
+ 
+ func init() {
+ 	flag.StringVar(&token, "t", "", "Bot Token")
++	flag.StringVar(&voiceConfigPath, "voice-config", "", "Required JSON file containing explicit discordgo.VoiceConfig bounds (durations in nanoseconds)")
+ 	flag.Parse()
+ }
+ 
+ var token string
++var voiceConfigPath string
++var voiceConfig discordgo.VoiceConfig
+ var buffer = make([][]byte, 0)
+ 
+ func main() {
+ 
+ 	if token == "" {
+-		fmt.Println("No token provided. Please run: airhorn -t <bot token>")
++		fmt.Println("Usage: airhorn -t <bot token> -voice-config <bounds.json> (voice-enabled build required)")
++		return
++	}
++	if !discordgo.VoiceAvailable() {
++		fmt.Println(discordgo.ErrVoiceUnavailable)
++		return
++	}
++	configBytes, err := os.ReadFile(voiceConfigPath)
++	if err == nil {
++		err = json.Unmarshal(configBytes, &voiceConfig)
++	}
++	if err == nil {
++		err = voiceConfig.Validate()
++	}
++	if err != nil {
++		fmt.Println("Invalid required voice configuration:", err)
+ 		return
+ 	}
+ 
+ 	// Load the sound file.
+-	err := loadSound()
++	err = loadSound()
+ 	if err != nil {
+ 		fmt.Println("Error loading sound: ", err)
+-		fmt.Println("Please copy $GOPATH/src/github.com/bwmarrin/examples/airhorn/airhorn.dca to this directory.")
++		fmt.Println("Please copy examples/airhorn/airhorn.dca from the SDK checkout to this directory.")
+ 		return
+ 	}
+ 
+@@ -182,34 +201,32 @@
+ 	}
+ }
+ 
+-// playSound plays the current buffer to the provided channel.
++// playSound submits immutable frames and awaits each local UDP-write receipt.
++// Only the transport paces packets; no sleeps or public send queue are used.
+ func playSound(s *discordgo.Session, guildID, channelID string) (err error) {
+-
+-	// Join the provided voice channel.
+-	vc, err := s.ChannelVoiceJoin(guildID, channelID, false, true)
++	ctx, cancel := context.WithCancel(context.Background())
++	defer cancel()
++	vc, err := s.ChannelVoiceJoinContext(ctx, guildID, channelID, false, true, voiceConfig)
+ 	if err != nil {
+ 		return err
+ 	}
+-
+-	// Sleep for a specified amount of time before playing the sound
+-	time.Sleep(250 * time.Millisecond)
+-
+-	// Start speaking.
+-	vc.Speaking(true)
+-
+-	// Send the buffer data.
+-	for _, buff := range buffer {
+-		vc.OpusSend <- buff
+-	}
+-
+-	// Stop speaking
+-	vc.Speaking(false)
+-
+-	// Sleep for a specificed amount of time before ending.
+-	time.Sleep(250 * time.Millisecond)
+-
+-	// Disconnect from the provided voice channel.
+-	vc.Disconnect()
+-
++	defer func() {
++		closeCtx, closeCancel := context.WithTimeout(context.Background(), voiceConfig.CloseTimeout)
++		defer closeCancel()
++		closeErr := vc.DisconnectContext(closeCtx)
++		if err == nil {
++			err = closeErr
++		}
++	}()
++	for _, frame := range buffer {
++		submission, submitErr := vc.SubmitOpus(ctx, frame)
++		if submitErr != nil {
++			return submitErr
++		}
++		result := <-submission.Done()
++		if result.Err != nil {
++			return result.Err
++		}
++	}
+ 	return nil
+ }
+diff --git a/internal/dave/authorization.go b/internal/dave/authorization.go
+new file mode 100644
+--- /dev/null
++++ b/internal/dave/authorization.go
+@@ -0,0 +1,39 @@
++//go:build voice && cgo
++
++package dave
++
++import "context"
++
++func (c *Context) clearPendingReset() {
++	c.pendingResetGeneration = 0
++	c.pendingResetVersion = 0
++}
++
++// clearPendingResetOnError runs before the admitted control operation releases
++// its owner lock. Rejected control state cannot leave a reusable activation grant.
++func (c *Context) clearPendingResetOnError(err *error) {
++	if *err != nil {
++		c.clearPendingReset()
++	}
++}
++
++// AuthorizePendingReset binds a single pending-self activation to the current
++// native generation, version and latest one-use key package. The Gateway owner
++// MUST call it only after an authenticated opcode 24 with epoch=1 reset this
++// generation AND its fresh opcode-26 package was successfully written. Initial
++// Session Description and invalid-commit recovery alone do not authorize it.
++// It is not an acknowledgement that a package merely generated in memory was sent.
++func (c *Context) AuthorizePendingReset(ctx context.Context, version uint16) error {
++	if err := c.enter(ctx); err != nil {
++		return err
++	}
++	defer c.mu.Unlock()
++	c.clearPendingReset()
++	if !c.initialized || c.established || version == 0 || version != c.version ||
++		c.generation == 0 || c.keyPackageGeneration != c.generation {
++		return ErrNotReady
++	}
++	c.pendingResetGeneration = c.generation
++	c.pendingResetVersion = version
++	return nil
++}
+diff --git a/internal/dave/authorization_test.go b/internal/dave/authorization_test.go
+new file mode 100644
+--- /dev/null
++++ b/internal/dave/authorization_test.go
+@@ -0,0 +1,122 @@
++//go:build voice && cgo
++
++package dave
++
++import (
++	"context"
++	"errors"
++	"testing"
++)
++
++// This native-boundary fixture models the trusted Gateway owner's explicit
++// authenticated epoch-one reset and successful opcode-26 write. Transport tests
++// separately own the wire observation; generating a package never grants this.
++func authorizeNativeTestReset(t *testing.T, c *Context) {
++	t.Helper()
++	ctx := context.Background()
++	if err := c.Initialize(ctx, 1, "1", "2"); err != nil {
++		t.Fatal(err)
++	}
++	if err := c.SetExternalSender(ctx, externalSenderFixture(t)); err != nil {
++		t.Fatal(err)
++	}
++	if err := c.SetParticipants(ctx, []string{"2"}); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := c.FreshKeyPackage(ctx); err != nil {
++		t.Fatal(err)
++	}
++	if err := c.AuthorizePendingReset(ctx, 1); err != nil {
++		t.Fatal(err)
++	}
++}
++
++func TestNativePendingResetAuthorityRevocation(t *testing.T) {
++	cases := []struct {
++		name      string
++		wantError bool
++		invoke    func(*Context) error
++	}{
++		{"same-version-epoch-supersedes", false, func(c *Context) error { return c.SetProtocolVersion(context.Background(), 1) }},
++		{"fresh-unsent-package", false, func(c *Context) error { _, err := c.FreshKeyPackage(context.Background()); return err }},
++		{"new-reset-generation", false, func(c *Context) error { return c.Initialize(context.Background(), 1, "1", "2") }},
++		{"proposal-error", true, func(c *Context) error {
++			_, err := c.ProcessProposals(context.Background(), ProposalOperation(2), []byte{0}, []string{"2"})
++			return err
++		}},
++		{"welcome-error", true, func(c *Context) error { return c.ProcessWelcome(context.Background(), 9, []byte{0xff}, []string{"2"}) }},
++		{"prepare-error", true, func(c *Context) error { return c.PrepareReceivers(context.Background(), 9) }},
++		{"execute-error", true, func(c *Context) error { return c.ExecuteTransition(context.Background(), 9) }},
++		{"participant-error", true, func(c *Context) error { return c.SetParticipants(context.Background(), []string{"2", "2"}) }},
++		{"unsupported-transition", true, func(c *Context) error { return c.PrepareTransition(context.Background(), 0, 0) }},
++		{"external-sender-error", true, func(c *Context) error { return c.SetExternalSender(context.Background(), []byte{0xff}) }},
++	}
++	for _, tc := range cases {
++		t.Run(tc.name, func(t *testing.T) {
++			c := newNativeTestContext(t)
++			authorizeNativeTestReset(t, c)
++			if err := tc.invoke(c); (err != nil) != tc.wantError {
++				t.Fatalf("control result does not match its revocation case: %v", err)
++			}
++			if c.pendingResetGeneration != 0 || c.pendingResetVersion != 0 {
++				t.Fatal("superseded or rejected control retained pending activation authority")
++			}
++			if err := c.PrepareTransition(context.Background(), 0, 1); !errors.Is(err, ErrNotReady) {
++				t.Fatalf("revoked reset activated pending media: %v", err)
++			}
++		})
++	}
++}
++
++func TestNativeIgnoredCommitPreservesResetAuthorityButFailureRevokes(t *testing.T) {
++	c := newNativeTestContext(t)
++	authorizeNativeTestReset(t, c)
++	ctx := context.Background()
++	result, err := c.ProcessCommit(ctx, 8, []byte{0xff})
++	if err != nil || result != CommitIgnored || c.pendingResetGeneration != c.generation {
++		t.Fatalf("ignored commit incorrectly revoked the sanctioned reset: %v %v", result, err)
++	}
++	out, err := c.ProcessProposals(ctx, ProposalAppend, []byte{0}, []string{"2"})
++	if err != nil || len(out.Wire) != 0 {
++		t.Fatalf("empty native proposal list: %v", err)
++	}
++	result, err = c.ProcessCommit(ctx, 8, []byte{0xff})
++	if result != CommitFailed || !errors.Is(err, ErrNative) || c.pendingResetGeneration != 0 {
++		t.Fatalf("failed commit retained activation authority: %v %v", result, err)
++	}
++}
++
++func TestNativeDelayedExternalSenderPreservesSentPackageGeneration(t *testing.T) {
++	c := newNativeTestContext(t)
++	ctx := context.Background()
++	if err := c.Initialize(ctx, 1, "1", "2"); err != nil {
++		t.Fatal(err)
++	}
++	if err := c.SetParticipants(ctx, []string{"2"}); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := c.FreshKeyPackage(ctx); err != nil {
++		t.Fatal(err)
++	}
++	sentGeneration := c.keyPackageGeneration
++	// The Gateway owner retains its authenticated epoch-one/successful-write
++	// record while waiting for opcode 25; native generation alone grants nothing.
++	if c.pendingResetGeneration != 0 {
++		t.Fatal("package generation granted authority")
++	}
++	if err := c.SetExternalSender(ctx, externalSenderFixture(t)); err != nil {
++		t.Fatal(err)
++	}
++	if c.keyPackageGeneration != sentGeneration || c.generation != sentGeneration {
++		t.Fatal("delayed external sender invalidated the existing native join package")
++	}
++	if err := c.AuthorizePendingReset(ctx, 1); err != nil {
++		t.Fatal(err)
++	}
++	if err := c.PrepareTransition(ctx, 0, 1); err != nil {
++		t.Fatal(err)
++	}
++	if !c.Ready() || c.established || c.pendingResetGeneration != 0 {
++		t.Fatal("delayed sender did not produce one consumed pending-media activation")
++	}
++}
+diff --git a/internal/dave/bridge.c b/internal/dave/bridge.c
+new file mode 100644
+--- /dev/null
++++ b/internal/dave/bridge.c
+@@ -0,0 +1,62 @@
++//go:build voice && cgo
++
++#include "bridge.h"
++#include <stdatomic.h>
++
++struct flex_dave_failure {
++    atomic_bool failed;
++};
++
++static void flex_dave_mls_failure(const char* source, const char* reason, void* user_data)
++{
++    (void)source;
++    (void)reason;
++    atomic_store_explicit(&((flex_dave_failure*)user_data)->failed, true, memory_order_release);
++}
++
++static void flex_dave_discard_log(DAVELoggingSeverity severity, const char* file,
++                                int line, const char* message)
++{
++    (void)severity;
++    (void)file;
++    (void)line;
++    (void)message;
++}
++
++flex_dave_failure* flex_dave_failure_create(void)
++{
++    flex_dave_failure* state = malloc(sizeof(*state));
++    if (state != NULL) {
++        atomic_init(&state->failed, false);
++    }
++    return state;
++}
++
++void flex_dave_failure_destroy(flex_dave_failure* state)
++{
++    free(state);
++}
++
++void flex_dave_failure_reset(flex_dave_failure* state)
++{
++    atomic_store_explicit(&state->failed, false, memory_order_release);
++}
++
++bool flex_dave_failure_failed(flex_dave_failure* state)
++{
++    return atomic_load_explicit(&state->failed, memory_order_acquire);
++}
++
++DAVESessionHandle flex_dave_session_create(flex_dave_failure* state)
++{
++    /* Empty authSessionId selects transient identity. No persistent key ID or
++     * platform key-store context is supplied. */
++    return daveSessionCreate(NULL, NULL, flex_dave_mls_failure, state);
++}
++
++void flex_dave_suppress_logs(void)
++{
++    /* Upstream verbose logs include MLS bytes and key-domain addresses. Never
++     * route those messages through the host logger, including error text. */
++    daveSetLogSinkCallback(flex_dave_discard_log);
++}
+diff --git a/internal/dave/bridge.h b/internal/dave/bridge.h
+new file mode 100644
+--- /dev/null
++++ b/internal/dave/bridge.h
+@@ -0,0 +1,21 @@
++//go:build voice && cgo
++
++#ifndef CHATANIUM_DAVE_BRIDGE_H
++#define CHATANIUM_DAVE_BRIDGE_H
++
++#include <dave/dave.h>
++#include <dave/flex_dave_ext.h>
++#include <stdlib.h>
++
++/* Only C-owned memory is retained by native callbacks. The callback records no
++ * source, reason, identity or key-bearing text. All session calls are serialized
++ * by Context; the MLS callbacks used here execute synchronously in those calls. */
++typedef struct flex_dave_failure flex_dave_failure;
++flex_dave_failure* flex_dave_failure_create(void);
++void flex_dave_failure_destroy(flex_dave_failure* state);
++void flex_dave_failure_reset(flex_dave_failure* state);
++bool flex_dave_failure_failed(flex_dave_failure* state);
++DAVESessionHandle flex_dave_session_create(flex_dave_failure* state);
++void flex_dave_suppress_logs(void);
++
++#endif
+diff --git a/internal/dave/context.go b/internal/dave/context.go
+new file mode 100644
+--- /dev/null
++++ b/internal/dave/context.go
+@@ -0,0 +1,473 @@
++//go:build voice && cgo
++
++// Package dave owns ephemeral libdave MLS and media contexts. It is deliberately
++// absent from ordinary builds; it never implements media cryptography itself.
++package dave
++
++/*
++#cgo CFLAGS: -std=c11
++#cgo LDFLAGS: -ldave
++#include "bridge.h"
++*/
++import "C"
++
++import (
++	"context"
++	"errors"
++	"runtime"
++	"strconv"
++	"sync"
++	"time"
++	"unsafe"
++)
++
++// Config has no defaults. Limits apply before native input allocations and
++// before copying native output into Go. Frame buffers remain caller-owned.
++type Config struct {
++	MaxParticipants        int
++	MaxDecryptors          int
++	MaxControlBytes        int
++	MaxProposalCount       int
++	MaxProposalBytes       int
++	MaxPreparedTransitions int
++	MaxTransitionBytes     int
++	MaxFrameBytes          int
++	MaxEncryptedFrameBytes int
++}
++
++var (
++	ErrConfig         = errors.New("dave: invalid finite bounds")
++	ErrClosed         = errors.New("dave: context closed")
++	ErrBounds         = errors.New("dave: resource bound exceeded")
++	ErrInput          = errors.New("dave: invalid control input")
++	ErrNative         = errors.New("dave: native operation failed")
++	ErrNotReady       = errors.New("dave: media context not ready")
++	ErrUnsupported    = errors.New("dave: unsupported protocol version")
++	ErrUnknownSender  = errors.New("dave: sender not recognized")
++	ErrBuffer         = errors.New("dave: insufficient output buffer")
++	ErrTransition     = errors.New("dave: invalid transition")
++	ErrAuthentication = errors.New("dave: frame authentication failed")
++)
++
++type ProposalOperation uint8
++
++const (
++	ProposalAppend ProposalOperation = iota
++	ProposalRevoke
++)
++
++// Wire is the official ABI's serialized commit followed by its optional welcome.
++// It is one opaque opcode-28 payload, not two independently framed messages.
++type CommitWelcome struct{ Wire []byte }
++
++type CommitResult uint8
++
++const (
++	CommitApplied CommitResult = iota
++	CommitIgnored
++	CommitFailed
++)
++
++// The C ABI's TransitionToKeyRatchet uses kDefaultTransitionDuration=10s. The
++// admission ledger here bounds retained native key domains within that window;
++// native decryptors, not Go, authenticate against and expire the old ratchets.
++const receiverTransitionWindow = 10 * time.Second
++
++type receiver struct {
++	handle     C.DAVEDecryptorHandle
++	epochs     []time.Time
++	generation uint64
++	retired    time.Time
++}
++
++type transition struct {
++	version    uint16
++	sender     C.DAVEKeyRatchetHandle
++	receivers  map[string]C.DAVEKeyRatchetHandle
++	prepared   bool
++	bytes      int
++	generation uint64
++}
++
++// Context serializes all MLS, frame, callback-state and close operations. No
++// native callback invokes Go, and no Go pointer is retained by libdave.
++type Context struct {
++	mu                     sync.Mutex
++	cfg                    Config
++	session                C.DAVESessionHandle
++	failure                *C.flex_dave_failure
++	encryptor              C.DAVEEncryptorHandle
++	closed                 bool
++	initialized            bool
++	established            bool
++	version                uint16
++	self                   string
++	participants           map[string]struct{}
++	roster                 map[string]struct{}
++	receivers              map[string]*receiver
++	transitions            map[uint16]*transition
++	transitionBytes        int
++	proposalScratch        []byte
++	active                 bool
++	activeID               uint16
++	generation             uint64
++	receivingGeneration    uint64
++	activeGeneration       uint64
++	keyPackageGeneration   uint64
++	pendingResetGeneration uint64
++	pendingResetVersion    uint16
++	ssrc                   uint32
++	ssrcBound              bool
++}
++
++var suppressLogs sync.Once
++
++func MaxSupportedProtocolVersion() uint16 {
++	// This adapter supports the currently pinned protocol, not an unreviewed
++	// future native release's additional protocols.
++	v := uint16(C.daveMaxSupportedProtocolVersion())
++	if v > 1 {
++		return 1
++	}
++	return v
++}
++
++func (cfg Config) Validate() error {
++	for _, n := range []int{cfg.MaxParticipants, cfg.MaxDecryptors,
++		cfg.MaxControlBytes, cfg.MaxProposalCount, cfg.MaxProposalBytes,
++		cfg.MaxPreparedTransitions, cfg.MaxTransitionBytes, cfg.MaxFrameBytes,
++		cfg.MaxEncryptedFrameBytes} {
++		if n <= 0 {
++			return ErrConfig
++		}
++	}
++	// Native control copies use Go's bounded length; frame-size arithmetic must
++	// leave room for the library's transform overhead without uintptr overflow.
++	maxInt := int(^uint(0) >> 1)
++	if cfg.MaxControlBytes > maxInt-1 || cfg.MaxFrameBytes > maxInt-cfg.MaxEncryptedFrameBytes ||
++		cfg.MaxFrameBytes > cfg.MaxEncryptedFrameBytes {
++		return ErrConfig
++	}
++	return nil
++}
++
++func New(cfg Config) (*Context, error) {
++	if err := cfg.Validate(); err != nil {
++		return nil, err
++	}
++	suppressLogs.Do(func() { C.flex_dave_suppress_logs() })
++	c := &Context{cfg: cfg, participants: make(map[string]struct{}),
++		roster: make(map[string]struct{}), receivers: make(map[string]*receiver),
++		transitions: make(map[uint16]*transition)}
++	c.failure = C.flex_dave_failure_create()
++	if c.failure == nil {
++		return nil, ErrNative
++	}
++	c.session = C.flex_dave_session_create(c.failure)
++	c.encryptor = C.daveEncryptorCreate()
++	if c.session == nil || c.encryptor == nil {
++		c.Close()
++		return nil, ErrNative
++	}
++	if !bool(C.flexDaveSessionSetProposalLimits(c.session, C.size_t(cfg.MaxProposalCount), C.size_t(cfg.MaxProposalBytes))) {
++		c.Close()
++		return nil, ErrConfig
++	}
++	C.daveEncryptorSetPassthroughMode(c.encryptor, C.bool(false))
++	n := C.daveEncryptorGetMaxCiphertextByteSize(c.encryptor, C.DAVE_MEDIA_TYPE_AUDIO, C.size_t(cfg.MaxFrameBytes))
++	if n > C.size_t(cfg.MaxEncryptedFrameBytes) || n < C.size_t(cfg.MaxFrameBytes) {
++		c.Close()
++		return nil, ErrConfig
++	}
++	return c, nil
++}
++
++func (c *Context) enter(ctx context.Context) error {
++	if ctx == nil {
++		return ErrInput
++	}
++	if err := ctx.Err(); err != nil {
++		return err
++	}
++	c.mu.Lock()
++	if c.closed {
++		c.mu.Unlock()
++		return ErrClosed
++	}
++	if err := ctx.Err(); err != nil {
++		c.mu.Unlock()
++		return err
++	}
++	return nil
++}
++
++func validID(id string) bool {
++	if len(id) == 0 || len(id) > 20 {
++		return false
++	}
++	n, err := strconv.ParseUint(id, 10, 64)
++	return err == nil && n != 0 && strconv.FormatUint(n, 10) == id
++}
++
++func pointer(b []byte) *C.uint8_t { return (*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(b))) }
++
++func (c *Context) checkNative() error {
++	if bool(C.flex_dave_failure_failed(c.failure)) {
++		return ErrNative
++	}
++	return nil
++}
++
++func (c *Context) resetFailure() { C.flex_dave_failure_reset(c.failure) }
++
++func (c *Context) Initialize(ctx context.Context, version uint16, groupID, selfUserID string) error {
++	if err := c.enter(ctx); err != nil {
++		return err
++	}
++	defer c.mu.Unlock()
++	c.clearPendingReset()
++	if version == 0 || version > MaxSupportedProtocolVersion() {
++		return ErrUnsupported
++	}
++	if !validID(groupID) || !validID(selfUserID) {
++		return ErrInput
++	}
++	if c.initialized && c.self != selfUserID {
++		return ErrInput
++	}
++	if c.generation == ^uint64(0) {
++		return ErrBounds
++	}
++	group, _ := strconv.ParseUint(groupID, 10, 64)
++	self := C.CString(selfUserID)
++	if self == nil {
++		return ErrNative
++	}
++	defer C.free(unsafe.Pointer(self))
++	c.resetFailure()
++	C.daveSessionInit(c.session, C.uint16_t(version), C.uint64_t(group), self)
++	if err := c.checkNative(); err != nil {
++		return err
++	}
++	for id, t := range c.transitions {
++		destroyTransition(t)
++		delete(c.transitions, id)
++	}
++	c.transitionBytes = 0
++	c.version, c.self, c.initialized = version, selfUserID, true
++	c.established = false
++	c.generation++
++	c.keyPackageGeneration = 0
++	// Reset only MLS/pending state. Existing native media contexts remain valid
++	// until the gateway executes the new transition.
++	c.roster = map[string]struct{}{selfUserID: {}}
++	return nil
++}
++
++func (c *Context) SetProtocolVersion(ctx context.Context, version uint16) (resultErr error) {
++	if err := c.enter(ctx); err != nil {
++		return err
++	}
++	defer c.mu.Unlock()
++	c.clearPendingReset()
++	if !c.initialized {
++		return ErrNotReady
++	}
++	if version == 0 || version > MaxSupportedProtocolVersion() {
++		return ErrUnsupported
++	}
++	C.daveSessionSetProtocolVersion(c.session, C.uint16_t(version))
++	c.version = version
++	return nil
++}
++
++func (c *Context) SetExternalSender(ctx context.Context, senderPackage []byte) (resultErr error) {
++	if err := c.enter(ctx); err != nil {
++		return err
++	}
++	defer c.mu.Unlock()
++	c.clearPendingReset()
++	if len(senderPackage) == 0 || len(senderPackage) > c.cfg.MaxControlBytes {
++		return ErrBounds
++	}
++	// Replacing a pending group's sender after its media domain was activated
++	// would recreate that group within the same generation. Require a real reset.
++	if c.initialized && !c.established && c.activeGeneration == c.generation {
++		return ErrTransition
++	}
++	c.resetFailure()
++	C.daveSessionSetExternalSender(c.session, pointer(senderPackage), C.size_t(len(senderPackage)))
++	runtime.KeepAlive(senderPackage)
++	return c.checkNative()
++}
++
++func (c *Context) copyOutput(p *C.uint8_t, n C.size_t, required bool) ([]byte, error) {
++	if p != nil {
++		defer C.daveFree(unsafe.Pointer(p))
++	}
++	if n > C.size_t(c.cfg.MaxControlBytes) {
++		return nil, ErrBounds
++	}
++	if n == 0 {
++		if required {
++			return nil, ErrNative
++		}
++		return nil, nil
++	}
++	if p == nil {
++		return nil, ErrNative
++	}
++	out := make([]byte, int(n))
++	copy(out, unsafe.Slice((*byte)(unsafe.Pointer(p)), int(n)))
++	return out, nil
++}
++
++func (c *Context) FreshKeyPackage(ctx context.Context) ([]byte, error) {
++	if err := c.enter(ctx); err != nil {
++		return nil, err
++	}
++	defer c.mu.Unlock()
++	c.clearPendingReset()
++	if !c.initialized {
++		return nil, ErrNotReady
++	}
++	// Native replaces the previous private join package even if output fails
++	// our copy bound; an older package must not authorize pending activation.
++	c.keyPackageGeneration = 0
++	var p *C.uint8_t
++	var n C.size_t
++	c.resetFailure()
++	C.daveSessionGetMarshalledKeyPackage(c.session, &p, &n)
++	if err := c.checkNative(); err != nil {
++		if p != nil {
++			C.daveFree(unsafe.Pointer(p))
++		}
++		return nil, err
++	}
++	out, err := c.copyOutput(p, n, true)
++	if err == nil {
++		c.keyPackageGeneration = c.generation
++	}
++	return out, err
++}
++
++func (c *Context) setParticipants(ids []string) error {
++	if len(ids) > c.cfg.MaxParticipants {
++		return ErrBounds
++	}
++	next := make(map[string]struct{}, len(ids))
++	for _, id := range ids {
++		if !validID(id) {
++			return ErrInput
++		}
++		if _, exists := next[id]; exists {
++			return ErrInput
++		}
++		next[id] = struct{}{}
++	}
++	c.participants = next
++	if c.self != "" {
++		if _, selfPresent := next[c.self]; !selfPresent {
++			c.clearPendingReset()
++		}
++	}
++	for id, r := range c.receivers {
++		if _, exists := next[id]; !exists {
++			C.daveDecryptorDestroy(r.handle)
++			delete(c.receivers, id)
++		}
++	}
++	return nil
++}
++
++func (c *Context) SetParticipants(ctx context.Context, ids []string) (resultErr error) {
++	if err := c.enter(ctx); err != nil {
++		return err
++	}
++	defer c.mu.Unlock()
++	defer c.clearPendingResetOnError(&resultErr)
++	return c.setParticipants(ids)
++}
++
++// recognizedArray returns C-owned pointer storage AND C-owned strings. Native
++// constructors copy them synchronously; none is retained after this call.
++func recognizedArray(ids []string) (array **C.char, release func(), err error) {
++	count := len(ids)
++	if count == 0 {
++		// The official C++ binding constructs a range even for an empty set.
++		// Supply a valid zero-length range rather than nullptr arithmetic.
++		count = 1
++	}
++	mem := C.calloc(C.size_t(count), C.size_t(unsafe.Sizeof(uintptr(0))))
++	if mem == nil {
++		return nil, nil, ErrNative
++	}
++	array = (**C.char)(mem)
++	slots := unsafe.Slice(array, count)
++	release = func() {
++		for _, p := range slots {
++			if p != nil {
++				C.free(unsafe.Pointer(p))
++			}
++		}
++		C.free(mem)
++	}
++	for i, id := range ids {
++		slots[i] = C.CString(id)
++		if slots[i] == nil {
++			release()
++			return nil, nil, ErrNative
++		}
++	}
++	return array, release, nil
++}
++
++func destroyTransition(t *transition) {
++	if t.sender != nil {
++		C.daveKeyRatchetDestroy(t.sender)
++		t.sender = nil
++	}
++	for id, r := range t.receivers {
++		C.daveKeyRatchetDestroy(r)
++		delete(t.receivers, id)
++	}
++}
++
++func (c *Context) Close() error {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	if c.closed {
++		return nil
++	}
++	c.closed = true
++	c.clearPendingReset()
++	// Lock acquisition joins all admitted operations and their synchronous MLS
++	// callbacks. No fingerprint/asynchronous callbacks are ever registered.
++	for id, t := range c.transitions {
++		destroyTransition(t)
++		delete(c.transitions, id)
++	}
++	for id, r := range c.receivers {
++		C.daveDecryptorDestroy(r.handle)
++		delete(c.receivers, id)
++	}
++	if c.encryptor != nil {
++		C.daveEncryptorDestroy(c.encryptor)
++		c.encryptor = nil
++	}
++	if c.session != nil {
++		C.daveSessionDestroy(c.session)
++		c.session = nil
++	}
++	// Destroy callback memory only after the native session can no longer call it.
++	if c.failure != nil {
++		C.flex_dave_failure_destroy(c.failure)
++		c.failure = nil
++	}
++	c.participants, c.roster = nil, nil
++	c.self, c.version, c.active = "", 0, false
++	c.transitionBytes = 0
++	clear(c.proposalScratch)
++	c.proposalScratch = nil
++	return nil
++}
+diff --git a/internal/dave/context_test.go b/internal/dave/context_test.go
+new file mode 100644
+--- /dev/null
++++ b/internal/dave/context_test.go
+@@ -0,0 +1,258 @@
++//go:build voice && cgo
++
++package dave
++
++import (
++	"bytes"
++	"context"
++	"encoding/hex"
++	"errors"
++	"sync"
++	"testing"
++)
++
++func nativeTestConfig() Config {
++	return Config{MaxParticipants: 8, MaxDecryptors: 8, MaxControlBytes: 65536,
++		MaxProposalCount: 16, MaxProposalBytes: 65536, MaxPreparedTransitions: 8,
++		MaxTransitionBytes: 65536, MaxFrameBytes: 1275, MaxEncryptedFrameBytes: 1536}
++}
++
++// Public SEC1 P256 generator + BasicCredential{00,01,01,00}. Serialization follows
++// pinned MLSpp ExternalSender/SignaturePublicKey/Credential and the official
++// cpp/test/external_sender.cpp credential. No private key or persisted fixture.
++func externalSenderFixture(t *testing.T) []byte {
++	t.Helper()
++	p, err := hex.DecodeString("4041046b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c2964fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f500010400010100")
++	if err != nil {
++		t.Fatal(err)
++	}
++	return p
++}
++
++func newNativeTestContext(t *testing.T) *Context {
++	t.Helper()
++	c, err := New(nativeTestConfig())
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() {
++		if err := c.Close(); err != nil {
++			t.Error(err)
++		}
++	})
++	return c
++}
++
++func TestNativeBoundsAndUnavailableMedia(t *testing.T) {
++	if _, err := New(Config{}); !errors.Is(err, ErrConfig) {
++		t.Fatalf("missing bounds: %v", err)
++	}
++	c := newNativeTestContext(t)
++	ctx := context.Background()
++	if c.Ready() {
++		t.Fatal("new context published readiness")
++	}
++	if _, err := c.EncryptOpus(ctx, 1, []byte{0xf8, 0xff, 0xfe}, make([]byte, 1536)); !errors.Is(err, ErrNotReady) {
++		t.Fatalf("media without key: %v", err)
++	}
++	if _, err := c.MaxCiphertextSize(1276); !errors.Is(err, ErrBounds) {
++		t.Fatalf("unbounded frame: %v", err)
++	}
++	if err := c.Initialize(ctx, 0, "1", "2"); !errors.Is(err, ErrUnsupported) {
++		t.Fatalf("plaintext version: %v", err)
++	}
++	if err := c.Initialize(ctx, 1, "01", "2"); !errors.Is(err, ErrInput) {
++		t.Fatalf("noncanonical identity: %v", err)
++	}
++	if err := c.SetExternalSender(ctx, make([]byte, nativeTestConfig().MaxControlBytes+1)); !errors.Is(err, ErrBounds) {
++		t.Fatalf("native input allocation bound: %v", err)
++	}
++	if err := c.SetParticipants(ctx, []string{"2", "2"}); !errors.Is(err, ErrInput) {
++		t.Fatalf("duplicate participant: %v", err)
++	}
++	if _, err := c.DecryptOpus(ctx, "3", []byte{1, 2, 3}, make([]byte, 1536)); !errors.Is(err, ErrUnknownSender) {
++		t.Fatalf("unknown sender: %v", err)
++	}
++}
++
++func TestNativeFreshPackagesAndIgnoredCommit(t *testing.T) {
++	c := newNativeTestContext(t)
++	ctx := context.Background()
++	if err := c.Initialize(ctx, 1, "1", "2"); err != nil {
++		t.Fatal(err)
++	}
++	first, err := c.FreshKeyPackage(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	second, err := c.FreshKeyPackage(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if len(first) == 0 || bytes.Equal(first, second) {
++		t.Fatal("key package was reused")
++	}
++	// Upstream explicitly ignores an in-flight commit while there is neither
++	// current state nor proposals, despite invoking its failure callback.
++	result, err := c.ProcessCommit(ctx, 7, []byte{0xff})
++	if err != nil || result != CommitIgnored {
++		t.Fatalf("ignored became failed: %v %v", result, err)
++	}
++	if c.Ready() {
++		t.Fatal("ignored commit published readiness")
++	}
++}
++
++func TestNativePendingTransitionAndSoleMemberReset(t *testing.T) {
++	c := newNativeTestContext(t)
++	ctx := context.Background()
++	if err := c.Initialize(ctx, 1, "1", "2"); err != nil {
++		t.Fatal(err)
++	}
++	if err := c.PrepareTransition(ctx, 0, 1); !errors.Is(err, ErrNotReady) {
++		t.Fatalf("group without sender: %v", err)
++	}
++	if err := c.SetExternalSender(ctx, externalSenderFixture(t)); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := c.FreshKeyPackage(ctx); err != nil {
++		t.Fatal(err)
++	}
++	if err := c.SetParticipants(ctx, []string{"2", "3"}); err != nil {
++		t.Fatal(err)
++	}
++	if err := c.AuthorizePendingReset(ctx, 1); err != nil {
++		t.Fatal(err)
++	}
++	if err := c.PrepareTransition(ctx, 0, 1); !errors.Is(err, ErrNotReady) {
++		t.Fatalf("non-sole pending activation: %v", err)
++	}
++	// A failed prepare consumed the authorization. Model another authenticated
++	// epoch-one reset and a successfully sent fresh package before authorizing.
++	if err := c.Initialize(ctx, 1, "1", "2"); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := c.FreshKeyPackage(ctx); err != nil {
++		t.Fatal(err)
++	}
++	if err := c.SetParticipants(ctx, []string{"2"}); err != nil {
++		t.Fatal(err)
++	}
++	if err := c.PrepareTransition(ctx, 0, 1); !errors.Is(err, ErrNotReady) {
++		t.Fatalf("initial description/generated-only package authorized pending media: %v", err)
++	}
++	if err := c.AuthorizePendingReset(ctx, 1); err != nil {
++		t.Fatal(err)
++	}
++	if err := c.PrepareTransition(ctx, 0, 1); err != nil {
++		t.Fatal(err)
++	}
++	if !c.Ready() || c.established {
++		t.Fatal("pending media activation incorrectly established MLS or stayed unready")
++	}
++	opus := []byte{0xf8, 0xff, 0xfe}
++	dst := make([]byte, nativeTestConfig().MaxEncryptedFrameBytes)
++	n, err := c.EncryptOpus(ctx, 42, opus, dst)
++	if err != nil || n <= len(opus) || bytes.Equal(dst[:n], opus) {
++		t.Fatalf("real frame encryption failed: n=%d err=%v", n, err)
++	}
++	firstCiphertext := append([]byte(nil), dst[:n]...)
++	if err := c.PrepareTransition(ctx, 0, 1); err != nil {
++		t.Fatal(err)
++	}
++	n, err = c.EncryptOpus(ctx, 42, opus, dst)
++	if err != nil || bytes.Equal(firstCiphertext, dst[:n]) {
++		t.Fatalf("repeated zero reused sender nonce: %v", err)
++	}
++	// A reset prepares a new pending group but preserves the old active sender
++	// until the gateway's immediate transition zero.
++	oldGeneration := c.activeGeneration
++	if err := c.Initialize(ctx, 1, "1", "2"); err != nil {
++		t.Fatal(err)
++	}
++	if !c.Ready() || c.activeGeneration != oldGeneration {
++		t.Fatal("reset switched sender before execute")
++	}
++	if _, err := c.FreshKeyPackage(ctx); err != nil {
++		t.Fatal(err)
++	}
++	if err := c.PrepareTransition(ctx, 0, 1); !errors.Is(err, ErrNotReady) {
++		t.Fatalf("previous generation authorized a fresh pending reset: %v", err)
++	}
++	if err := c.AuthorizePendingReset(ctx, 1); err != nil {
++		t.Fatal(err)
++	}
++	if err := c.PrepareTransition(ctx, 0, 1); err != nil {
++		t.Fatal(err)
++	}
++	if c.activeGeneration == oldGeneration || c.established {
++		t.Fatal("sole member reset did not activate fresh pending media")
++	}
++	if _, err := c.EncryptOpus(ctx, 43, opus, dst); !errors.Is(err, ErrInput) {
++		t.Fatalf("unbounded SSRC codec map: %v", err)
++	}
++}
++
++func TestNativeEmptyProposalAndFailedCommit(t *testing.T) {
++	c := newNativeTestContext(t)
++	ctx := context.Background()
++	if err := c.Initialize(ctx, 1, "1", "2"); err != nil {
++		t.Fatal(err)
++	}
++	if err := c.SetExternalSender(ctx, externalSenderFixture(t)); err != nil {
++		t.Fatal(err)
++	}
++	// An empty TLS list must not synthesize a local commit or activate media.
++	out, err := c.ProcessProposals(ctx, ProposalAppend, []byte{0}, []string{"2"})
++	if err != nil || len(out.Wire) != 0 || c.Ready() {
++		t.Fatalf("empty proposal result: %d %v", len(out.Wire), err)
++	}
++	result, err := c.ProcessCommit(ctx, 9, []byte{0xff})
++	if result != CommitFailed || !errors.Is(err, ErrNative) {
++		t.Fatalf("invalid commit not failed: %v %v", result, err)
++	}
++	// Reject a truncated vector in the single native parser; do not silently
++	// accept its framing or return a locally fabricated commit.
++	if _, err := c.ProcessProposals(ctx, ProposalAppend, []byte{4, 1}, []string{"2"}); !errors.Is(err, ErrNative) {
++		t.Fatalf("malformed proposal framing: %v", err)
++	}
++}
++
++func TestNativeCloseAndSynchronousCallbackOwnership(t *testing.T) {
++	c := newNativeTestContext(t)
++	ctx := context.Background()
++	if err := c.Initialize(ctx, 1, "1", "2"); err != nil {
++		t.Fatal(err)
++	}
++	var wg sync.WaitGroup
++	for range 8 {
++		wg.Add(1)
++		go func() {
++			defer wg.Done()
++			// Invalid external sender enters the real synchronous native MLS
++			// failure callback while Close competes for the same owner lock.
++			err := c.SetExternalSender(ctx, []byte{0xff})
++			if !errors.Is(err, ErrNative) && !errors.Is(err, ErrClosed) {
++				t.Errorf("callback boundary: %v", err)
++			}
++		}()
++	}
++	if err := c.Close(); err != nil {
++		t.Fatal(err)
++	}
++	wg.Wait()
++	if err := c.Close(); err != nil {
++		t.Fatal(err)
++	}
++	if c.Ready() {
++		t.Fatal("closed native context remains ready")
++	}
++	if _, err := c.FreshKeyPackage(ctx); !errors.Is(err, ErrClosed) {
++		t.Fatalf("use after close: %v", err)
++	}
++	canceled, cancel := context.WithCancel(ctx)
++	cancel()
++	if err := c.Initialize(canceled, 1, "1", "2"); !errors.Is(err, context.Canceled) {
++		t.Fatalf("canceled native admission: %v", err)
++	}
++}
+diff --git a/internal/dave/frames.go b/internal/dave/frames.go
+new file mode 100644
+--- /dev/null
++++ b/internal/dave/frames.go
+@@ -0,0 +1,133 @@
++//go:build voice && cgo
++
++package dave
++
++/*
++#include "bridge.h"
++*/
++import "C"
++
++import (
++	"context"
++	"runtime"
++	"time"
++)
++
++func (c *Context) maxCiphertextSize(frameBytes int) (int, error) {
++	if frameBytes <= 0 || frameBytes > c.cfg.MaxFrameBytes {
++		return 0, ErrBounds
++	}
++	n := C.daveEncryptorGetMaxCiphertextByteSize(c.encryptor, C.DAVE_MEDIA_TYPE_AUDIO, C.size_t(frameBytes))
++	if n < C.size_t(frameBytes) || n > C.size_t(c.cfg.MaxEncryptedFrameBytes) {
++		return 0, ErrBounds
++	}
++	return int(n), nil
++}
++
++// MaxCiphertextSize can size a reusable caller buffer before media is ready.
++func (c *Context) MaxCiphertextSize(frameBytes int) (int, error) {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	if c.closed {
++		return 0, ErrClosed
++	}
++	return c.maxCiphertextSize(frameBytes)
++}
++
++func (c *Context) maxPlaintextSize(senderID string, frameBytes int) (int, error) {
++	if frameBytes <= 0 || frameBytes > c.cfg.MaxEncryptedFrameBytes {
++		return 0, ErrBounds
++	}
++	if _, known := c.participants[senderID]; !known {
++		return 0, ErrUnknownSender
++	}
++	c.expireReceivers(time.Now())
++	r := c.receivers[senderID]
++	if r == nil {
++		return 0, ErrNotReady
++	}
++	n := C.daveDecryptorGetMaxPlaintextByteSize(r.handle, C.DAVE_MEDIA_TYPE_AUDIO, C.size_t(frameBytes))
++	// Pinned libdave returns encryptedFrameSize as its upper bound. The scratch
++	// buffer may therefore exceed MaxFrameBytes, but authenticated Opus output
++	// is independently checked against MaxFrameBytes before release.
++	if n == 0 || n > C.size_t(c.cfg.MaxEncryptedFrameBytes) {
++		return 0, ErrBounds
++	}
++	return int(n), nil
++}
++
++func (c *Context) MaxPlaintextSize(senderID string, frameBytes int) (int, error) {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	if c.closed {
++		return 0, ErrClosed
++	}
++	return c.maxPlaintextSize(senderID, frameBytes)
++}
++
++func (c *Context) EncryptOpus(ctx context.Context, ssrc uint32, opus, dst []byte) (int, error) {
++	if err := c.enter(ctx); err != nil {
++		return 0, err
++	}
++	defer c.mu.Unlock()
++	if !c.active || !bool(C.daveEncryptorHasKeyRatchet(c.encryptor)) ||
++		bool(C.daveEncryptorIsPassthroughMode(c.encryptor)) {
++		return 0, ErrNotReady
++	}
++	n, err := c.maxCiphertextSize(len(opus))
++	if err != nil {
++		return 0, err
++	}
++	if len(dst) < n {
++		return 0, ErrBuffer
++	}
++	if c.ssrcBound && c.ssrc != ssrc {
++		return 0, ErrInput
++	}
++	if !c.ssrcBound {
++		C.daveEncryptorAssignSsrcToCodec(c.encryptor, C.uint32_t(ssrc), C.DAVE_CODEC_OPUS)
++		c.ssrc, c.ssrcBound = ssrc, true
++	}
++	var written C.size_t
++	result := C.daveEncryptorEncrypt(c.encryptor, C.DAVE_MEDIA_TYPE_AUDIO, C.uint32_t(ssrc),
++		pointer(opus), C.size_t(len(opus)), pointer(dst), C.size_t(n), &written)
++	runtime.KeepAlive(opus)
++	runtime.KeepAlive(dst)
++	if result != C.DAVE_ENCRYPTOR_RESULT_CODE_SUCCESS || written == 0 || written > C.size_t(n) {
++		clear(dst[:n])
++		return 0, ErrNative
++	}
++	return int(written), nil
++}
++
++func (c *Context) DecryptOpus(ctx context.Context, senderID string, encrypted, dst []byte) (int, error) {
++	if err := c.enter(ctx); err != nil {
++		return 0, err
++	}
++	defer c.mu.Unlock()
++	n, err := c.maxPlaintextSize(senderID, len(encrypted))
++	if err != nil {
++		return 0, err
++	}
++	if len(dst) < n {
++		return 0, ErrBuffer
++	}
++	// libdave has an intentional SFU synthesized-silence exception. This strict
++	// authenticated-Opus API never publishes an unauthenticated frame, including
++	// that exception. The transport may discard it, not turn it into media.
++	if len(encrypted) == 3 && encrypted[0] == 0xf8 && encrypted[1] == 0xff && encrypted[2] == 0xfe {
++		return 0, ErrAuthentication
++	}
++	r := c.receivers[senderID]
++	var written C.size_t
++	result := C.daveDecryptorDecrypt(r.handle, C.DAVE_MEDIA_TYPE_AUDIO,
++		pointer(encrypted), C.size_t(len(encrypted)), pointer(dst), C.size_t(n), &written)
++	runtime.KeepAlive(encrypted)
++	runtime.KeepAlive(dst)
++	if result != C.DAVE_DECRYPTOR_RESULT_CODE_SUCCESS || written == 0 ||
++		written > C.size_t(n) || written > C.size_t(c.cfg.MaxFrameBytes) {
++		clear(dst[:n])
++		return 0, ErrAuthentication
++	}
++	return int(written), nil
++}
+diff --git a/internal/dave/proposals.go b/internal/dave/proposals.go
+new file mode 100644
+--- /dev/null
++++ b/internal/dave/proposals.go
+@@ -0,0 +1,72 @@
++//go:build voice && cgo
++
++package dave
++
++/*
++#include "bridge.h"
++*/
++import "C"
++
++import (
++	"context"
++	"runtime"
++	"unsafe"
++)
++
++// ProcessProposals receives the TLS proposal/ref list excluding its operation
++// byte. The source-patched official parser enforces exact queued proposal count
++// and serialized-byte limits in its single parse/validation path.
++// On success, empty Wire means the actual native proposal queue is empty and
++// its outbound candidate was cleared. A nonempty queue synchronously produces
++// its candidate; native failures return errors, never successful deferred output.
++func (c *Context) ProcessProposals(ctx context.Context, operation ProposalOperation, proposals []byte, recognizedIDs []string) (out CommitWelcome, resultErr error) {
++	if err := c.enter(ctx); err != nil {
++		return CommitWelcome{}, err
++	}
++	defer c.mu.Unlock()
++	defer c.clearPendingResetOnError(&resultErr)
++	if !c.initialized {
++		return CommitWelcome{}, ErrNotReady
++	}
++	if operation != ProposalAppend && operation != ProposalRevoke {
++		return CommitWelcome{}, ErrInput
++	}
++	if len(proposals) == 0 {
++		return CommitWelcome{}, ErrInput
++	}
++	if len(proposals) >= c.cfg.MaxControlBytes || len(proposals) >= c.cfg.MaxProposalBytes {
++		return CommitWelcome{}, ErrBounds
++	}
++	if err := c.setParticipants(recognizedIDs); err != nil {
++		return CommitWelcome{}, err
++	}
++	recognized, release, err := recognizedArray(recognizedIDs)
++	if err != nil {
++		return CommitWelcome{}, err
++	}
++	defer release()
++	size := len(proposals) + 1
++	if len(c.proposalScratch) < size {
++		c.proposalScratch = make([]byte, size)
++	}
++	wire := c.proposalScratch[:size]
++	wire[0] = byte(operation)
++	copy(wire[1:], proposals)
++	var p *C.uint8_t
++	var n C.size_t
++	c.resetFailure()
++	C.daveSessionProcessProposals(c.session, pointer(wire), C.size_t(size), recognized,
++		C.size_t(len(recognizedIDs)), &p, &n)
++	runtime.KeepAlive(wire)
++	if err := c.checkNative(); err != nil {
++		if p != nil {
++			C.daveFree(unsafe.Pointer(p))
++		}
++		return CommitWelcome{}, err
++	}
++	result, err := c.copyOutput(p, n, false)
++	if err != nil {
++		return CommitWelcome{}, err
++	}
++	return CommitWelcome{Wire: result}, nil
++}
+diff --git a/internal/dave/transitions.go b/internal/dave/transitions.go
+new file mode 100644
+--- /dev/null
++++ b/internal/dave/transitions.go
+@@ -0,0 +1,464 @@
++//go:build voice && cgo
++
++package dave
++
++/*
++#include "bridge.h"
++*/
++import "C"
++
++import (
++	"context"
++	"runtime"
++	"strconv"
++	"time"
++	"unsafe"
++)
++
++func (c *Context) transitionAdmission(id uint16, bytes int) error {
++	if _, exists := c.transitions[id]; exists {
++		return ErrTransition
++	}
++	if len(c.transitions) >= c.cfg.MaxPreparedTransitions || bytes < 0 ||
++		bytes > c.cfg.MaxTransitionBytes-c.transitionBytes {
++		return ErrBounds
++	}
++	return nil
++}
++
++// applyRoster consumes the official CHANGES map, not a full-membership snapshot.
++// Empty member signatures indicate removals. Signatures stay native and are
++// freed without copying or exposing them outside this ownership boundary.
++func (c *Context) applyRoster(ids *C.uint64_t, count C.size_t, signature func(C.uint64_t, **C.uint8_t, *C.size_t)) error {
++	if ids != nil {
++		defer C.daveFree(unsafe.Pointer(ids))
++	}
++	// A change set can contain both all old removals and all new additions.
++	if count > C.size_t(c.cfg.MaxControlBytes/8) ||
++		uint64(count) > uint64(c.cfg.MaxParticipants)*2 {
++		return ErrBounds
++	}
++	if count != 0 && ids == nil {
++		return ErrNative
++	}
++	next := make(map[string]struct{}, len(c.roster))
++	for id := range c.roster {
++		next[id] = struct{}{}
++	}
++	for _, rawID := range unsafe.Slice(ids, int(count)) {
++		id := strconv.FormatUint(uint64(rawID), 10)
++		if !validID(id) {
++			return ErrNative
++		}
++		var p *C.uint8_t
++		var n C.size_t
++		signature(rawID, &p, &n)
++		if n > C.size_t(c.cfg.MaxControlBytes) || (n != 0 && p == nil) {
++			if p != nil {
++				C.daveFree(unsafe.Pointer(p))
++			}
++			return ErrBounds
++		}
++		if p != nil {
++			C.daveFree(unsafe.Pointer(p))
++		}
++		if n == 0 {
++			delete(next, id)
++			continue
++		}
++		if id != c.self {
++			if _, recognized := c.participants[id]; !recognized {
++				return ErrUnknownSender
++			}
++		}
++		next[id] = struct{}{}
++	}
++	if len(next) > c.cfg.MaxParticipants {
++		return ErrBounds
++	}
++	if _, exists := next[c.self]; !exists {
++		return ErrNative
++	}
++	c.roster = next
++	return nil
++}
++
++func (c *Context) ratchet(id string) (C.DAVEKeyRatchetHandle, error) {
++	user := C.CString(id)
++	if user == nil {
++		return nil, ErrNative
++	}
++	defer C.free(unsafe.Pointer(user))
++	h := C.daveSessionGetKeyRatchet(c.session, user)
++	if h == nil {
++		return nil, ErrNotReady
++	}
++	return h, nil
++}
++
++func (c *Context) snapshotTransition(id uint16, bytes int) error {
++	if err := c.transitionAdmission(id, bytes); err != nil {
++		return err
++	}
++	t := &transition{version: c.version, bytes: bytes, generation: c.generation,
++		receivers: make(map[string]C.DAVEKeyRatchetHandle)}
++	sender, err := c.ratchet(c.self)
++	if err != nil {
++		return err
++	}
++	t.sender = sender
++	for user := range c.roster {
++		if user == c.self {
++			continue
++		}
++		if _, recognized := c.participants[user]; !recognized {
++			continue
++		}
++		if len(t.receivers) >= c.cfg.MaxDecryptors {
++			destroyTransition(t)
++			return ErrBounds
++		}
++		h, err := c.ratchet(user)
++		if err != nil {
++			destroyTransition(t)
++			return err
++		}
++		t.receivers[user] = h
++	}
++	c.transitions[id] = t
++	c.transitionBytes += bytes
++	return nil
++}
++
++func (c *Context) ProcessCommit(ctx context.Context, transitionID uint16, commit []byte) (outcome CommitResult, resultErr error) {
++	if err := c.enter(ctx); err != nil {
++		return CommitFailed, err
++	}
++	defer c.mu.Unlock()
++	defer c.clearPendingResetOnError(&resultErr)
++	if !c.initialized {
++		return CommitFailed, ErrNotReady
++	}
++	if len(commit) == 0 || len(commit) > c.cfg.MaxControlBytes {
++		return CommitFailed, ErrBounds
++	}
++	if err := c.transitionAdmission(transitionID, len(commit)); err != nil {
++		return CommitFailed, err
++	}
++	if c.generation == ^uint64(0) {
++		return CommitFailed, ErrBounds
++	}
++	c.resetFailure()
++	result := C.daveSessionProcessCommit(c.session, pointer(commit), C.size_t(len(commit)))
++	runtime.KeepAlive(commit)
++	if result == nil {
++		return CommitFailed, ErrNative
++	}
++	defer C.daveCommitResultDestroy(result)
++	// The upstream ignored branch can invoke the failure callback. Check the
++	// semantic result first; ignored is explicitly not invalid-commit recovery.
++	if bool(C.daveCommitResultIsIgnored(result)) {
++		return CommitIgnored, nil
++	}
++	if bool(C.daveCommitResultIsFailed(result)) {
++		return CommitFailed, ErrNative
++	}
++	if err := c.checkNative(); err != nil {
++		return CommitFailed, err
++	}
++	var ids *C.uint64_t
++	var count C.size_t
++	C.daveCommitResultGetRosterMemberIds(result, &ids, &count)
++	if err := c.applyRoster(ids, count, func(id C.uint64_t, p **C.uint8_t, n *C.size_t) {
++		C.daveCommitResultGetRosterMemberSignature(result, id, p, n)
++	}); err != nil {
++		return CommitFailed, err
++	}
++	c.established = true
++	c.clearPendingReset()
++	c.generation++
++	if err := c.snapshotTransition(transitionID, len(commit)); err != nil {
++		return CommitFailed, err
++	}
++	return CommitApplied, nil
++}
++
++func (c *Context) ProcessWelcome(ctx context.Context, transitionID uint16, welcome []byte, recognizedIDs []string) (resultErr error) {
++	if err := c.enter(ctx); err != nil {
++		return err
++	}
++	defer c.mu.Unlock()
++	defer c.clearPendingResetOnError(&resultErr)
++	if !c.initialized {
++		return ErrNotReady
++	}
++	if len(welcome) == 0 || len(welcome) > c.cfg.MaxControlBytes {
++		return ErrBounds
++	}
++	if err := c.transitionAdmission(transitionID, len(welcome)); err != nil {
++		return err
++	}
++	if c.generation == ^uint64(0) {
++		return ErrBounds
++	}
++	if err := c.setParticipants(recognizedIDs); err != nil {
++		return err
++	}
++	recognized, release, err := recognizedArray(recognizedIDs)
++	if err != nil {
++		return err
++	}
++	defer release()
++	c.resetFailure()
++	result := C.daveSessionProcessWelcome(c.session, pointer(welcome), C.size_t(len(welcome)),
++		recognized, C.size_t(len(recognizedIDs)))
++	runtime.KeepAlive(welcome)
++	if result == nil {
++		return ErrNative
++	}
++	defer C.daveWelcomeResultDestroy(result)
++	if err := c.checkNative(); err != nil {
++		return err
++	}
++	var ids *C.uint64_t
++	var count C.size_t
++	C.daveWelcomeResultGetRosterMemberIds(result, &ids, &count)
++	if err := c.applyRoster(ids, count, func(id C.uint64_t, p **C.uint8_t, n *C.size_t) {
++		C.daveWelcomeResultGetRosterMemberSignature(result, id, p, n)
++	}); err != nil {
++		return err
++	}
++	c.established = true
++	c.clearPendingReset()
++	c.generation++
++	return c.snapshotTransition(transitionID, len(welcome))
++}
++
++func (c *Context) expireReceivers(now time.Time) {
++	for user, r := range c.receivers {
++		if !r.retired.IsZero() && !r.retired.After(now) {
++			C.daveDecryptorDestroy(r.handle)
++			delete(c.receivers, user)
++		}
++	}
++}
++
++func (c *Context) prepareReceivers(id uint16) error {
++	t := c.transitions[id]
++	if t == nil || t.generation < c.receivingGeneration {
++		return ErrTransition
++	}
++	if t.prepared {
++		return nil
++	}
++	now := time.Now()
++	c.expireReceivers(now)
++	additional := 0
++	for user := range t.receivers {
++		if _, recognized := c.participants[user]; !recognized {
++			continue
++		}
++		if r := c.receivers[user]; r != nil {
++			if r.generation == t.generation && r.retired.IsZero() {
++				continue
++			}
++			first := 0
++			for first < len(r.epochs) && !r.epochs[first].IsZero() && !r.epochs[first].After(now) {
++				first++
++			}
++			copy(r.epochs, r.epochs[first:])
++			r.epochs = r.epochs[:len(r.epochs)-first]
++			if len(r.epochs) >= c.cfg.MaxPreparedTransitions {
++				return ErrBounds
++			}
++		} else {
++			additional++
++		}
++	}
++	if additional > c.cfg.MaxDecryptors-len(c.receivers) {
++		return ErrBounds
++	}
++	// Allocate all required decryptors before mutating any existing ratchets.
++	created := make(map[string]*receiver, additional)
++	for user := range t.receivers {
++		if _, recognized := c.participants[user]; !recognized {
++			continue
++		}
++		if c.receivers[user] != nil {
++			continue
++		}
++		h := C.daveDecryptorCreate()
++		if h == nil {
++			for _, r := range created {
++				C.daveDecryptorDestroy(r.handle)
++			}
++			return ErrNative
++		}
++		// Native default is no passthrough. Never turn it on.
++		created[user] = &receiver{handle: h}
++	}
++	for user, r := range created {
++		c.receivers[user] = r
++	}
++	for user, r := range c.receivers {
++		if _, member := t.receivers[user]; member || !r.retired.IsZero() {
++			continue
++		}
++		// Removal expires the former active domain using the same official
++		// ten-second transition facility, without admitting plaintext.
++		C.daveDecryptorTransitionToKeyRatchet(r.handle, nil)
++		r.retired = now.Add(receiverTransitionWindow)
++		for i := range r.epochs {
++			if r.epochs[i].IsZero() {
++				r.epochs[i] = r.retired
++			}
++		}
++	}
++	for user, ratchet := range t.receivers {
++		if _, recognized := c.participants[user]; recognized {
++			r := c.receivers[user]
++			if r.generation != t.generation || !r.retired.IsZero() {
++				// The C ABI copies the key domain; input remains ours.
++				C.daveDecryptorTransitionToKeyRatchet(r.handle, ratchet)
++				for i := range r.epochs {
++					if r.epochs[i].IsZero() {
++						r.epochs[i] = now.Add(receiverTransitionWindow)
++					}
++				}
++				r.epochs = append(r.epochs, time.Time{})
++				r.generation, r.retired = t.generation, time.Time{}
++			}
++		}
++		C.daveKeyRatchetDestroy(ratchet)
++		delete(t.receivers, user)
++	}
++	c.receivingGeneration = t.generation
++	t.prepared = true
++	return nil
++}
++
++func (c *Context) PrepareReceivers(ctx context.Context, transitionID uint16) (resultErr error) {
++	if err := c.enter(ctx); err != nil {
++		return err
++	}
++	defer c.mu.Unlock()
++	defer c.clearPendingResetOnError(&resultErr)
++	if err := c.prepareReceivers(transitionID); err != nil {
++		return err
++	}
++	if transitionID == 0 {
++		return c.executeTransition(transitionID)
++	}
++	return nil
++}
++
++// PrepareTransition handles opcode 21, including immediate transition zero. A
++// commit/welcome transition has already snapshotted its own native key domains.
++func (c *Context) PrepareTransition(ctx context.Context, transitionID, version uint16) (resultErr error) {
++	if err := c.enter(ctx); err != nil {
++		return err
++	}
++	defer c.mu.Unlock()
++	defer c.clearPendingResetOnError(&resultErr)
++	if !c.initialized {
++		return ErrNotReady
++	}
++	if version == 0 || version > MaxSupportedProtocolVersion() {
++		return ErrUnsupported
++	}
++	if transitionID != 0 {
++		c.clearPendingReset()
++	}
++	if t := c.transitions[transitionID]; t != nil {
++		if t.version != version {
++			return ErrTransition
++		}
++	} else {
++		C.daveSessionSetProtocolVersion(c.session, C.uint16_t(version))
++		c.version = version
++		if transitionID == 0 && !c.established {
++			if c.active && c.activeGeneration == c.generation && c.activeID == 0 {
++				c.clearPendingReset()
++				return nil
++			}
++			if c.pendingResetGeneration != c.generation || c.pendingResetVersion != version {
++				return ErrNotReady
++			}
++			if c.keyPackageGeneration != c.generation || len(c.participants) != 1 {
++				return ErrNotReady
++			}
++			if _, soleSelf := c.participants[c.self]; !soleSelf {
++				return ErrNotReady
++			}
++			c.clearPendingReset()
++			if !bool(C.flexDaveSessionActivatePendingGroup(c.session)) {
++				return ErrNotReady
++			}
++		}
++		if err := c.snapshotTransition(transitionID, 0); err != nil {
++			return err
++		}
++	}
++	if err := c.prepareReceivers(transitionID); err != nil {
++		return err
++	}
++	if transitionID == 0 {
++		return c.executeTransition(transitionID)
++	}
++	return nil
++}
++
++func (c *Context) executeTransition(id uint16) error {
++	t := c.transitions[id]
++	if t == nil {
++		if c.active && c.activeID == id {
++			return nil
++		}
++		return ErrTransition
++	}
++	if !t.prepared || t.sender == nil {
++		return ErrNotReady
++	}
++	if t.generation < c.activeGeneration {
++		return ErrTransition
++	}
++	if t.generation != c.activeGeneration {
++		C.daveEncryptorSetKeyRatchet(c.encryptor, t.sender)
++	}
++	C.daveKeyRatchetDestroy(t.sender)
++	t.sender = nil
++	if !bool(C.daveEncryptorHasKeyRatchet(c.encryptor)) || bool(C.daveEncryptorIsPassthroughMode(c.encryptor)) {
++		return ErrNative
++	}
++	c.active, c.activeID = true, id
++	c.activeGeneration = t.generation
++	c.transitionBytes -= t.bytes
++	destroyTransition(t)
++	delete(c.transitions, id)
++	// An executed newer domain makes older prepared sender contexts obsolete.
++	// Receiver in-flight retention remains in the official decryptors.
++	for oldID, old := range c.transitions {
++		if old.generation < c.activeGeneration {
++			c.transitionBytes -= old.bytes
++			destroyTransition(old)
++			delete(c.transitions, oldID)
++		}
++	}
++	return nil
++}
++
++func (c *Context) ExecuteTransition(ctx context.Context, transitionID uint16) (resultErr error) {
++	if err := c.enter(ctx); err != nil {
++		return err
++	}
++	defer c.mu.Unlock()
++	defer c.clearPendingResetOnError(&resultErr)
++	return c.executeTransition(transitionID)
++}
++
++func (c *Context) Ready() bool {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	return !c.closed && c.active && bool(C.daveEncryptorHasKeyRatchet(c.encryptor)) &&
++		!bool(C.daveEncryptorIsPassthroughMode(c.encryptor))
++}
+diff --git a/voice.go b/voice.go
+--- a/voice.go
++++ b/voice.go
+@@ -1,1003 +1,409 @@
+ // Discordgo - Discord bindings for Go
+-// Available at https://github.com/bwmarrin/discordgo
+-
+-// Copyright 2015-2016 Bruce Marriner <bruce@sqls.net>.  All rights reserved.
+-// Use of this source code is governed by a BSD-style
+-// license that can be found in the LICENSE file.
+-
+-// This file contains code related to Discord voice suppport
+-
++// Copyright 2015-2016 Bruce Marriner. BSD-style license; see LICENSE.
+ package discordgo
+ 
+ import (
+-	"crypto/aes"
+-	"crypto/cipher"
+-	"encoding/binary"
+-	"encoding/json"
++	"context"
++	"errors"
+ 	"fmt"
+-	"net"
+-	"strconv"
+-	"strings"
+ 	"sync"
+ 	"time"
+-
+-	"github.com/gorilla/websocket"
+ )
+ 
+-// ------------------------------------------------------------------------------------------------
+-// Code related to both VoiceConnection Websocket and UDP connections.
+-// ------------------------------------------------------------------------------------------------
+-
+-// A VoiceConnection struct holds all the data and functions related to a Discord Voice Connection.
++var ErrVoiceUnavailable = errors.New("VOICE_TRANSPORT_UNSUPPORTED: build with voice and cgo and link pinned libdave")
++var ErrVoiceClosed = errors.New("voice connection closed")
++var ErrVoiceNotReady = errors.New("DAVE_NOT_READY")
++var ErrVoiceInFlight = errors.New("voice submission already outstanding")
++
++var ErrVoiceChannelChanged = errors.New("voice channel or server generation changed")
++var ErrVoicePermissionDenied = errors.New("Discord voice handshake permission denied")
++var ErrVoiceDAVETimeout = fmt.Errorf("DAVE_NOT_READY: %w", context.DeadlineExceeded)
++
++// VoiceConfig deliberately has no defaults. All resource limits and deadlines
++// must be supplied by the host; ordinary Gateway use does not require it.
++type VoiceConfig struct {
++	MaxWebSocketBytes      int           `json:"max_websocket_bytes"`
++	MaxControlMessages     int           `json:"max_control_messages"`
++	MaxParticipants        int           `json:"max_participants"`
++	MaxDecryptors          int           `json:"max_decryptors"`
++	MaxProposalBytes       int           `json:"max_proposal_bytes"`
++	MaxProposals           int           `json:"max_proposals"`
++	MaxTransitions         int           `json:"max_transitions"`
++	MaxTransitionBytes     int           `json:"max_transition_bytes"`
++	MaxOpusBytes           int           `json:"max_opus_bytes"`
++	MaxEncryptedFrameBytes int           `json:"max_encrypted_frame_bytes"`
++	MaxUDPPacketBytes      int           `json:"max_udp_packet_bytes"`
++	ReceiveQueuePackets    int           `json:"receive_queue_packets"`
++	ReceiveQueueBytes      int           `json:"receive_queue_bytes"`
++	HandshakeTimeout       time.Duration `json:"handshake_timeout"`
++	RekeyTimeout           time.Duration `json:"rekey_timeout"`
++	WriteTimeout           time.Duration `json:"write_timeout"`
++	UDPDiscoveryTimeout    time.Duration `json:"udp_discovery_timeout"`
++	UDPKeepAliveInterval   time.Duration `json:"udp_keepalive_interval"`
++	HeartbeatTimeout       time.Duration `json:"heartbeat_timeout"`
++	SubmitTimeout          time.Duration `json:"submit_timeout"`
++	ReceiptTimeout         time.Duration `json:"receipt_timeout"`
++	CloseTimeout           time.Duration `json:"close_timeout"`
++}
++
++func (c VoiceConfig) Validate() error {
++	for _, n := range []int{c.MaxWebSocketBytes, c.MaxControlMessages, c.MaxParticipants, c.MaxDecryptors, c.MaxProposalBytes, c.MaxProposals, c.MaxTransitions, c.MaxTransitionBytes, c.MaxOpusBytes, c.MaxEncryptedFrameBytes, c.MaxUDPPacketBytes, c.ReceiveQueuePackets, c.ReceiveQueueBytes} {
++		if n <= 0 {
++			return errors.New("voice resource bounds must be explicit positive integers")
++		}
++	}
++	for _, d := range []time.Duration{c.HandshakeTimeout, c.RekeyTimeout, c.WriteTimeout, c.UDPDiscoveryTimeout, c.UDPKeepAliveInterval, c.HeartbeatTimeout, c.SubmitTimeout, c.ReceiptTimeout, c.CloseTimeout} {
++		if d <= 0 {
++			return errors.New("voice deadlines must be explicit positive durations")
++		}
++	}
++	if c.MaxUDPPacketBytes > 65507 || c.MaxUDPPacketBytes < 74 || c.MaxEncryptedFrameBytes > c.MaxUDPPacketBytes-32 || c.MaxOpusBytes > c.MaxEncryptedFrameBytes || c.ReceiveQueueBytes < c.MaxOpusBytes || c.MaxTransitionBytes < c.MaxProposalBytes || c.MaxWebSocketBytes < 3 || c.MaxProposalBytes > c.MaxWebSocketBytes-3 {
++		return errors.New("inconsistent voice resource bounds")
++	}
++	return nil
++}
++
++type OpusWriteResult struct {
++	Err       error
++	WrittenAt time.Time
++}
++type OpusSubmission struct{ done chan OpusWriteResult }
++
++func (s *OpusSubmission) Done() <-chan OpusWriteResult { return s.done }
++
++// Packet owns immutable encoded Opus. ReceiveOpus returns no PCM or key material.
++type Packet struct {
++	SSRC       uint32
++	Sequence   uint16
++	Timestamp  uint32
++	Opus       []byte
++	ReceivedAt time.Time
++}
++
++type voiceEngine interface {
++	run(context.Context) error
++	submit(context.Context, []byte) (*OpusSubmission, error)
++	receive(context.Context) (*Packet, error)
++	stop(error)
++	wait(context.Context) error
++	shutdown(context.Context) error
++	ready() bool
++	changed() <-chan struct{}
++	done() <-chan struct{}
++	err() error
++}
++
++// VoiceConnection is host-owned and fixed to one guild/channel generation.
++// No public send/receive channels or channel-moving operation exist.
+ type VoiceConnection struct {
+ 	sync.RWMutex
+-
+-	Debug        bool // If true, print extra logging -- DEPRECATED
+-	LogLevel     int
+-	Ready        bool // If true, voice is ready to send/receive audio
+-	UserID       string
+-	GuildID      string
+-	ChannelID    string
+-	deaf         bool
+-	mute         bool
+-	speaking     bool
+-	reconnecting bool // If true, voice connection is trying to reconnect
+-
+-	OpusSend chan []byte  // Chan for sending opus audio
+-	OpusRecv chan *Packet // Chan for receiving opus audio
+-
+-	wsConn  *websocket.Conn
+-	wsMutex sync.Mutex
+-	udpConn *net.UDPConn
+-	session *Session
+-
+-	sessionID string
+-	token     string
+-	endpoint  string
+-
+-	// Used to send a close signal to goroutines
+-	close chan struct{}
+-
+-	// Used to allow blocking until connected
+-	connected chan bool
+-
+-	// Used to pass the sessionid from onVoiceStateUpdate
+-	// sessionRecv chan string UNUSED ATM
+-
+-	aead         cipher.AEAD
+-	nonceCounter uint32
+-
+-	op4 voiceOP4
+-	op2 voiceOP2
+-
+-	voiceSpeakingUpdateHandlers []VoiceSpeakingUpdateHandler
+-}
+-
+-// VoiceSpeakingUpdateHandler type provides a function definition for the
+-// VoiceSpeakingUpdate event
+-type VoiceSpeakingUpdateHandler func(vc *VoiceConnection, vs *VoiceSpeakingUpdate)
+-
+-// Speaking sends a speaking notification to Discord over the voice websocket.
+-// This must be sent as true prior to sending audio and should be set to false
+-// once finished sending audio.
+-// b : Send true if speaking, false if not.
+-func (v *VoiceConnection) Speaking(b bool) (err error) {
+-
+-	v.log(LogDebug, "called (%t)", b)
+-
+-	type voiceSpeakingData struct {
+-		Speaking bool `json:"speaking"`
+-		Delay    int  `json:"delay"`
+-	}
+-
+-	type voiceSpeakingOp struct {
+-		Op   int               `json:"op"` // Always 5
+-		Data voiceSpeakingData `json:"d"`
+-	}
+-
+-	if v.wsConn == nil {
+-		return fmt.Errorf("no VoiceConnection websocket")
+-	}
+-
+-	data := voiceSpeakingOp{5, voiceSpeakingData{b, 0}}
+-	v.wsMutex.Lock()
+-	err = v.wsConn.WriteJSON(data)
+-	v.wsMutex.Unlock()
+-
+-	v.Lock()
+-	defer v.Unlock()
++	LogLevel                   int
++	GuildID, ChannelID, UserID string
++	session                    *Session
++	config                     VoiceConfig
++	engine                     voiceEngine
++	credentials                chan struct{}
++	sessionID, token, endpoint string
++	mute, deaf                 bool
++	started                    bool
++	disconnectGate             gatewayMutex
++	disconnected               bool
++	disconnectErr              error
++	localClosed                bool
++	releaseOnClose             bool
++	leaveAck                   chan struct{}
++	leaveConfirmed             bool
++}
++
++// ChannelVoiceJoinContext reserves a fresh connection. It never reuses or moves
++// another channel's connection, resumes a lost transport, or retries a frame.
++func (s *Session) ChannelVoiceJoinContext(ctx context.Context, guildID, channelID string, mute, deaf bool, config VoiceConfig) (*VoiceConnection, error) {
++	if !VoiceAvailable() {
++		return nil, ErrVoiceUnavailable
++	}
++	if err := config.Validate(); err != nil {
++		return nil, err
++	}
++	if guildID == "" || channelID == "" {
++		return nil, errors.New("guild and channel required")
++	}
++	if err := ctx.Err(); err != nil {
++		return nil, err
++	}
++	s.RLock()
++	state := s.State
++	s.RUnlock()
++	if state == nil {
++		return nil, errors.New("voice requires main Gateway identity")
++	}
++	state.RLock()
++	user := state.User
++	userID := ""
++	if user != nil {
++		userID = user.ID
++	}
++	state.RUnlock()
++	if userID == "" {
++		return nil, errors.New("voice requires authenticated bot identity")
++	}
++	v := &VoiceConnection{session: s, config: config, GuildID: guildID, ChannelID: channelID, UserID: userID, mute: mute, deaf: deaf, credentials: make(chan struct{}, 1)}
++	s.Lock()
++	if s.VoiceConnections == nil {
++		s.VoiceConnections = make(map[string]*VoiceConnection)
++	}
++	if s.VoiceConnections[guildID] != nil {
++		s.Unlock()
++		return nil, errors.New("voice guild already reserved")
++	}
++	engine, err := newVoiceEngine(v)
+ 	if err != nil {
+-		v.speaking = false
+-		v.log(LogError, "Speaking() write json error, %s", err)
++		s.Unlock()
++		return nil, err
++	}
++	v.engine = engine
++	s.VoiceConnections[guildID] = v
++	s.Unlock()
++	joinCtx, cancel := context.WithTimeout(ctx, config.HandshakeTimeout)
++	defer cancel()
++	err = engine.run(joinCtx)
++	if err != nil {
++		cleanup, c := context.WithTimeout(context.Background(), config.CloseTimeout)
++		defer c()
++		cleanupErr := v.DisconnectContext(cleanup)
++		return nil, errors.Join(err, cleanupErr)
++	}
++	return v, nil
++}
++
++// VoiceGatewayDispatch consumes host-private main Gateway voice events. Hosts
++// may call this from their ordered raw observer; it performs no network I/O.
++func (s *Session) VoiceGatewayDispatch(e *Event) error {
++	if e == nil {
++		return nil
++	}
++	switch x := e.Struct.(type) {
++	case *VoiceStateUpdate:
++		return s.acceptVoiceState(x)
++	case *VoiceServerUpdate:
++		return s.acceptVoiceServer(x)
++	}
++	return nil
++}
++func (s *Session) acceptVoiceState(x *VoiceStateUpdate) error {
++	if x == nil || x.VoiceState == nil {
++		return errors.New("invalid voice state")
++	}
++	s.RLock()
++	v := s.VoiceConnections[x.GuildID]
++	s.RUnlock()
++	if v == nil || x.UserID != v.UserID {
++		return nil
++	}
++	v.Lock()
++	// Only an explicitly requested retirement may consume a null-channel
++	// update. Keep that generation indexed through ordered host observation.
++	if x.ChannelID == "" && v.leaveAck != nil {
++		first := !v.leaveConfirmed
++		if first {
++			v.leaveConfirmed = true
++			close(v.leaveAck)
++		}
++		release := first && v.localClosed && v.releaseOnClose
++		v.Unlock()
++		if release {
++			go v.removeReservation()
++		}
++		return nil
++	}
++	if x.ChannelID != v.ChannelID || (v.sessionID != "" && v.sessionID != x.SessionID) {
++		v.Unlock()
++		v.engine.stop(ErrVoiceChannelChanged)
++		return ErrVoiceChannelChanged
++	}
++	v.sessionID = x.SessionID
++	v.Unlock()
++	v.signalCredentials()
++	return nil
++}
++func (s *Session) acceptVoiceServer(x *VoiceServerUpdate) error {
++	if x == nil {
++		return errors.New("invalid voice server")
++	}
++	s.RLock()
++	v := s.VoiceConnections[x.GuildID]
++	s.RUnlock()
++	if v == nil {
++		return nil
++	}
++	v.Lock()
++	if x.Endpoint == "" || (v.started && (v.endpoint != x.Endpoint || v.token != x.Token)) {
++		v.Unlock()
++		v.engine.stop(ErrVoiceChannelChanged)
++		return ErrVoiceChannelChanged
++	}
++	v.endpoint = x.Endpoint
++	v.token = x.Token
++	v.Unlock()
++	v.signalCredentials()
++	return nil
++}
++func (v *VoiceConnection) signalCredentials() {
++	select {
++	case v.credentials <- struct{}{}:
++	default:
++	}
++}
++func (v *VoiceConnection) SubmitOpus(ctx context.Context, p []byte) (*OpusSubmission, error) {
++	if v == nil || v.engine == nil {
++		return nil, ErrVoiceUnavailable
++	}
++	return v.engine.submit(ctx, p)
++}
++func (v *VoiceConnection) ReceiveOpus(ctx context.Context) (*Packet, error) {
++	if v == nil || v.engine == nil {
++		return nil, ErrVoiceUnavailable
++	}
++	return v.engine.receive(ctx)
++}
++func (v *VoiceConnection) ReadyState() bool                  { return v != nil && v.engine != nil && v.engine.ready() }
++func (v *VoiceConnection) ReadinessChanged() <-chan struct{} { return v.engine.changed() }
++func (v *VoiceConnection) WaitReady(ctx context.Context) error {
++	for {
++		ch := v.ReadinessChanged()
++		if err := v.Err(); err != nil {
++			return err
++		}
++		if v.ReadyState() {
++			return nil
++		}
++		select {
++		case <-ch:
++		case <-v.Done():
++			return v.Err()
++		case <-ctx.Done():
++			return ctx.Err()
++		}
++	}
++}
++func (v *VoiceConnection) SetStateContext(ctx context.Context, mute, deaf bool) error {
++	if err := v.Err(); err != nil {
++		return err
++	}
++	if err := v.session.ChannelVoiceJoinManualContext(ctx, v.GuildID, v.ChannelID, mute, deaf); err != nil {
++		return err
++	}
++	v.Lock()
++	v.mute = mute
++	v.deaf = deaf
++	v.Unlock()
++	return nil
++}
++func (v *VoiceConnection) CloseContext(ctx context.Context) error { return v.engine.shutdown(ctx) }
++func (v *VoiceConnection) DisconnectContext(ctx context.Context) error {
++	ctx, cancel := context.WithTimeout(ctx, v.config.CloseTimeout)
++	defer cancel()
++	if err := v.disconnectGate.lockContext(ctx); err != nil {
++		return err
++	}
++	defer v.disconnectGate.Unlock()
++	if v.disconnected {
++		return v.disconnectErr
++	}
++	closeErr := v.engine.shutdown(ctx)
++	v.session.RLock()
++	owned := v.session.VoiceConnections[v.GuildID] == v
++	v.session.RUnlock()
++	var leave error
++	v.Lock()
++	ack := v.leaveAck
++	v.Unlock()
++	// A stale handle may never disconnect a later generation. Retain this
++	// reservation until both local cleanup and the ordered leave event finish.
++	if owned && ack == nil {
++		ack = make(chan struct{})
++		v.Lock()
++		v.leaveAck = ack
++		v.Unlock()
++		leave = v.session.ChannelVoiceJoinManualContext(ctx, v.GuildID, "", true, true)
++		if leave != nil {
++			v.Lock()
++			v.leaveAck = nil
++			v.leaveConfirmed = false
++			v.Unlock()
++		}
++	}
++	v.requestDisconnectRelease()
++	wait := v.engine.wait(ctx)
++	var confirmation error
++	if leave == nil && ack != nil {
++		select {
++		case <-ack:
++		default:
++			select {
++			case <-ack:
++			case <-ctx.Done():
++				confirmation = ctx.Err()
++			}
++		}
++	}
++	result := errors.Join(closeErr, leave, wait, confirmation)
++	if wait == nil && confirmation == nil {
++		v.disconnected = true
++		v.disconnectErr = result
++		v.removeReservation()
++	}
++	return result
++}
++func (v *VoiceConnection) Disconnect() error {
++	ctx, c := context.WithTimeout(context.Background(), v.config.CloseTimeout)
++	defer c()
++	return v.DisconnectContext(ctx)
++}
++func (v *VoiceConnection) Close() {
++	ctx, c := context.WithTimeout(context.Background(), v.config.CloseTimeout)
++	defer c()
++	_ = v.CloseContext(ctx)
++}
++func (v *VoiceConnection) String() string {
++	return fmt.Sprintf("VoiceConnection(guild=%s,channel=%s)", v.GuildID, v.ChannelID)
++}
++
++// Done closes only after media goroutines and native owners have been joined.
++// Err and ReadinessChanged report failure immediately, before cleanup completes.
++func (v *VoiceConnection) Done() <-chan struct{} { return v.engine.done() }
++func (v *VoiceConnection) Err() error            { return v.engine.err() }
++func (v *VoiceConnection) removeReservation() {
++	// onInterface and the host observer consume the same Gateway event. Do not
++	// expose a replacement between those two deliveries of the old leave.
++	v.session.dispatchSerial.Lock()
++	defer v.session.dispatchSerial.Unlock()
++	v.RLock()
++	release := v.localClosed && v.releaseOnClose && (v.leaveAck == nil || v.leaveConfirmed)
++	v.RUnlock()
++	if !release {
+ 		return
+ 	}
+-
+-	v.speaking = b
+-
+-	return
+-}
+-
+-// ChangeChannel sends Discord a request to change channels within a Guild
+-// !!! NOTE !!! This function may be removed in favour of just using ChannelVoiceJoin
+-func (v *VoiceConnection) ChangeChannel(channelID string, mute, deaf bool) (err error) {
+-
+-	v.log(LogInformational, "called")
+-
+-	data := voiceChannelJoinOp{4, voiceChannelJoinData{&v.GuildID, &channelID, mute, deaf}}
+-	v.session.wsMutex.Lock()
+-	err = v.session.wsConn.WriteJSON(data)
+-	v.session.wsMutex.Unlock()
+-	if err != nil {
+-		return
+-	}
+-	v.ChannelID = channelID
+-	v.deaf = deaf
+-	v.mute = mute
+-	v.speaking = false
+-
+-	return
+-}
+-
+-// Disconnect disconnects from this voice channel and closes the websocket
+-// and udp connections to Discord.
+-func (v *VoiceConnection) Disconnect() (err error) {
+-
+-	// Send a OP4 with a nil channel to disconnect
+-	v.Lock()
+-	if v.sessionID != "" {
+-		data := voiceChannelJoinOp{4, voiceChannelJoinData{&v.GuildID, nil, true, true}}
+-		v.session.wsMutex.Lock()
+-		err = v.session.wsConn.WriteJSON(data)
+-		v.session.wsMutex.Unlock()
+-		v.sessionID = ""
+-	}
+-	v.Unlock()
+-
+-	// Close websocket and udp connections
+-	v.Close()
+-
+-	v.log(LogInformational, "Deleting VoiceConnection %s", v.GuildID)
+-
+ 	v.session.Lock()
+-	delete(v.session.VoiceConnections, v.GuildID)
++	if v.session.VoiceConnections[v.GuildID] == v {
++		delete(v.session.VoiceConnections, v.GuildID)
++	}
+ 	v.session.Unlock()
+-
+-	return
+-}
+-
+-// Close closes the voice ws and udp connections
+-func (v *VoiceConnection) Close() {
+-
+-	v.log(LogInformational, "called")
+-
+-	v.Lock()
+-	defer v.Unlock()
+-
+-	v.Ready = false
+-	v.speaking = false
+-
+-	if v.close != nil {
+-		v.log(LogInformational, "closing v.close")
+-		close(v.close)
+-		v.close = nil
+-	}
+-
+-	if v.udpConn != nil {
+-		v.log(LogInformational, "closing udp")
+-		err := v.udpConn.Close()
+-		if err != nil {
+-			v.log(LogError, "error closing udp connection, %s", err)
+-		}
+-		v.udpConn = nil
+-	}
+-
+-	if v.wsConn != nil {
+-		v.log(LogInformational, "sending close frame")
+-
+-		// To cleanly close a connection, a client should send a close
+-		// frame and wait for the server to close the connection.
+-		v.wsMutex.Lock()
+-		err := v.wsConn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+-		v.wsMutex.Unlock()
+-		if err != nil {
+-			v.log(LogError, "error closing websocket, %s", err)
+-		}
+-
+-		// TODO: Wait for Discord to actually close the connection.
+-		time.Sleep(1 * time.Second)
+-
+-		v.log(LogInformational, "closing websocket")
+-		err = v.wsConn.Close()
+-		if err != nil {
+-			v.log(LogError, "error closing websocket, %s", err)
+-		}
+-
+-		v.wsConn = nil
+-	}
+-}
+-
+-// AddHandler adds a Handler for VoiceSpeakingUpdate events.
+-func (v *VoiceConnection) AddHandler(h VoiceSpeakingUpdateHandler) {
+-	v.Lock()
+-	defer v.Unlock()
+-
+-	v.voiceSpeakingUpdateHandlers = append(v.voiceSpeakingUpdateHandlers, h)
+-}
+-
+-// VoiceSpeakingUpdate is a struct for a VoiceSpeakingUpdate event.
+-type VoiceSpeakingUpdate struct {
+-	UserID   string `json:"user_id"`
+-	SSRC     int    `json:"ssrc"`
+-	Speaking bool   `json:"speaking"`
+-}
+-
+-// ------------------------------------------------------------------------------------------------
+-// Unexported Internal Functions Below.
+-// ------------------------------------------------------------------------------------------------
+-
+-// A voiceOP4 stores the data for the voice operation 4 websocket event
+-// which provides us with the NaCl SecretBox encryption key
+-type voiceOP4 struct {
+-	SecretKey [32]byte `json:"secret_key"`
+-	Mode      string   `json:"mode"`
+-}
+-
+-// A voiceOP2 stores the data for the voice operation 2 websocket event
+-// which is sort of like the voice READY packet
+-type voiceOP2 struct {
+-	SSRC              uint32        `json:"ssrc"`
+-	Port              int           `json:"port"`
+-	Modes             []string      `json:"modes"`
+-	HeartbeatInterval time.Duration `json:"heartbeat_interval"`
+-	IP                string        `json:"ip"`
+-}
+-
+-// WaitUntilConnected waits for the Voice Connection to
+-// become ready, if it does not become ready it returns an err
+-func (v *VoiceConnection) waitUntilConnected() error {
+-
+-	v.log(LogInformational, "called")
+-
+-	i := 0
+-	for {
+-		v.RLock()
+-		ready := v.Ready
+-		v.RUnlock()
+-		if ready {
+-			return nil
+-		}
+-
+-		if i > 10 {
+-			return fmt.Errorf("timeout waiting for voice")
+-		}
+-
+-		time.Sleep(1 * time.Second)
+-		i++
+-	}
+-}
+-
+-// Open opens a voice connection.  This should be called
+-// after VoiceChannelJoin is used and the data VOICE websocket events
+-// are captured.
+-func (v *VoiceConnection) open() (err error) {
+-
+-	v.log(LogInformational, "called")
+-
+-	v.Lock()
+-	defer v.Unlock()
+-
+-	// Don't open a websocket if one is already open
+-	if v.wsConn != nil {
+-		v.log(LogWarning, "refusing to overwrite non-nil websocket")
+-		return
+-	}
+-
+-	// TODO temp? loop to wait for the SessionID
+-	i := 0
+-	for {
+-		if v.sessionID != "" {
+-			break
+-		}
+-
+-		if i > 20 { // only loop for up to 1 second total
+-			return fmt.Errorf("did not receive voice Session ID in time")
+-		}
+-		// Release the lock, so sessionID can be populated upon receiving a VoiceStateUpdate event.
+-		v.Unlock()
+-		time.Sleep(50 * time.Millisecond)
+-		i++
+-		v.Lock()
+-	}
+-
+-	// Connect to VoiceConnection Websocket
+-	vg := "wss://" + strings.TrimSuffix(v.endpoint, ":80")
+-	v.log(LogInformational, "connecting to voice endpoint %s", vg)
+-	v.wsConn, _, err = v.session.Dialer.Dial(vg, nil)
+-	if err != nil {
+-		v.log(LogWarning, "error connecting to voice endpoint %s, %s", vg, err)
+-		v.log(LogDebug, "voice struct: %#v\n", v)
+-		return
+-	}
+-
+-	type voiceHandshakeData struct {
+-		ServerID  string `json:"server_id"`
+-		UserID    string `json:"user_id"`
+-		SessionID string `json:"session_id"`
+-		Token     string `json:"token"`
+-	}
+-	type voiceHandshakeOp struct {
+-		Op   int                `json:"op"` // Always 0
+-		Data voiceHandshakeData `json:"d"`
+-	}
+-	data := voiceHandshakeOp{0, voiceHandshakeData{v.GuildID, v.UserID, v.sessionID, v.token}}
+-
+-	v.wsMutex.Lock()
+-	err = v.wsConn.WriteJSON(data)
+-	v.wsMutex.Unlock()
+-	if err != nil {
+-		v.log(LogWarning, "error sending init packet, %s", err)
+-		return
+-	}
+-
+-	v.close = make(chan struct{})
+-	go v.wsListen(v.wsConn, v.close)
+-
+-	// add loop/check for Ready bool here?
+-	// then return false if not ready?
+-	// but then wsListen will also err.
+-
+-	return
+-}
+-
+-// wsListen listens on the voice websocket for messages and passes them
+-// to the voice event handler.  This is automatically called by the Open func
+-func (v *VoiceConnection) wsListen(wsConn *websocket.Conn, close <-chan struct{}) {
+-
+-	v.log(LogInformational, "called")
+-
+-	for {
+-		_, message, err := v.wsConn.ReadMessage()
+-		if err != nil {
+-			// 4014 indicates a manual disconnection by someone in the guild;
+-			// we shouldn't reconnect.
+-			if websocket.IsCloseError(err, 4014) {
+-				v.log(LogInformational, "received 4014 manual disconnection")
+-
+-				// Abandon the voice WS connection
+-				v.Lock()
+-				v.wsConn = nil
+-				v.Unlock()
+-
+-				// Wait for VOICE_SERVER_UPDATE.
+-				// When the bot is moved by the user to another voice channel,
+-				// VOICE_SERVER_UPDATE is received after the code 4014.
+-				for i := 0; i < 5; i++ { // TODO: temp, wait for VoiceServerUpdate.
+-					<-time.After(1 * time.Second)
+-
+-					v.RLock()
+-					reconnected := v.wsConn != nil
+-					v.RUnlock()
+-					if !reconnected {
+-						continue
+-					}
+-					v.log(LogInformational, "successfully reconnected after 4014 manual disconnection")
+-					return
+-				}
+-
+-				// When VOICE_SERVER_UPDATE is not received, disconnect as usual.
+-				v.log(LogInformational, "disconnect due to 4014 manual disconnection")
+-
+-				v.session.Lock()
+-				delete(v.session.VoiceConnections, v.GuildID)
+-				v.session.Unlock()
+-
+-				v.Close()
+-
+-				return
+-			}
+-
+-			// Detect if we have been closed manually. If a Close() has already
+-			// happened, the websocket we are listening on will be different to the
+-			// current session.
+-			v.RLock()
+-			sameConnection := v.wsConn == wsConn
+-			v.RUnlock()
+-			if sameConnection {
+-
+-				v.log(LogError, "voice endpoint %s websocket closed unexpectedly, %s", v.endpoint, err)
+-
+-				// Start reconnect goroutine then exit.
+-				go v.reconnect()
+-			}
+-			return
+-		}
+-
+-		// Pass received message to voice event handler
+-		select {
+-		case <-close:
+-			return
+-		default:
+-			go v.onEvent(message)
+-		}
+-	}
+-}
+-
+-// wsEvent handles any voice websocket events. This is only called by the
+-// wsListen() function.
+-func (v *VoiceConnection) onEvent(message []byte) {
+-
+-	v.log(LogDebug, "received: %s", string(message))
+-
+-	var e Event
+-	if err := json.Unmarshal(message, &e); err != nil {
+-		v.log(LogError, "unmarshall error, %s", err)
+-		return
+-	}
+-
+-	switch e.Operation {
+-
+-	case 2: // READY
+-
+-		if err := json.Unmarshal(e.RawData, &v.op2); err != nil {
+-			v.log(LogError, "OP2 unmarshall error, %s, %s", err, string(e.RawData))
+-			return
+-		}
+-
+-		// Start the voice websocket heartbeat to keep the connection alive
+-		go v.wsHeartbeat(v.wsConn, v.close, v.op2.HeartbeatInterval)
+-		// TODO monitor a chan/bool to verify this was successful
+-
+-		// Start the UDP connection
+-		err := v.udpOpen()
+-		if err != nil {
+-			v.log(LogError, "error opening udp connection, %s", err)
+-			return
+-		}
+-
+-		// Start the opusSender.
+-		// TODO: Should we allow 48000/960 values to be user defined?
+-		// answer: no, 48k is required as per discord documentaiton and 960 is the most optimal frame size (based on testing)
+-		if v.OpusSend == nil {
+-			v.OpusSend = make(chan []byte, 2)
+-		}
+-		go v.opusSender(v.udpConn, v.close, v.OpusSend, 48000, 960)
+-
+-		// Start the opusReceiver
+-		if !v.deaf {
+-			if v.OpusRecv == nil {
+-				v.OpusRecv = make(chan *Packet, 2)
+-			}
+-
+-			go v.opusReceiver(v.udpConn, v.close, v.OpusRecv)
+-		}
+-
+-		return
+-
+-	case 3: // HEARTBEAT response
+-		// add code to use this to track latency?
+-		// TODO: maybe actually implement this, seems cool
+-		return
+-
+-	case 4: // udp encryption secret key
+-		v.Lock()
+-		defer v.Unlock()
+-
+-		v.op4 = voiceOP4{}
+-		if err := json.Unmarshal(e.RawData, &v.op4); err != nil {
+-			v.log(LogError, "OP4 unmarshall error, %s, %s", err, string(e.RawData))
+-			return
+-		}
+-
+-		// TODO: error handling? meh
+-		block, _ := aes.NewCipher(v.op4.SecretKey[:])
+-		v.aead, _ = cipher.NewGCM(block)
+-
+-		return
+-
+-	case 5:
+-		if len(v.voiceSpeakingUpdateHandlers) == 0 {
+-			return
+-		}
+-
+-		voiceSpeakingUpdate := &VoiceSpeakingUpdate{}
+-		if err := json.Unmarshal(e.RawData, voiceSpeakingUpdate); err != nil {
+-			v.log(LogError, "OP5 unmarshall error, %s, %s", err, string(e.RawData))
+-			return
+-		}
+-
+-		for _, h := range v.voiceSpeakingUpdateHandlers {
+-			h(v, voiceSpeakingUpdate)
+-		}
+-
+-	default:
+-		v.log(LogDebug, "unknown voice operation, %d, %s", e.Operation, string(e.RawData))
+-	}
+-
+-	return
+-}
+-
+-type voiceHeartbeatOp struct {
+-	Op   int `json:"op"` // Always 3
+-	Data int `json:"d"`
+-}
+-
+-// NOTE :: When a guild voice server changes how do we shut this down
+-// properly, so a new connection can be setup without fuss?
+-//
+-// wsHeartbeat sends regular heartbeats to voice Discord so it knows the client
+-// is still connected.  If you do not send these heartbeats Discord will
+-// disconnect the websocket connection after a few seconds.
+-func (v *VoiceConnection) wsHeartbeat(wsConn *websocket.Conn, close <-chan struct{}, i time.Duration) {
+-
+-	if close == nil || wsConn == nil {
+-		return
+-	}
+-
+-	var err error
+-	ticker := time.NewTicker(i * time.Millisecond)
+-	defer ticker.Stop()
+-	for {
+-		v.log(LogDebug, "sending heartbeat packet")
+-		v.wsMutex.Lock()
+-		err = wsConn.WriteJSON(voiceHeartbeatOp{3, int(time.Now().Unix())})
+-		v.wsMutex.Unlock()
+-		if err != nil {
+-			v.log(LogError, "error sending heartbeat to voice endpoint %s, %s", v.endpoint, err)
+-			return
+-		}
+-
+-		select {
+-		case <-ticker.C:
+-			// continue loop and send heartbeat
+-		case <-close:
+-			return
+-		}
+-	}
+-}
+-
+-// ------------------------------------------------------------------------------------------------
+-// Code related to the VoiceConnection UDP connection
+-// ------------------------------------------------------------------------------------------------
+-
+-type voiceUDPData struct {
+-	Address string `json:"address"` // Public IP of machine running this code
+-	Port    uint16 `json:"port"`    // UDP Port of machine running this code
+-	Mode    string `json:"mode"`    // always "xsalsa20_poly1305"
+-}
+-
+-type voiceUDPD struct {
+-	Protocol string       `json:"protocol"` // Always "udp" ?
+-	Data     voiceUDPData `json:"data"`
+-}
+-
+-type voiceUDPOp struct {
+-	Op   int       `json:"op"` // Always 1
+-	Data voiceUDPD `json:"d"`
+-}
+-
+-// udpOpen opens a UDP connection to the voice server and completes the
+-// initial required handshake.  This connection is left open in the session
+-// and can be used to send or receive audio.  This should only be called
+-// from voice.wsEvent OP2
+-func (v *VoiceConnection) udpOpen() (err error) {
+-
+-	v.Lock()
+-	defer v.Unlock()
+-
+-	if v.wsConn == nil {
+-		return fmt.Errorf("nil voice websocket")
+-	}
+-
+-	if v.udpConn != nil {
+-		return fmt.Errorf("udp connection already open")
+-	}
+-
+-	if v.close == nil {
+-		return fmt.Errorf("nil close channel")
+-	}
+-
+-	if v.endpoint == "" {
+-		return fmt.Errorf("empty endpoint")
+-	}
+-
+-	host := v.op2.IP + ":" + strconv.Itoa(v.op2.Port)
+-	addr, err := net.ResolveUDPAddr("udp", host)
+-	if err != nil {
+-		v.log(LogWarning, "error resolving udp host %s, %s", host, err)
+-		return
+-	}
+-
+-	v.log(LogInformational, "connecting to udp addr %s", addr.String())
+-	v.udpConn, err = net.DialUDP("udp", nil, addr)
+-	if err != nil {
+-		v.log(LogWarning, "error connecting to udp addr %s, %s", addr.String(), err)
+-		return
+-	}
+-
+-	// Create a 74 byte array to store the packet data
+-	sb := make([]byte, 74)
+-	binary.BigEndian.PutUint16(sb, 1)              // Packet type (0x1 is request, 0x2 is response)
+-	binary.BigEndian.PutUint16(sb[2:], 70)         // Packet length (excluding type and length fields)
+-	binary.BigEndian.PutUint32(sb[4:], v.op2.SSRC) // The SSRC code from the Op 2 VoiceConnection event
+-
+-	// And send that data over the UDP connection to Discord.
+-	_, err = v.udpConn.Write(sb)
+-	if err != nil {
+-		v.log(LogWarning, "udp write error to %s, %s", addr.String(), err)
+-		return
+-	}
+-
+-	// Create a 74-byte array and listen for the initial handshake response
+-	// from Discord.  Once we get it parse the IP and PORT information out
+-	// of the response.  This should be our public IP and PORT as Discord
+-	// saw us.
+-	rb := make([]byte, 74)
+-	rlen, _, err := v.udpConn.ReadFromUDP(rb)
+-	if err != nil {
+-		v.log(LogWarning, "udp read error, %s, %s", addr.String(), err)
+-		return
+-	}
+-
+-	if rlen < 74 {
+-		v.log(LogWarning, "received udp packet too small")
+-		return fmt.Errorf("received udp packet too small")
+-	}
+-
+-	// Loop over position 8 through 71 to grab the IP address.
+-	var ip string
+-	for i := 8; i < len(rb)-2; i++ {
+-		if rb[i] == 0 {
+-			break
+-		}
+-		ip += string(rb[i])
+-	}
+-
+-	// Grab port from position 72 and 73
+-	port := binary.BigEndian.Uint16(rb[len(rb)-2:])
+-
+-	// Take the data from above and send it back to Discord to finalize
+-	// the UDP connection handshake.
+-
+-	// AEAD AES256-GCM (RTP Size)	aead_aes256_gcm_rtpsize	32-bit incremental integer value, appended to payload	Available (Preferred)
+-	data := voiceUDPOp{1, voiceUDPD{"udp", voiceUDPData{ip, port, "aead_aes256_gcm_rtpsize"}}}
+-
+-	v.wsMutex.Lock()
+-	err = v.wsConn.WriteJSON(data)
+-	v.wsMutex.Unlock()
+-	if err != nil {
+-		v.log(LogWarning, "udp write error, %#v, %s", data, err)
+-		return
+-	}
+-
+-	// start udpKeepAlive
+-	go v.udpKeepAlive(v.udpConn, v.close, 5*time.Second)
+-	// TODO: find a way to check that it fired off okay
+-
+-	return
+-}
+-
+-// udpKeepAlive sends a udp packet to keep the udp connection open
+-// This is still a bit of a "proof of concept"
+-func (v *VoiceConnection) udpKeepAlive(udpConn *net.UDPConn, close <-chan struct{}, i time.Duration) {
+-
+-	if udpConn == nil || close == nil {
+-		return
+-	}
+-
+-	var err error
+-	var sequence uint64
+-
+-	packet := make([]byte, 8)
+-
+-	ticker := time.NewTicker(i)
+-	defer ticker.Stop()
+-	for {
+-
+-		binary.LittleEndian.PutUint64(packet, sequence)
+-		sequence++
+-
+-		_, err = udpConn.Write(packet)
+-		if err != nil {
+-			v.log(LogError, "write error, %s", err)
+-			return
+-		}
+-
+-		select {
+-		case <-ticker.C:
+-			// continue loop and send keepalive
+-		case <-close:
+-			return
+-		}
+-	}
+-}
+-
+-// opusSender will listen on the given channel and send any
+-// pre-encoded opus audio to Discord.  Supposedly.
+-func (v *VoiceConnection) opusSender(udpConn *net.UDPConn, close <-chan struct{}, opus <-chan []byte, rate, size int) {
+-
+-	if udpConn == nil || close == nil {
+-		return
+-	}
+-
+-	// VoiceConnection is now ready to receive audio packets
+-	// TODO: this needs reviewing as I think there must be a better way.
+-	v.Lock()
+-	v.Ready = true
+-	v.Unlock()
+-	defer func() {
+-		v.Lock()
+-		v.Ready = false
+-		v.Unlock()
+-	}()
+-
+-	var sequence uint16
+-	var timestamp uint32
+-	var recvbuf []byte
+-	var ok bool
+-	udpHeader := make([]byte, 12)
+-	nonce := make([]byte, 12)
+-
+-	// build the parts that don't change in the udpHeader
+-	udpHeader[0] = 0x80
+-	udpHeader[1] = 0x78
+-	binary.BigEndian.PutUint32(udpHeader[8:], v.op2.SSRC)
+-
+-	// start a send loop that loops until buf chan is closed
+-	ticker := time.NewTicker(time.Millisecond * time.Duration(size/(rate/1000)))
+-	defer ticker.Stop()
+-	for {
+-
+-		// Get data from chan.  If chan is closed, return.
+-		select {
+-		case <-close:
+-			return
+-		case recvbuf, ok = <-opus:
+-			if !ok {
+-				return
+-			}
+-			// else, continue loop
+-		}
+-
+-		v.RLock()
+-		speaking := v.speaking
+-		v.RUnlock()
+-		if !speaking {
+-			err := v.Speaking(true)
+-			if err != nil {
+-				v.log(LogError, "error sending speaking packet, %s", err)
+-			}
+-		}
+-
+-		// Add sequence and timestamp to udpPacket
+-		binary.BigEndian.PutUint16(udpHeader[2:], sequence)
+-		binary.BigEndian.PutUint32(udpHeader[4:], timestamp)
+-
+-		// encrypt the opus data
+-		// add incrementing nonce counter as per discord's requirements
+-		binary.LittleEndian.PutUint32(nonce[:4], v.nonceCounter)
+-		v.nonceCounter++
+-
+-		sendbuf := v.aead.Seal(nil, nonce, recvbuf, udpHeader)
+-		sendbuf = append(sendbuf, nonce[:4]...) // 4 byte nonce to ciphertext appended
+-		sendbuf = append(udpHeader, sendbuf...) // final
+-
+-		// block here until we're exactly at the right time :)
+-		// Then send rtp audio packet to Discord over UDP
+-		select {
+-		case <-close:
+-			return
+-		case <-ticker.C:
+-			// continue
+-		}
+-		_, err := udpConn.Write(sendbuf)
+-
+-		if err != nil {
+-			v.log(LogError, "udp write error, %s", err)
+-			v.log(LogDebug, "voice struct: %#v\n", v)
+-			return
+-		}
+-
+-		if (sequence) == 0xFFFF {
+-			sequence = 0
+-		} else {
+-			sequence++
+-		}
+-
+-		if (timestamp + uint32(size)) >= 0xFFFFFFFF {
+-			timestamp = 0
+-		} else {
+-			timestamp += uint32(size)
+-		}
+-	}
+-}
+-
+-// A Packet contains the headers and content of a received voice packet.
+-type Packet struct {
+-	SSRC      uint32
+-	Sequence  uint16
+-	Timestamp uint32
+-	Type      []byte
+-	Opus      []byte
+-	PCM       []int16
+-}
+-
+-// opusReceiver listens on the UDP socket for incoming packets
+-// and sends them across the given channel
+-// NOTE :: This function may change names later.
+-func (v *VoiceConnection) opusReceiver(udpConn *net.UDPConn, close <-chan struct{}, c chan *Packet) {
+-
+-	if udpConn == nil || close == nil {
+-		return
+-	}
+-
+-	recvbuf := make([]byte, 2048)
+-	var nonce [12]byte
+-
+-	for {
+-		rlen, err := udpConn.Read(recvbuf)
+-		if err != nil {
+-			// Detect if we have been closed manually. If a Close() has already
+-			// happened, the udp connection we are listening on will be different
+-			// to the current session.
+-			v.RLock()
+-			sameConnection := v.udpConn == udpConn
+-			v.RUnlock()
+-			if sameConnection {
+-
+-				v.log(LogError, "udp read error, %s, %s", v.endpoint, err)
+-				v.log(LogDebug, "voice struct: %#v\n", v)
+-
+-				go v.reconnect()
+-			}
+-			return
+-		}
+-
+-		select {
+-		case <-close:
+-			return
+-		default:
+-			// continue loop
+-		}
+-
+-		// For now, skip anything except RTP v2 packets (audio).
+-		// RTP v2 => top two bits are 10 (0x80).
+-		if rlen < 12 || (recvbuf[0]&0xC0) != 0x80 {
+-			continue
+-		}
+-
+-		// build a audio packet struct
+-		p := Packet{}
+-		p.Type = recvbuf[0:2]
+-		p.Sequence = binary.BigEndian.Uint16(recvbuf[2:4])
+-		p.Timestamp = binary.BigEndian.Uint32(recvbuf[4:8])
+-		p.SSRC = binary.BigEndian.Uint32(recvbuf[8:12])
+-
+-		// RTP header parsing for *_rtpsize AEAD modes:
+-		// - base RTP header is 12 bytes + 4 bytes per CSRC (CC).
+-		// - if extension bit (X) is set, ONLY the 4-byte extension preamble is unencrypted/AAD;
+-		//   the extension payload is encrypted and must be stripped after decryption.
+-		cc := int(recvbuf[0] & 0x0F)
+-		hasExt := (recvbuf[0] & 0x10) != 0
+-
+-		baseHeaderLen := 12 + (4 * cc)
+-		if rlen < baseHeaderLen {
+-			continue
+-		}
+-
+-		aadLen := baseHeaderLen
+-		extPayloadBytes := 0
+-		if hasExt {
+-			if rlen < baseHeaderLen+4 {
+-				continue
+-			}
+-			// Extension length is in 32-bit words at the end of the extension preamble.
+-			extLenWords := int(binary.BigEndian.Uint16(recvbuf[baseHeaderLen+2 : baseHeaderLen+4]))
+-			extPayloadBytes = extLenWords * 4
+-			aadLen = baseHeaderLen + 4
+-		}
+-
+-		if rlen < aadLen+4 {
+-			continue
+-		}
+-
+-		// decrypt opus data
+-		payload := recvbuf[aadLen:rlen]
+-		if len(payload) < 4 {
+-			continue
+-		}
+-		nonceCounter := payload[len(payload)-4:]
+-		cipherTextPayload := payload[:len(payload)-4]
+-
+-		binary.LittleEndian.PutUint32(nonce[:4], binary.LittleEndian.Uint32(nonceCounter))
+-
+-		if v.aead == nil {
+-			continue
+-		}
+-		// AAD must cover the unencrypted header portion.
+-		if plain, err := v.aead.Open(nil, nonce[:], cipherTextPayload, recvbuf[:aadLen]); err == nil {
+-			// If header extensions are present, strip decrypted extension payload to get to Opus.
+-			if extPayloadBytes > 0 {
+-				if len(plain) < extPayloadBytes {
+-					continue
+-				}
+-				plain = plain[extPayloadBytes:]
+-			}
+-			p.Opus = plain
+-		} else {
+-			continue
+-		}
+-
+-		if c != nil {
+-			select {
+-			case c <- &p:
+-			case <-close:
+-				return
+-			}
+-		}
+-	}
+-}
+-
+-// Reconnect will close down a voice connection then immediately try to
+-// reconnect to that session.
+-// NOTE : This func is messy and a WIP while I find what works.
+-// It will be cleaned up once a proven stable option is flushed out.
+-// aka: this is ugly shit code, please don't judge too harshly.
+-func (v *VoiceConnection) reconnect() {
+-
+-	v.log(LogInformational, "called")
+-
+-	v.Lock()
+-	if v.reconnecting {
+-		v.log(LogInformational, "already reconnecting to channel %s, exiting", v.ChannelID)
+-		v.Unlock()
+-		return
+-	}
+-	v.reconnecting = true
+-	v.Unlock()
+-
+-	defer func() {
+-		v.Lock()
+-		v.reconnecting = false
+-		v.Unlock()
+-	}()
+-
+-	// Close any currently open connections
+-	v.Close()
+-
+-	wait := time.Duration(1)
+-	for {
+-
+-		<-time.After(wait * time.Second)
+-		wait *= 2
+-		if wait > 600 {
+-			wait = 600
+-		}
+-
+-		if v.session.DataReady == false || v.session.wsConn == nil {
+-			v.log(LogInformational, "cannot reconnect to channel %s with unready session", v.ChannelID)
+-			continue
+-		}
+-
+-		v.log(LogInformational, "trying to reconnect to channel %s", v.ChannelID)
+-
+-		_, err := v.session.ChannelVoiceJoin(v.GuildID, v.ChannelID, v.mute, v.deaf)
+-		if err == nil {
+-			v.log(LogInformational, "successfully reconnected to channel %s", v.ChannelID)
+-			return
+-		}
+-
+-		v.log(LogInformational, "error reconnecting to channel %s, %s", v.ChannelID, err)
+-
+-		// if the reconnect above didn't work lets just send a disconnect
+-		// packet to reset things.
+-		// Send a OP4 with a nil channel to disconnect
+-		data := voiceChannelJoinOp{4, voiceChannelJoinData{&v.GuildID, nil, true, true}}
+-		v.session.wsMutex.Lock()
+-		err = v.session.wsConn.WriteJSON(data)
+-		v.session.wsMutex.Unlock()
+-		if err != nil {
+-			v.log(LogError, "error sending disconnect packet, %s", err)
+-		}
+-
+-	}
+-}
++}
++func (v *VoiceConnection) requestDisconnectRelease() {
++	v.Lock()
++	v.releaseOnClose = true
++	closed := v.localClosed
++	v.Unlock()
++	if closed {
++		v.removeReservation()
++	}
++}
++func (v *VoiceConnection) finishLocalCleanup() {
++	v.Lock()
++	v.localClosed = true
++	release := v.releaseOnClose
++	v.Unlock()
++	if release {
++		v.removeReservation()
++	}
++}
+diff --git a/voice_disabled.go b/voice_disabled.go
+new file mode 100644
+--- /dev/null
++++ b/voice_disabled.go
+@@ -0,0 +1,6 @@
++//go:build !voice
++
++package discordgo
++
++func VoiceAvailable() bool                                 { return false }
++func newVoiceEngine(*VoiceConnection) (voiceEngine, error) { return nil, ErrVoiceUnavailable }
+diff --git a/voice_gateway.go b/voice_gateway.go
+new file mode 100644
+--- /dev/null
++++ b/voice_gateway.go
+@@ -0,0 +1,502 @@
++//go:build voice && cgo
++
++package discordgo
++
++import (
++	"encoding/binary"
++	"encoding/json"
++	"errors"
++	"math"
++	"sort"
++	"strconv"
++	"time"
++
++	"github.com/bwmarrin/discordgo/internal/dave"
++	"github.com/gorilla/websocket"
++)
++
++func (n *nativeVoice) roster() []string {
++	ids := make([]string, 0, len(n.participants))
++	for id := range n.participants {
++		ids = append(ids, id)
++	}
++	sort.Strings(ids)
++	return ids
++}
++func (n *nativeVoice) control(m voiceMessage) error {
++	if m.kind == websocket.BinaryMessage {
++		seq, op, b, err := parseVoiceBinary(m.data, n.v.config.MaxWebSocketBytes)
++		if err != nil {
++			return err
++		}
++		n.seqAck = int(seq)
++		switch op {
++		case 25:
++			if len(b) == 0 || len(b) > n.v.config.MaxProposalBytes {
++				return errors.New("invalid external sender size")
++			}
++			n.external = append(n.external[:0], b...)
++			if err := n.dave.SetExternalSender(n.ctx, b); err != nil {
++				return err
++			}
++			// A delayed external sender may create the pending group after26.
++			// Re-grant only the still-unconsumed matching epoch-one reset.
++			return n.authorizePendingReset()
++		case 27:
++			if len(b) < 2 || len(b)-1 > n.v.config.MaxProposalBytes || b[0] > 1 {
++				return errors.New("invalid DAVE proposal framing")
++			}
++			if n.proposalDeadline.IsZero() {
++				n.proposalDeadline = time.Now().Add(n.v.config.RekeyTimeout)
++			}
++			out, err := n.dave.ProcessProposals(n.ctx, dave.ProposalOperation(b[0]), b[1:], n.roster())
++			if err != nil {
++				return err
++			}
++			if len(out.Wire) == 0 {
++				// The patched native parser has retired its final queued proposal
++				// and outbound candidate. Only this negotiation is complete.
++				n.proposalDeadline = time.Time{}
++				return nil
++			}
++			return n.writeBinary(n.ctx, 28, out.Wire)
++		case 29, 30:
++			if len(b) < 3 || len(b)-2 > n.v.config.MaxTransitionBytes {
++				return errors.New("invalid DAVE transition framing")
++			}
++			id := binary.BigEndian.Uint16(b[:2])
++			_, alreadyPrepared := n.transitions[id]
++			if err := n.addTransition(id); err != nil {
++				return err
++			}
++			if op == 29 {
++				result, err := n.dave.ProcessCommit(n.ctx, id, b[2:])
++				if err != nil || result == dave.CommitFailed {
++					return n.recoverInvalid(id)
++				}
++				if result == dave.CommitIgnored {
++					if !alreadyPrepared {
++						delete(n.transitions, id)
++					}
++					return nil
++				}
++			} else if err := n.dave.ProcessWelcome(n.ctx, id, b[2:], n.roster()); err != nil {
++				return n.recoverInvalid(id)
++			}
++			if err := n.dave.PrepareReceivers(n.ctx, id); err != nil {
++				return n.recoverInvalid(id)
++			}
++			// Successful MLS establishment supersedes reset/proposal negotiation;
++			// the prepared ID retains its own deadline until execution.
++			n.resetDeadline = time.Time{}
++			n.proposalDeadline = time.Time{}
++			n.clearPendingResetAuthorization()
++			if id == 0 {
++				n.finishTransition(id)
++				return nil
++			} // Native prepares and executes immediate zero.
++			return n.writeJSON(n.ctx, 23, voiceTransition{id})
++		default:
++			return errors.New("unexpected server binary voice opcode")
++		}
++	}
++	var e voiceEnvelope
++	if err := json.Unmarshal(m.data, &e); err != nil {
++		return errors.New("invalid voice text framing")
++	}
++	if e.Seq != nil {
++		n.seqAck = int(*e.Seq)
++	}
++	if fields := voiceRequiredFields[e.Op]; fields != nil {
++		if err := requireVoiceFields(e.D, fields...); err != nil {
++			return err
++		}
++	}
++	decode := func(dst any) error {
++		if len(e.D) == 0 || string(e.D) == "null" {
++			return errors.New("missing voice opcode data")
++		}
++		if err := json.Unmarshal(e.D, dst); err != nil {
++			return errors.New("invalid voice opcode data")
++		}
++		return nil
++	}
++	switch e.Op {
++	case 8:
++		var d struct {
++			Interval float64 `json:"heartbeat_interval"`
++		}
++		if err := decode(&d); err != nil {
++			return err
++		}
++		if math.IsNaN(d.Interval) || math.IsInf(d.Interval, 0) || d.Interval <= 0 || d.Interval > float64(math.MaxInt64)/float64(time.Millisecond) {
++			return errors.New("invalid voice heartbeat interval")
++		}
++		interval := time.Duration(d.Interval * float64(time.Millisecond))
++		if interval <= 0 {
++			return errors.New("invalid voice heartbeat interval")
++		}
++		n.heartbeatMu.Lock()
++		if n.heartbeatInterval != 0 {
++			n.heartbeatMu.Unlock()
++			return errors.New("duplicate voice Hello")
++		}
++		n.heartbeatInterval = interval
++		n.heartbeatMu.Unlock()
++		select {
++		case n.heartbeatWake <- struct{}{}:
++		default:
++		}
++		return nil
++	case 6:
++		var d struct {
++			T int64 `json:"t"`
++		}
++		if err := decode(&d); err != nil {
++			return err
++		}
++		n.heartbeatMu.Lock()
++		defer n.heartbeatMu.Unlock()
++		if !n.heartbeatPending || d.T != n.heartbeatNonce {
++			return errors.New("unexpected voice heartbeat ACK")
++		}
++		n.heartbeatPending = false
++		select {
++		case n.heartbeatWake <- struct{}{}:
++		default:
++		}
++		return nil
++	case 2:
++		var d struct {
++			SSRC  uint32   `json:"ssrc"`
++			IP    string   `json:"ip"`
++			Port  int      `json:"port"`
++			Modes []string `json:"modes"`
++		}
++		if err := decode(&d); err != nil {
++			return err
++		}
++		if n.mode != "" {
++			return errors.New("duplicate voice Ready")
++		}
++		mode, err := selectVoiceMode(d.Modes)
++		if err != nil {
++			return err
++		}
++		n.mode = mode
++		n.ssrc = d.SSRC
++		return n.discoverUDP(d.IP, d.Port)
++	case 4:
++		var d struct {
++			Mode    string `json:"mode"`
++			Key     []int  `json:"secret_key"`
++			Version uint16 `json:"dave_protocol_version"`
++		}
++		if err := decode(&d); err != nil {
++			return err
++		}
++		if n.aead != nil || d.Mode != n.mode || len(d.Key) != 32 {
++			return errors.New("invalid voice session description")
++		}
++		var key [32]byte
++		for i, b := range d.Key {
++			if b < 0 || b > 255 {
++				return errors.New("invalid transport key")
++			}
++			key[i] = byte(b)
++		}
++		aead, err := voiceAEAD(d.Mode, key[:])
++		clear(key[:])
++		clear(d.Key)
++		if err != nil {
++			return err
++		}
++		n.aead = aead
++		n.mu.Lock()
++		n.transportReady = true
++		n.mu.Unlock()
++		if err = n.initializeDAVE(d.Version, false); err != nil {
++			return err
++		}
++		return nil
++	case 5:
++		var d struct {
++			UserID   string `json:"user_id"`
++			SSRC     uint32 `json:"ssrc"`
++			Speaking int    `json:"speaking"`
++		}
++		if err := decode(&d); err != nil {
++			return err
++		}
++		if _, ok := n.participants[d.UserID]; !ok {
++			return nil
++		}
++		if old, ok := n.senders[d.SSRC]; ok && old != d.UserID {
++			return errors.New("voice SSRC identity conflict")
++		}
++		if len(n.senders) >= n.v.config.MaxDecryptors {
++			if _, ok := n.senders[d.SSRC]; !ok {
++				return errors.New("voice sender bound exceeded")
++			}
++		}
++		n.senders[d.SSRC] = d.UserID
++		return nil
++	case 11:
++		var d struct {
++			IDs []string `json:"user_ids"`
++		}
++		if err := decode(&d); err != nil {
++			return err
++		}
++		if len(d.IDs) > n.v.config.MaxParticipants {
++			return errors.New("participant bound exceeded")
++		}
++		for _, id := range d.IDs {
++			if _, err := strconv.ParseUint(id, 10, 64); err != nil {
++				return errors.New("invalid participant ID")
++			}
++			if _, ok := n.participants[id]; !ok && len(n.participants) >= n.v.config.MaxParticipants {
++				return errors.New("participant bound exceeded")
++			}
++			n.participants[id] = struct{}{}
++		}
++		return n.dave.SetParticipants(n.ctx, n.roster())
++	case 13:
++		var d struct {
++			ID string `json:"user_id"`
++		}
++		if err := decode(&d); err != nil {
++			return err
++		}
++		if d.ID == n.v.UserID {
++			return errors.New("voice local participant disconnected")
++		}
++		delete(n.participants, d.ID)
++		for ssrc, id := range n.senders {
++			if id == d.ID {
++				delete(n.senders, ssrc)
++			}
++		}
++		return n.dave.SetParticipants(n.ctx, n.roster())
++	case 21:
++		var d voicePrepareTransition
++		if err := decode(&d); err != nil {
++			return err
++		}
++		if d.Version == 0 || d.Version > dave.MaxSupportedProtocolVersion() {
++			return ErrVoiceUnavailable
++		}
++		if err := n.addTransition(d.ID); err != nil {
++			return err
++		}
++		if err := n.dave.PrepareTransition(n.ctx, d.ID, d.Version); err != nil {
++			return err
++		}
++		n.resetDeadline = time.Time{}
++		n.clearPendingResetAuthorization()
++		if d.ID == 0 {
++			n.finishTransition(0)
++			return nil
++		}
++		return n.writeJSON(n.ctx, 23, voiceTransition{d.ID})
++	case 22:
++		var d voiceTransition
++		if err := decode(&d); err != nil {
++			return err
++		}
++		if _, ok := n.transitions[d.ID]; !ok {
++			return errors.New("unprepared voice transition")
++		}
++		if err := n.dave.ExecuteTransition(n.ctx, d.ID); err != nil {
++			return err
++		}
++		n.finishTransition(d.ID)
++		return nil
++	case 24:
++		var d voicePrepareEpoch
++		if err := decode(&d); err != nil {
++			return err
++		}
++		if d.Epoch == 0 {
++			return errors.New("invalid DAVE epoch")
++		}
++		if d.Version == 0 || d.Version > dave.MaxSupportedProtocolVersion() {
++			return ErrVoiceUnavailable
++		}
++		if d.Epoch == 1 {
++			return n.initializeDAVE(d.Version, true)
++		}
++		n.clearPendingResetAuthorization()
++		n.beginReset()
++		if err := n.dave.SetProtocolVersion(n.ctx, d.Version); err != nil {
++			return err
++		}
++		n.version = d.Version
++		return nil
++	case 9:
++		return errors.New("unsolicited voice Resume")
++	case 12, 14, 15, 16, 17, 18, 20: // non-audio/video metadata does not alter media state
++		return nil
++	case 0, 1, 3, 7, 23, 25, 26, 27, 28, 29, 30, 31:
++		return errors.New("unexpected server voice opcode direction or framing")
++	default:
++		return nil // bounded future metadata; never interpreted as media/key material
++	}
++}
++func (n *nativeVoice) nextRekeyDeadline() time.Time {
++	deadline := n.resetDeadline
++	if !n.proposalDeadline.IsZero() && (deadline.IsZero() || n.proposalDeadline.Before(deadline)) {
++		deadline = n.proposalDeadline
++	}
++	for _, prepared := range n.transitions {
++		if deadline.IsZero() || prepared.Before(deadline) {
++			deadline = prepared
++		}
++	}
++	return deadline
++}
++func (n *nativeVoice) beginReset() {
++	deadline := n.nextRekeyDeadline()
++	if deadline.IsZero() {
++		deadline = time.Now().Add(n.v.config.RekeyTimeout)
++	}
++	n.resetDeadline = deadline
++}
++func (n *nativeVoice) addTransition(id uint16) error {
++	if _, ok := n.transitions[id]; !ok && len(n.transitions) >= n.v.config.MaxTransitions {
++		return errors.New("DAVE transition bound exceeded")
++	}
++	if _, ok := n.transitions[id]; !ok {
++		n.transitions[id] = time.Now().Add(n.v.config.RekeyTimeout)
++	}
++	return nil
++}
++func (n *nativeVoice) finishTransition(id uint16) {
++	delete(n.transitions, id)
++}
++func (n *nativeVoice) clearPendingResetAuthorization() {
++	n.resetAuthorizationGeneration = 0
++	n.resetAuthorizationVersion = 0
++	n.resetPackageSent = false
++}
++func (n *nativeVoice) authorizePendingReset() error {
++	if !n.resetPackageSent || n.resetAuthorizationGeneration != n.daveGeneration ||
++		n.resetAuthorizationVersion != n.version || len(n.external) == 0 {
++		return nil
++	}
++	return n.dave.AuthorizePendingReset(n.ctx, n.resetAuthorizationVersion)
++}
++func (n *nativeVoice) initializeDAVE(version uint16, authorizeEpochOne bool) error {
++	if version == 0 || version > dave.MaxSupportedProtocolVersion() {
++		return ErrVoiceUnavailable
++	}
++	n.beginReset()
++	n.clearPendingResetAuthorization()
++	if n.daveGeneration == ^uint64(0) {
++		return errors.New("DAVE reset generation exhausted")
++	}
++	n.daveGeneration++
++	n.proposalDeadline = time.Time{}
++	n.version = version
++	clear(n.transitions)
++	if err := n.dave.Initialize(n.ctx, version, n.v.ChannelID, n.v.UserID); err != nil {
++		return err
++	}
++	if len(n.external) > 0 {
++		if err := n.dave.SetExternalSender(n.ctx, n.external); err != nil {
++			return err
++		}
++	}
++	if err := n.dave.SetParticipants(n.ctx, n.roster()); err != nil {
++		return err
++	}
++	key, err := n.dave.FreshKeyPackage(n.ctx)
++	if err != nil {
++		return err
++	}
++	if err := n.writeBinary(n.ctx, 26, key); err != nil {
++		return err
++	}
++	if authorizeEpochOne {
++		// Only authenticated24(epoch=1) reaches this record, after this reset
++		// generation's fresh package was actually written. A later25 may finish
++		// its authorization, but cannot create initial-only or consumed grants.
++		n.resetAuthorizationGeneration = n.daveGeneration
++		n.resetAuthorizationVersion = version
++		n.resetPackageSent = true
++		return n.authorizePendingReset()
++	}
++	return nil
++}
++func (n *nativeVoice) recoverInvalid(id uint16) error {
++	if err := n.writeJSON(n.ctx, 31, voiceTransition{id}); err != nil {
++		return err
++	}
++	return n.initializeDAVE(n.version, false)
++}
++func (n *nativeVoice) sendHeartbeat() error {
++	n.heartbeatMu.Lock()
++	if n.heartbeatPending {
++		n.heartbeatMu.Unlock()
++		return nil
++	}
++	nonce := time.Now().UnixMilli()
++	if nonce <= n.heartbeatNonce {
++		nonce = n.heartbeatNonce + 1
++	}
++	n.heartbeatNonce = nonce
++	n.heartbeatSent = time.Now()
++	n.heartbeatPending = true
++	n.heartbeatMu.Unlock()
++	return n.writeJSON(n.ctx, 3, voiceHeartbeatData{nonce, n.seqAck})
++}
++func (n *nativeVoice) heartbeatLoop() {
++	defer n.wg.Done()
++	timer := time.NewTimer(n.v.config.HeartbeatTimeout)
++	if !timer.Stop() {
++		<-timer.C
++	}
++	defer timer.Stop()
++	for {
++		select {
++		case <-n.ctx.Done():
++			return
++		case <-n.heartbeatWake:
++		case <-timer.C:
++		}
++		n.heartbeatMu.Lock()
++		interval, pending, sent := n.heartbeatInterval, n.heartbeatPending, n.heartbeatSent
++		n.heartbeatMu.Unlock()
++		if interval == 0 {
++			continue
++		}
++		elapsed := time.Since(sent)
++		if pending && elapsed >= n.v.config.HeartbeatTimeout {
++			n.stop(errors.New("voice heartbeat ACK timeout"))
++			return
++		}
++		if !pending && (sent.IsZero() || elapsed >= interval) {
++			n.cryptoMu.Lock()
++			err := n.sendHeartbeat()
++			n.cryptoMu.Unlock()
++			if err != nil {
++				n.stop(err)
++				return
++			}
++			n.heartbeatMu.Lock()
++			pending, sent = n.heartbeatPending, n.heartbeatSent
++			n.heartbeatMu.Unlock()
++		}
++		delay := time.Until(sent.Add(interval))
++		if pending {
++			delay = time.Until(sent.Add(n.v.config.HeartbeatTimeout))
++		}
++		if !timer.Stop() {
++			select {
++			case <-timer.C:
++			default:
++			}
++		}
++		timer.Reset(max(0, delay))
++	}
++}
+diff --git a/voice_handoff_test.go b/voice_handoff_test.go
+new file mode 100644
+--- /dev/null
++++ b/voice_handoff_test.go
+@@ -0,0 +1,143 @@
++//go:build voice && cgo
++
++package discordgo
++
++import (
++	"bytes"
++	"context"
++	"errors"
++	"net/http"
++	"net/http/httptest"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/gorilla/websocket"
++)
++
++func voiceHandoffGateway(t *testing.T, s *Session) <-chan voiceWireFixture {
++	t.Helper()
++	wires := make(chan voiceWireFixture, 8)
++	serverConn := make(chan *websocket.Conn, 1)
++	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		c, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
++		if err != nil {
++			return
++		}
++		serverConn <- c
++		for {
++			kind, data, err := c.ReadMessage()
++			if err != nil {
++				return
++			}
++			wires <- voiceWireFixture{kind, data}
++		}
++	}))
++	t.Cleanup(srv.Close)
++	ws, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http"), nil)
++	if err != nil {
++		t.Fatal(err)
++	}
++	peer := <-serverConn
++	t.Cleanup(func() { peer.Close(); ws.Close() })
++	s.wsConn = ws
++	return wires
++}
++
++func TestVoiceRetirementWaitsForOrderedGatewayLeaveBeforeReplacement(t *testing.T) {
++	n, _ := nativeTransportFixture(t)
++	s := n.v.session
++	s.VoiceConnections = map[string]*VoiceConnection{"1": n.v}
++	wires := voiceHandoffGateway(t, s)
++	ctx, cancel := context.WithCancel(context.Background())
++	defer cancel()
++	result := make(chan error, 1)
++	go func() { result <- n.v.DisconnectContext(ctx) }()
++	leave := nextVoiceWire(t, wires)
++	if !bytes.Contains(leave.data, []byte(`"channel_id":null`)) {
++		t.Fatal("retirement did not send main Gateway leave")
++	}
++	// End the caller's wait only after observing the leave write, but before
++	// delivering its acknowledgement. No timer determines the event ordering.
++	cancel()
++	select {
++	case err := <-result:
++		if !errors.Is(err, context.Canceled) {
++			t.Fatal("disconnect completed before the Gateway confirmed its leave")
++		}
++	case <-time.After(time.Second):
++		t.Fatal("disconnect did not respect its caller cancellation")
++	}
++	s.RLock()
++	retained := s.VoiceConnections["1"] == n.v
++	s.RUnlock()
++	if !retained {
++		t.Fatal("unacknowledged leave exposed the guild to a replacement join")
++	}
++	// The real ingress calls the SDK handler and then the host observer. A
++	// retirement acknowledgement must be consumed by the same old generation
++	// on both deliveries, not reported as an external move to the host.
++	observed := false
++	s.SetDispatchObserver(func(s *Session, e *Event, err error) {
++		observed = true
++		if err != nil || s.VoiceGatewayDispatch(e) != nil {
++			t.Error("owned retirement acknowledgement failed host dispatch")
++		}
++		s.RLock()
++		owned := s.VoiceConnections["1"] == n.v
++		s.RUnlock()
++		if !owned {
++			t.Error("reservation released before ordered host observation finished")
++		}
++	})
++	t.Cleanup(func() { s.SetDispatchObserver(nil) })
++	_, err := s.onGatewayEvent(&Event{Operation: 0, Type: "VOICE_STATE_UPDATE", Sequence: 1, RawData: []byte(`{"guild_id":"1","channel_id":null,"user_id":"2","session_id":"old"}`)})
++	if err != nil || !observed {
++		t.Fatal("leave acknowledgement did not traverse ordered Gateway ingress")
++	}
++	if err := n.v.DisconnectContext(context.Background()); err != nil {
++		t.Fatal("confirmed retirement could not finish idempotently")
++	}
++	select {
++	case <-wires:
++		t.Fatal("repeat disconnect sent another leave that could hit a replacement")
++	default:
++	}
++	s.RLock()
++	old := s.VoiceConnections["1"]
++	s.RUnlock()
++	if old != nil {
++		t.Fatal("confirmed retirement retained its guild reservation")
++	}
++	replacement, _ := nativeTransportFixture(t)
++	replacement.v.session = s
++	s.Lock()
++	s.VoiceConnections["1"] = replacement.v
++	s.Unlock()
++	if err := n.v.DisconnectContext(context.Background()); err != nil {
++		t.Fatal("stale retirement attempted to disconnect the replacement")
++	}
++	if err := s.acceptVoiceState(&VoiceStateUpdate{VoiceState: &VoiceState{GuildID: "1", ChannelID: "1", UserID: "2", SessionID: "new"}}); err != nil || !replacement.ready() {
++		t.Fatal("new generation could not accept its own channel/session state")
++	}
++}
++
++func TestVoiceUnsolicitedGatewayChangesStillFailClosed(t *testing.T) {
++	for _, change := range []struct {
++		name, channel, session string
++	}{
++		{"kick", "", "original"},
++		{"move", "3", "original"},
++		{"session", "1", "replacement"},
++	} {
++		t.Run(change.name, func(t *testing.T) {
++			n, _ := nativeTransportFixture(t)
++			n.v.sessionID = "original"
++			n.v.session.VoiceConnections = map[string]*VoiceConnection{"1": n.v}
++			err := n.v.session.acceptVoiceState(&VoiceStateUpdate{VoiceState: &VoiceState{GuildID: "1", ChannelID: change.channel, UserID: "2", SessionID: change.session}})
++			if !errors.Is(err, ErrVoiceChannelChanged) || !errors.Is(n.err(), ErrVoiceChannelChanged) || n.ready() {
++				t.Fatal("unsolicited channel change was treated as owned retirement")
++			}
++		})
++	}
++}
+diff --git a/voice_nocgo.go b/voice_nocgo.go
+new file mode 100644
+--- /dev/null
++++ b/voice_nocgo.go
+@@ -0,0 +1,6 @@
++//go:build voice && !cgo
++
++package discordgo
++
++// Intentionally a compile-time configuration error, not an unavailable backend.
++var _ = voice_build_requires_CGO_ENABLED_1_and_pinned_libdave
+diff --git a/voice_opus.go b/voice_opus.go
+new file mode 100644
+--- /dev/null
++++ b/voice_opus.go
+@@ -0,0 +1,109 @@
++package discordgo
++
++import "errors"
++
++var ErrInvalidOpusPacket = errors.New("invalid OPUS_48KHZ_20MS packet")
++
++// ValidateOpusPacket validates RFC 6716 section 3 packet framing without decoding
++// audio. Only a complete 960-sample packet at 48 kHz is accepted. Frame sizes,
++// VBR lengths, code-3 padding and total duration are checked, not caller metadata.
++func ValidateOpusPacket(p []byte, maxBytes int) error {
++	return validateOpusPacket(p, maxBytes, 960)
++}
++func validateOpusPacket(p []byte, maxBytes, expectedSamples int) error {
++	bad := ErrInvalidOpusPacket
++	if maxBytes <= 0 || len(p) == 0 || len(p) > maxBytes {
++		return bad
++	}
++	config := int(p[0] >> 3)
++	var samples int
++	switch {
++	case config >= 16:
++		samples = 120 << (config & 3)
++	case config >= 12:
++		samples = 480 << (config & 1)
++	default:
++		samples = []int{480, 960, 1920, 2880}[config&3]
++	}
++	code := p[0] & 3
++	count := 1
++	pos := 1
++	end := len(p)
++	vbr := false
++	switch code {
++	case 1:
++		count = 2
++	case 2:
++		count = 2
++		vbr = true
++	case 3:
++		if pos == end {
++			return bad
++		}
++		flags := p[pos]
++		pos++
++		count = int(flags & 63)
++		vbr = flags&128 != 0
++		if count == 0 || count > 48 {
++			return bad
++		}
++		if flags&64 != 0 {
++			for {
++				if pos >= end {
++					return bad
++				}
++				n := int(p[pos])
++				pos++
++				if n == 255 {
++					end -= 254
++				} else {
++					end -= n
++				}
++				if end < pos {
++					return bad
++				}
++				if n != 255 {
++					break
++				}
++			}
++		}
++	}
++	if count*samples > 5760 || (expectedSamples > 0 && count*samples != expectedSamples) {
++		return bad
++	}
++	if !vbr {
++		n := end - pos
++		if n < 0 || n%count != 0 || n/count > 1275 {
++			return bad
++		}
++		return nil
++	}
++	remaining := end - pos
++	for range count - 1 {
++		if pos >= end {
++			return bad
++		}
++		n := int(p[pos])
++		pos++
++		remaining--
++		if n >= 252 {
++			if pos >= end {
++				return bad
++			}
++			n += 4 * int(p[pos])
++			pos++
++			remaining--
++		}
++		if n > 1275 {
++			return bad
++		}
++		remaining -= n
++		if remaining < 0 {
++			return bad
++		}
++	}
++	if remaining > 1275 {
++		return bad
++	}
++	return nil
++}
+diff --git a/voice_packet.go b/voice_packet.go
+new file mode 100644
+--- /dev/null
++++ b/voice_packet.go
+@@ -0,0 +1,124 @@
++package discordgo
++
++import (
++	"crypto/aes"
++	"crypto/cipher"
++	"encoding/binary"
++	"errors"
++	"math"
++
++	"golang.org/x/crypto/chacha20poly1305"
++)
++
++const voiceAESMode = "aead_aes256_gcm_rtpsize"
++const voiceXChaChaMode = "aead_xchacha20_poly1305_rtpsize"
++const voiceFrameIntervalSamples = 960
++
++func selectVoiceMode(modes []string) (string, error) {
++	for _, m := range modes {
++		if m == voiceAESMode {
++			return m, nil
++		}
++	}
++	for _, m := range modes {
++		if m == voiceXChaChaMode {
++			return m, nil
++		}
++	}
++	return "", ErrVoiceUnavailable
++}
++func voiceAEAD(mode string, key []byte) (cipher.AEAD, error) {
++	if len(key) != 32 {
++		return nil, errors.New("invalid voice transport key length")
++	}
++	switch mode {
++	case voiceAESMode:
++		block, err := aes.NewCipher(key)
++		if err != nil {
++			return nil, err
++		}
++		return cipher.NewGCM(block)
++	case voiceXChaChaMode:
++		return chacha20poly1305.NewX(key)
++	default:
++		return nil, ErrVoiceUnavailable
++	}
++}
++
++// RTP-size AEAD authenticates the fixed header, CSRCs and extension preamble.
++// Extension data itself is encrypted (RFC 3711 section 3.1), not additional data.
++func voiceRTPHeader(p []byte) (aadLen, extensionBytes int, err error) {
++	if len(p) < 12 || p[0]>>6 != 2 || p[1]&127 != 120 {
++		return 0, 0, errors.New("invalid voice RTP header")
++	}
++	aadLen = 12 + 4*int(p[0]&15)
++	if aadLen > len(p) {
++		return 0, 0, errors.New("truncated RTP CSRC")
++	}
++	if p[0]&16 != 0 {
++		if aadLen+4 > len(p) {
++			return 0, 0, errors.New("truncated RTP extension")
++		}
++		extensionBytes = 4 * int(binary.BigEndian.Uint16(p[aadLen+2:aadLen+4]))
++		aadLen += 4
++	}
++	return aadLen, extensionBytes, nil
++}
++func sealVoiceRTP(dst []byte, aead cipher.AEAD, ssrc uint32, seq uint16, timestamp uint32, counter uint64, frame []byte) ([]byte, error) {
++	if counter > math.MaxUint32 {
++		return nil, errors.New("voice transport nonce exhausted")
++	}
++	needed := 12 + len(frame) + aead.Overhead() + 4
++	if cap(dst) < needed {
++		return nil, errors.New("voice RTP output exceeds bound")
++	}
++	dst = dst[:12]
++	dst[0] = 128
++	dst[1] = 120
++	binary.BigEndian.PutUint16(dst[2:4], seq)
++	binary.BigEndian.PutUint32(dst[4:8], timestamp)
++	binary.BigEndian.PutUint32(dst[8:12], ssrc)
++	var nonce [24]byte
++	binary.BigEndian.PutUint32(nonce[:4], uint32(counter))
++	dst = aead.Seal(dst, nonce[:aead.NonceSize()], frame, dst[:12])
++	dst = append(dst, nonce[:4]...)
++	return dst, nil
++}
++func openVoiceRTP(dst []byte, aead cipher.AEAD, packet []byte) (frame []byte, ssrc uint32, seq uint16, timestamp uint32, err error) {
++	header, ext, err := voiceRTPHeader(packet)
++	if err != nil {
++		return nil, 0, 0, 0, err
++	}
++	if len(packet) < header+aead.Overhead()+4 {
++		return nil, 0, 0, 0, errors.New("truncated voice ciphertext")
++	}
++	cipherEnd := len(packet) - 4
++	plainLen := cipherEnd - header - aead.Overhead()
++	if cap(dst) < plainLen {
++		return nil, 0, 0, 0, errors.New("voice decrypt output exceeds bound")
++	}
++	var nonce [24]byte
++	copy(nonce[:4], packet[cipherEnd:])
++	plain, err := aead.Open(dst[:0], nonce[:aead.NonceSize()], packet[header:cipherEnd], packet[:header])
++	if err != nil {
++		return nil, 0, 0, 0, errors.New("voice transport authentication failed")
++	}
++	if ext > len(plain) {
++		return nil, 0, 0, 0, errors.New("truncated authenticated RTP extension")
++	}
++	plain = plain[ext:]
++	if packet[0]&32 != 0 {
++		if len(plain) == 0 {
++			return nil, 0, 0, 0, errors.New("missing RTP padding")
++		}
++		padding := int(plain[len(plain)-1])
++		if padding == 0 || padding > len(plain) {
++			return nil, 0, 0, 0, errors.New("invalid RTP padding")
++		}
++		plain = plain[:len(plain)-padding]
++	}
++	if len(plain) == 0 {
++		return nil, 0, 0, 0, errors.New("empty voice frame")
++	}
++	return plain, binary.BigEndian.Uint32(packet[8:12]), binary.BigEndian.Uint16(packet[2:4]), binary.BigEndian.Uint32(packet[4:8]), nil
++}
+diff --git a/voice_protocol.go b/voice_protocol.go
+new file mode 100644
+--- /dev/null
++++ b/voice_protocol.go
+@@ -0,0 +1,64 @@
++package discordgo
++
++import (
++	"encoding/binary"
++	"encoding/json"
++	"errors"
++)
++
++type voiceEnvelope struct {
++	Op  int             `json:"op"`
++	D   json.RawMessage `json:"d"`
++	Seq *uint16         `json:"seq,omitempty"`
++}
++type voiceHeartbeatData struct {
++	T      int64 `json:"t"`
++	SeqAck int   `json:"seq_ack"`
++}
++type voiceResumeData struct {
++	ServerID  string `json:"server_id"`
++	SessionID string `json:"session_id"`
++	Token     string `json:"token"`
++	SeqAck    int    `json:"seq_ack"`
++}
++type voiceTransition struct {
++	ID uint16 `json:"transition_id"`
++}
++type voicePrepareTransition struct {
++	ID      uint16 `json:"transition_id"`
++	Version uint16 `json:"protocol_version"`
++}
++type voicePrepareEpoch struct {
++	Epoch   uint64 `json:"epoch"`
++	Version uint16 `json:"protocol_version"`
++}
++
++var voiceRequiredFields = map[int][]string{2: {"ssrc", "ip", "port", "modes"}, 4: {"mode", "secret_key", "dave_protocol_version"}, 5: {"user_id", "ssrc", "speaking"}, 8: {"heartbeat_interval"}, 6: {"t"}, 11: {"user_ids"}, 13: {"user_id"}, 21: {"protocol_version", "transition_id"}, 22: {"transition_id"}, 24: {"protocol_version", "epoch"}}
++
++// A Resume wire encoder is retained for v8 protocol fixtures only. Production
++// connections deliberately fail on loss and never invoke Resume or replay.
++func voiceResumeWire(serverID, sessionID, token string, seqAck int) ([]byte, error) {
++	return json.Marshal(struct {
++		Op int             `json:"op"`
++		D  voiceResumeData `json:"d"`
++	}{7, voiceResumeData{serverID, sessionID, token, seqAck}})
++}
++func parseVoiceBinary(p []byte, max int) (sequence uint16, opcode byte, payload []byte, err error) {
++	if len(p) < 3 || len(p) > max {
++		return 0, 0, nil, errors.New("invalid voice binary framing")
++	}
++	return binary.BigEndian.Uint16(p[:2]), p[2], p[3:], nil
++}
++func requireVoiceFields(data json.RawMessage, names ...string) error {
++	var fields map[string]json.RawMessage
++	if err := json.Unmarshal(data, &fields); err != nil {
++		return errors.New("invalid voice opcode object")
++	}
++	for _, name := range names {
++		value, ok := fields[name]
++		if !ok || len(value) == 0 || string(value) == "null" {
++			return errors.New("missing required voice opcode field")
++		}
++	}
++	return nil
++}
+diff --git a/voice_protocol_test.go b/voice_protocol_test.go
+new file mode 100644
+--- /dev/null
++++ b/voice_protocol_test.go
+@@ -0,0 +1,230 @@
++package discordgo
++
++import (
++	"bytes"
++	"context"
++	"encoding/binary"
++	"encoding/json"
++	"math"
++	"testing"
++	"time"
++)
++
++func voiceFixtureConfig() VoiceConfig {
++	return VoiceConfig{
++		MaxWebSocketBytes: 65536, MaxControlMessages: 16, MaxParticipants: 16, MaxDecryptors: 16, MaxProposalBytes: 16384, MaxProposals: 16, MaxTransitions: 8, MaxTransitionBytes: 32768, MaxOpusBytes: 1275, MaxEncryptedFrameBytes: 1536, MaxUDPPacketBytes: 2048, ReceiveQueuePackets: 16, ReceiveQueueBytes: 20400,
++		HandshakeTimeout: time.Second, RekeyTimeout: time.Second, WriteTimeout: time.Second, UDPDiscoveryTimeout: time.Second, UDPKeepAliveInterval: time.Second, HeartbeatTimeout: time.Second, SubmitTimeout: time.Second, ReceiptTimeout: time.Second, CloseTimeout: time.Second,
++	}
++}
++func TestVoiceConfigRequiresEveryFiniteBound(t *testing.T) {
++	good := voiceFixtureConfig()
++	if err := good.Validate(); err != nil {
++		t.Fatal(err)
++	}
++	cases := []VoiceConfig{{}, good, good, good, good, good}
++	cases[1].MaxControlMessages = 0
++	cases[2].RekeyTimeout = 0
++	cases[3].MaxUDPPacketBytes = 65508
++	cases[4].ReceiveQueueBytes = 1
++	cases[5].MaxProposalBytes = math.MaxInt
++	for i, c := range cases {
++		if c.Validate() == nil {
++			t.Fatalf("invalid configuration %d accepted", i)
++		}
++	}
++}
++func TestVoiceBinarySequenceAndDirection(t *testing.T) {
++	for _, op := range []byte{25, 27, 29, 30} {
++		wire := []byte{0xff, 0xff, op, 0x12, 0x34, 0xaa}
++		seq, got, payload, err := parseVoiceBinary(wire, 64)
++		if err != nil || seq != 65535 || got != op || !bytes.Equal(payload, wire[3:]) {
++			t.Fatalf("binary decode %d: seq=%d op=%d payload=%x err=%v", op, seq, got, payload, err)
++		}
++	}
++	for _, p := range [][]byte{nil, {25}, {0, 25}} {
++		if _, _, _, err := parseVoiceBinary(p, 64); err == nil {
++			t.Fatalf("truncated frame accepted %x", p)
++		}
++	}
++	if _, _, _, err := parseVoiceBinary([]byte{0, 1, 25, 0}, 3); err == nil {
++		t.Fatal("oversized binary frame accepted")
++	}
++	wire, err := voiceResumeWire("1", "session", "credential", 0)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if string(wire) != `{"op":7,"d":{"server_id":"1","session_id":"session","token":"credential","seq_ack":0}}` {
++		t.Fatalf("incorrect v8 Resume: %s", wire)
++	}
++	wire, err = voiceResumeWire("1", "session", "credential", 65535)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if !bytes.Contains(wire, []byte(`"seq_ack":65535`)) {
++		t.Fatal("last binary sequence missing from Resume")
++	}
++}
++func TestVoiceEpochWireHasNoTransitionID(t *testing.T) {
++	b, err := json.Marshal(voicePrepareEpoch{Epoch: 1, Version: 1})
++	if err != nil {
++		t.Fatal(err)
++	}
++	if string(b) != `{"epoch":1,"protocol_version":1}` {
++		t.Fatalf("incorrect PrepareEpoch schema: %s", b)
++	}
++	b, err = json.Marshal(voiceHeartbeatData{T: 123, SeqAck: -1})
++	if err != nil {
++		t.Fatal(err)
++	}
++	if string(b) != `{"t":123,"seq_ack":-1}` {
++		t.Fatalf("incorrect v8 heartbeat: %s", b)
++	}
++}
++func TestVoiceModeNegotiationNoLegacyFallback(t *testing.T) {
++	for _, c := range []struct {
++		modes []string
++		want  string
++	}{
++		{[]string{voiceXChaChaMode, voiceAESMode}, voiceAESMode},
++		{[]string{voiceXChaChaMode}, voiceXChaChaMode},
++	} {
++		got, err := selectVoiceMode(c.modes)
++		if err != nil || got != c.want {
++			t.Fatalf("mode %q %v", got, err)
++		}
++	}
++	for _, mode := range []string{"xsalsa20_poly1305", "aead_aes256_gcm", "xsalsa20_poly1305_lite_rtpsize", ""} {
++		if _, err := selectVoiceMode([]string{mode}); err == nil {
++			t.Fatalf("legacy mode accepted %q", mode)
++		}
++		if _, err := voiceAEAD(mode, make([]byte, 32)); err == nil {
++			t.Fatalf("legacy AEAD constructed %q", mode)
++		}
++	}
++}
++func TestVoiceAEADRoundTripAndAuthentication(t *testing.T) {
++	for _, mode := range []string{voiceAESMode, voiceXChaChaMode} {
++		t.Run(mode, func(t *testing.T) {
++			aead, err := voiceAEAD(mode, bytes.Repeat([]byte{7}, 32))
++			if err != nil {
++				t.Fatal(err)
++			}
++			frame := []byte{0xaa, 0xbb, 0xcc, 0xdd}
++			dst := make([]byte, 0, 2048)
++			wire, err := sealVoiceRTP(dst, aead, 42, 65535, math.MaxUint32, 1234, frame)
++			if err != nil {
++				t.Fatal(err)
++			}
++			if !bytes.Equal(wire[len(wire)-4:], []byte{0, 0, 4, 0xd2}) {
++				t.Fatalf("nonce suffix must equal first4 nonce bytes: %x", wire)
++			}
++			plain, ssrc, seq, ts, err := openVoiceRTP(make([]byte, 2048), aead, wire)
++			if err != nil || !bytes.Equal(plain, frame) || ssrc != 42 || seq != 65535 || ts != math.MaxUint32 {
++				t.Fatalf("RTP roundtrip: %x %d %d %d %v", plain, ssrc, seq, ts, err)
++			}
++			for _, index := range []int{2, 4, 8, 12, len(wire) - 1} {
++				bad := append([]byte(nil), wire...)
++				bad[index] ^= 1
++				if _, _, _, _, err := openVoiceRTP(make([]byte, 2048), aead, bad); err == nil {
++					t.Fatalf("tampering at %d authenticated", index)
++				}
++			}
++			if _, err := sealVoiceRTP(dst, aead, 42, 0, 0, uint64(math.MaxUint32)+1, frame); err == nil {
++				t.Fatal("nonce wrapped")
++			}
++			if _, err := sealVoiceRTP(make([]byte, 0, 12), aead, 42, 0, 0, 0, frame); err == nil {
++				t.Fatal("undersized output accepted")
++			}
++		})
++	}
++}
++func TestVoiceAEADAuthenticatedExtensionsAndPadding(t *testing.T) {
++	for _, mode := range []string{voiceAESMode, voiceXChaChaMode} {
++		t.Run(mode, func(t *testing.T) {
++			aead, err := voiceAEAD(mode, make([]byte, 32))
++			if err != nil {
++				t.Fatal(err)
++			}
++			// RTP X+P+one CSRC; extension preamble remains AAD, its four-byte
++			// extension body is encrypted and removed only after authentication.
++			header := []byte{0xb1, 120, 0, 9, 0, 0, 0, 10, 0, 0, 0, 11, 0, 0, 0, 12, 0xbe, 0xde, 0, 1}
++			payload := []byte{0x10, 0xff, 0, 0, 0xaa, 0xbb, 0, 2}
++			nonce := make([]byte, aead.NonceSize())
++			binary.BigEndian.PutUint32(nonce[:4], 7)
++			wire := append([]byte(nil), header...)
++			wire = aead.Seal(wire, nonce, payload, header)
++			wire = append(wire, nonce[:4]...)
++			plain, ssrc, seq, ts, err := openVoiceRTP(make([]byte, 2048), aead, wire)
++			if err != nil || !bytes.Equal(plain, []byte{0xaa, 0xbb}) || ssrc != 11 || seq != 9 || ts != 10 {
++				t.Fatalf("extension decode: %x %v", plain, err)
++			}
++			bad := append([]byte(nil), wire...)
++			bad[19] = 2
++			if _, _, _, _, err := openVoiceRTP(make([]byte, 2048), aead, bad); err == nil {
++				t.Fatal("extension length not authenticated")
++			}
++			for length := range len(header) {
++				if _, _, _, _, err := openVoiceRTP(make([]byte, 2048), aead, wire[:length]); err == nil {
++					t.Fatalf("truncated RTP accepted %d", length)
++				}
++			}
++		})
++	}
++}
++func TestVoiceOpusFramingAndDuration(t *testing.T) {
++	valid := [][]byte{
++		{0xf8, 0xff, 0xfe},                // CELT single 20 ms frame
++		{0x08, 0xaa},                      // SILK single20
++		{0x91, 0xaa, 0xbb},                // CELT two10ms CBR
++		{0x92, 1, 0xaa, 0xbb},             // CELT two10ms VBR
++		{0x83, 8, 1, 2, 3, 4, 5, 6, 7, 8}, // eight2.5ms CBR
++		{0x93, 0x42, 1, 0xaa, 0xbb, 0},    // two10ms CBR +1byte padding
++	}
++	for _, p := range valid {
++		if err := ValidateOpusPacket(p, 1275); err != nil {
++			t.Fatalf("valid packet %x: %v", p, err)
++		}
++	}
++	invalid := [][]byte{nil, {}, {0x00, 0xaa}, {0x10, 0xaa}, {0x91, 1}, {0x92}, {0x92, 252}, {0x92, 4, 1}, {0x83}, {0x83, 0}, {0x83, 49}, {0x93, 0x42, 255}, {0x93, 0x42, 4, 1}, {0x93, 0x82, 20, 1}}
++	for _, p := range invalid {
++		if ValidateOpusPacket(p, 1275) == nil {
++			t.Fatalf("invalid packet accepted %x", p)
++		}
++	}
++	if ValidateOpusPacket([]byte{0xf8, 0xff, 0xfe}, 2) == nil {
++		t.Fatal("packet byte bound ignored")
++	}
++	if err := validateOpusPacket([]byte{0x10, 0xaa}, 1275, 0); err != nil {
++		t.Fatal("valid incoming40ms must not inherit producer20ms restriction", err)
++	}
++}
++func TestVoiceUnavailableOrdinaryJoin(t *testing.T) {
++	if VoiceAvailable() {
++		t.Skip("ordinary-build boundary only")
++	}
++	s, _ := New("Bot token")
++	if _, err := s.ChannelVoiceJoinContext(context.Background(), "1", "2", true, false, VoiceConfig{}); err != ErrVoiceUnavailable {
++		t.Fatalf("ordinary join: %v", err)
++	}
++}
++func TestVoiceAEADInPlaceSenderStorage(t *testing.T) {
++	for _, mode := range []string{voiceAESMode, voiceXChaChaMode} {
++		t.Run(mode, func(t *testing.T) {
++			aead, err := voiceAEAD(mode, make([]byte, 32))
++			if err != nil {
++				t.Fatal(err)
++			}
++			storage := make([]byte, 2048)
++			frame := []byte{1, 2, 3, 4}
++			copy(storage[12:], frame)
++			packet, err := sealVoiceRTP(storage[:0], aead, 1, 2, 3, 4, storage[12:16])
++			if err != nil {
++				t.Fatal(err)
++			}
++			plain, _, _, _, err := openVoiceRTP(make([]byte, 2048), aead, packet)
++			if err != nil || !bytes.Equal(plain, frame) {
++				t.Fatalf("in-place sender: %x %v", plain, err)
++			}
++		})
++	}
++}
+diff --git a/voice_transport.go b/voice_transport.go
+new file mode 100644
+--- /dev/null
++++ b/voice_transport.go
+@@ -0,0 +1,570 @@
++//go:build voice && cgo
++
++package discordgo
++
++import (
++	"context"
++	"crypto/cipher"
++	"encoding/json"
++	"errors"
++	"net"
++	"net/url"
++	"strings"
++	"sync"
++	"time"
++
++	"github.com/bwmarrin/discordgo/internal/dave"
++	"github.com/gorilla/websocket"
++)
++
++func VoiceAvailable() bool { return dave.MaxSupportedProtocolVersion() > 0 }
++
++type opusHandoff struct {
++	ctx   context.Context
++	opus  []byte
++	reply chan handoffResult
++}
++type handoffResult struct {
++	submission *OpusSubmission
++	err        error
++}
++type voiceMessage struct {
++	kind int
++	data []byte
++}
++
++type nativeVoice struct {
++	v                            *VoiceConnection
++	ctx                          context.Context
++	cancel                       context.CancelFunc
++	mu                           sync.Mutex
++	failure                      error
++	closing                      bool
++	readyFlag                    bool
++	transportReady               bool
++	nativeReadyFlag              bool
++	change                       chan struct{}
++	cleaned                      chan struct{}
++	setupDone                    chan struct{}
++	cleanupErr                   error
++	ws                           *websocket.Conn
++	udp                          *net.UDPConn
++	writer                       chan struct{}
++	udpWriter                    chan struct{}
++	wg                           sync.WaitGroup
++	cryptoMu                     gatewayMutex
++	dave                         *dave.Context
++	aead                         cipher.AEAD
++	mode                         string
++	ssrc                         uint32
++	nonce                        uint64
++	rtpSequence                  uint16
++	rtpTimestamp                 uint32
++	seqAck                       int
++	version                      uint16
++	daveGeneration               uint64
++	resetAuthorizationGeneration uint64
++	resetAuthorizationVersion    uint16
++	resetPackageSent             bool
++	participants                 map[string]struct{}
++	senders                      map[uint32]string
++	external                     []byte
++	resetDeadline                time.Time
++	proposalDeadline             time.Time
++	transitions                  map[uint16]time.Time
++	messages                     chan voiceMessage
++	handoffs                     chan opusHandoff
++	outstanding                  chan struct{}
++	packets                      chan *Packet
++	closeGate                    chan struct{}
++	queueMu                      sync.Mutex
++	queueBytes                   int
++	heartbeatMu                  sync.Mutex
++	heartbeatInterval            time.Duration
++	heartbeatSent                time.Time
++	heartbeatNonce               int64
++	heartbeatPending             bool
++	heartbeatWake                chan struct{}
++}
++
++func newVoiceEngine(v *VoiceConnection) (voiceEngine, error) {
++	c := v.config
++	native, err := dave.New(dave.Config{MaxParticipants: c.MaxParticipants, MaxDecryptors: c.MaxDecryptors, MaxControlBytes: c.MaxWebSocketBytes, MaxProposalCount: c.MaxProposals, MaxProposalBytes: c.MaxProposalBytes, MaxPreparedTransitions: c.MaxTransitions, MaxTransitionBytes: c.MaxTransitionBytes, MaxFrameBytes: c.MaxOpusBytes, MaxEncryptedFrameBytes: c.MaxEncryptedFrameBytes})
++	if err != nil {
++		return nil, err
++	}
++	ctx, cancel := context.WithCancel(context.Background())
++	n := &nativeVoice{v: v, ctx: ctx, cancel: cancel, dave: native, change: make(chan struct{}), cleaned: make(chan struct{}), setupDone: make(chan struct{}), writer: make(chan struct{}, 1), seqAck: -1, participants: map[string]struct{}{v.UserID: {}}, senders: make(map[uint32]string), transitions: make(map[uint16]time.Time), messages: make(chan voiceMessage, c.MaxControlMessages), handoffs: make(chan opusHandoff), outstanding: make(chan struct{}, 1), packets: make(chan *Packet, c.ReceiveQueuePackets), heartbeatWake: make(chan struct{}, 1)}
++	n.udpWriter = make(chan struct{}, 1)
++	n.outstanding <- struct{}{}
++	n.closeGate = make(chan struct{}, 1)
++	n.closeGate <- struct{}{}
++	go n.cleanup()
++	return n, nil
++}
++func (n *nativeVoice) done() <-chan struct{} { return n.cleaned }
++func (n *nativeVoice) err() error            { n.mu.Lock(); defer n.mu.Unlock(); return n.failure }
++func (n *nativeVoice) ready() bool {
++	n.mu.Lock()
++	defer n.mu.Unlock()
++	return n.readyFlag && n.failure == nil && !n.closing
++}
++func (n *nativeVoice) changed() <-chan struct{} { n.mu.Lock(); defer n.mu.Unlock(); return n.change }
++func (n *nativeVoice) setReady(ready, native bool) {
++	n.mu.Lock()
++	defer n.mu.Unlock()
++	n.nativeReadyFlag = native
++	if n.readyFlag != ready {
++		n.readyFlag = ready
++		close(n.change)
++		n.change = make(chan struct{})
++	}
++}
++func (n *nativeVoice) stop(err error) {
++	if err == nil {
++		err = ErrVoiceClosed
++	}
++	n.mu.Lock()
++	if n.failure != nil {
++		n.mu.Unlock()
++		return
++	}
++	n.failure = err
++	n.readyFlag = false
++	close(n.change)
++	n.change = make(chan struct{})
++	ws, udp := n.ws, n.udp
++	n.mu.Unlock()
++	if ws != nil {
++		_ = ws.Close()
++	}
++	if udp != nil {
++		_ = udp.Close()
++	}
++	n.cancel()
++}
++func (n *nativeVoice) cleanup() {
++	<-n.ctx.Done()
++	<-n.setupDone
++	n.wg.Wait()
++	n.cryptoMu.Lock()
++	n.cleanupErr = n.dave.Close()
++	n.clearPendingResetAuthorization()
++	n.aead = nil
++	clear(n.external)
++	n.external = nil
++	clear(n.participants)
++	clear(n.senders)
++	n.cryptoMu.Unlock()
++	n.mu.Lock()
++	n.ws = nil
++	n.udp = nil
++	n.transportReady = false
++	n.nativeReadyFlag = false
++	n.mu.Unlock()
++	for draining := true; draining; {
++		select {
++		case message := <-n.messages:
++			clear(message.data)
++		default:
++			draining = false
++		}
++	}
++	n.queueMu.Lock()
++	for draining := true; draining; {
++		select {
++		case packet := <-n.packets:
++			n.queueBytes -= len(packet.Opus)
++			clear(packet.Opus)
++		default:
++			draining = false
++		}
++	}
++	n.queueMu.Unlock()
++	n.v.Lock()
++	n.v.token = ""
++	n.v.sessionID = ""
++	n.v.endpoint = ""
++	n.v.Unlock()
++	n.v.finishLocalCleanup()
++	close(n.cleaned)
++}
++func (n *nativeVoice) wait(ctx context.Context) error {
++	select {
++	case <-n.cleaned:
++		return n.cleanupErr
++	default:
++	}
++	select {
++	case <-n.cleaned:
++		return n.cleanupErr
++	case <-ctx.Done():
++		select {
++		case <-n.cleaned:
++			return n.cleanupErr
++		default:
++			return ctx.Err()
++		}
++	}
++}
++func (n *nativeVoice) run(ctx context.Context) (err error) {
++	defer close(n.setupDone)
++	defer func() {
++		if err != nil {
++			n.stop(err)
++		}
++	}()
++	if err = n.v.session.ChannelVoiceJoinManualContext(ctx, n.v.GuildID, n.v.ChannelID, n.v.mute, n.v.deaf); err != nil {
++		return err
++	}
++	for {
++		n.v.Lock()
++		sid, token, endpoint := n.v.sessionID, n.v.token, n.v.endpoint
++		if sid != "" && token != "" && endpoint != "" {
++			n.v.started = true
++			n.v.Unlock()
++			break
++		}
++		n.v.Unlock()
++		select {
++		case <-n.v.credentials:
++		case <-ctx.Done():
++			return ctx.Err()
++		case <-n.ctx.Done():
++			return n.err()
++		}
++	}
++	n.v.RLock()
++	endpoint, sid, token := n.v.endpoint, n.v.sessionID, n.v.token
++	n.v.RUnlock()
++	u, err := url.Parse("wss://" + endpoint)
++	if err != nil || u.Hostname() == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || strings.Contains(endpoint, "@") {
++		return errors.New("invalid voice endpoint")
++	}
++	u.Path = "/"
++	u.RawQuery = "v=8"
++	dialCtx, cancel := context.WithCancel(ctx)
++	stop := context.AfterFunc(n.ctx, cancel)
++	dialer := *n.v.session.Dialer
++	dialer.HandshakeTimeout = n.v.config.HandshakeTimeout
++	dialer.ReadBufferSize = n.v.config.MaxWebSocketBytes
++	dialer.WriteBufferSize = n.v.config.MaxWebSocketBytes
++	dialer.EnableCompression = false
++	ws, response, dialErr := dialer.DialContext(dialCtx, u.String(), nil)
++	stop()
++	cancel()
++	if dialErr != nil {
++		if response != nil {
++			if response.Body != nil {
++				response.Body.Close()
++			}
++			if response.StatusCode == 403 {
++				return ErrVoicePermissionDenied
++			}
++		}
++		if ctx.Err() != nil {
++			return ctx.Err()
++		}
++		if n.ctx.Err() != nil {
++			return n.err()
++		}
++		return errors.New("voice websocket connection failed")
++	}
++	n.mu.Lock()
++	if n.failure != nil {
++		n.mu.Unlock()
++		ws.Close()
++		return n.err()
++	}
++	n.ws = ws
++	n.mu.Unlock()
++	ws.SetReadLimit(int64(n.v.config.MaxWebSocketBytes))
++	ws.SetPingHandler(func(data string) error { return n.write(n.ctx, websocket.PongMessage, []byte(data)) })
++	ws.SetCloseHandler(func(int, string) error { return nil })
++	identify := struct {
++		ServerID  string `json:"server_id"`
++		UserID    string `json:"user_id"`
++		SessionID string `json:"session_id"`
++		Token     string `json:"token"`
++		MaxDAVE   uint16 `json:"max_dave_protocol_version"`
++	}{n.v.GuildID, n.v.UserID, sid, token, dave.MaxSupportedProtocolVersion()}
++	if err = n.writeJSON(ctx, 0, identify); err != nil {
++		return err
++	}
++	n.wg.Add(4)
++	go n.readWebSocket()
++	go n.controlLoop()
++	go n.heartbeatLoop()
++	go n.senderLoop()
++	err = n.v.WaitReady(ctx)
++	if errors.Is(err, context.DeadlineExceeded) {
++		n.mu.Lock()
++		daveMissing := n.transportReady && !n.nativeReadyFlag
++		n.mu.Unlock()
++		if daveMissing {
++			return ErrVoiceDAVETimeout
++		}
++	}
++	return err
++}
++func (n *nativeVoice) write(ctx context.Context, kind int, data []byte) error {
++	ctx, cancel := context.WithTimeout(ctx, n.v.config.WriteTimeout)
++	defer cancel()
++	if len(data) > n.v.config.MaxWebSocketBytes {
++		return errors.New("voice control exceeds bound")
++	}
++	select {
++	case n.writer <- struct{}{}:
++	case <-ctx.Done():
++		return ctx.Err()
++	case <-n.ctx.Done():
++		return n.err()
++	}
++	defer func() { <-n.writer }()
++	if err := ctx.Err(); err != nil {
++		return err
++	}
++	n.mu.Lock()
++	ws := n.ws
++	n.mu.Unlock()
++	if ws == nil {
++		return ErrVoiceClosed
++	}
++	deadline, _ := ctx.Deadline()
++	if err := ws.SetWriteDeadline(deadline); err != nil {
++		return err
++	}
++	callbackDone := make(chan struct{})
++	stop := context.AfterFunc(ctx, func() { _ = ws.Close(); close(callbackDone) })
++	err := ws.WriteMessage(kind, data)
++	if !stop() {
++		<-callbackDone
++	}
++	if ctx.Err() != nil {
++		return ctx.Err()
++	}
++	if err != nil {
++		return errors.New("voice websocket write failed")
++	}
++	return nil
++}
++func (n *nativeVoice) writeJSON(ctx context.Context, op int, value any) error {
++	b, err := json.Marshal(struct {
++		Op int `json:"op"`
++		D  any `json:"d"`
++	}{op, value})
++	if err != nil {
++		return err
++	}
++	defer clear(b)
++	return n.write(ctx, websocket.TextMessage, b)
++}
++func (n *nativeVoice) writeBinary(ctx context.Context, op byte, value []byte) error {
++	if len(value) >= n.v.config.MaxWebSocketBytes {
++		return errors.New("voice binary exceeds bound")
++	}
++	b := make([]byte, len(value)+1)
++	b[0] = op
++	copy(b[1:], value)
++	defer clear(b)
++	return n.write(ctx, websocket.BinaryMessage, b)
++}
++func (n *nativeVoice) readWebSocket() {
++	defer n.wg.Done()
++	for {
++		kind, b, err := n.ws.ReadMessage()
++		if err != nil {
++			var closed *websocket.CloseError
++			if errors.As(err, &closed) && (closed.Code == 4012 || closed.Code == 4016 || closed.Code == 4017) {
++				n.stop(ErrVoiceUnavailable)
++			} else {
++				n.stop(errors.New("voice websocket lost"))
++			}
++			return
++		}
++		if kind != websocket.TextMessage && kind != websocket.BinaryMessage {
++			clear(b)
++			continue
++		}
++		select {
++		case n.messages <- voiceMessage{kind, b}:
++		case <-n.ctx.Done():
++			clear(b)
++			return
++		default:
++			clear(b)
++			n.stop(errors.New("voice control mailbox exhausted"))
++			return
++		}
++	}
++}
++func (n *nativeVoice) handleVoiceMessage(message voiceMessage) error {
++	defer clear(message.data)
++	if err := n.cryptoMu.lockContext(n.ctx); err != nil {
++		return err
++	}
++	defer n.cryptoMu.Unlock()
++	if err := n.err(); err != nil {
++		n.clearPendingResetAuthorization()
++		return err
++	}
++	err := n.control(message)
++	if err != nil {
++		n.clearPendingResetAuthorization()
++	}
++	n.heartbeatMu.Lock()
++	helloReceived := n.heartbeatInterval > 0
++	n.heartbeatMu.Unlock()
++	nativeReady := n.dave.Ready()
++	n.setReady(helloReceived && n.aead != nil && nativeReady, nativeReady)
++	return err
++}
++func (n *nativeVoice) controlLoop() {
++	defer n.wg.Done()
++	timer := time.NewTimer(n.v.config.RekeyTimeout)
++	if !timer.Stop() {
++		<-timer.C
++	}
++	defer timer.Stop()
++	for {
++		select {
++		case <-n.ctx.Done():
++			return
++		case message := <-n.messages:
++			if err := n.handleVoiceMessage(message); err != nil {
++				n.stop(err)
++				return
++			}
++		case <-timer.C:
++		}
++		n.cryptoMu.Lock()
++		deadline := n.nextRekeyDeadline()
++		n.cryptoMu.Unlock()
++		if !timer.Stop() {
++			select {
++			case <-timer.C:
++			default:
++			}
++		}
++		if !deadline.IsZero() {
++			if !time.Now().Before(deadline) {
++				n.stop(ErrVoiceDAVETimeout)
++				return
++			}
++			timer.Reset(time.Until(deadline))
++		}
++	}
++}
++func (n *nativeVoice) submit(ctx context.Context, p []byte) (*OpusSubmission, error) {
++	if err := ValidateOpusPacket(p, n.v.config.MaxOpusBytes); err != nil {
++		return nil, err
++	}
++	if err := ctx.Err(); err != nil {
++		return nil, err
++	}
++	if !n.ready() {
++		if err := n.err(); err != nil {
++			return nil, err
++		}
++		return nil, ErrVoiceNotReady
++	}
++	select {
++	case <-n.outstanding:
++	default:
++		return nil, ErrVoiceInFlight
++	}
++	release := true
++	defer func() {
++		if release {
++			n.outstanding <- struct{}{}
++		}
++	}()
++	submitCtx, cancel := context.WithTimeout(ctx, n.v.config.SubmitTimeout)
++	defer cancel()
++	request := opusHandoff{ctx: submitCtx, opus: p, reply: make(chan handoffResult, 1)}
++	select {
++	case n.handoffs <- request:
++	case <-submitCtx.Done():
++		return nil, submitCtx.Err()
++	case <-n.ctx.Done():
++		return nil, n.err()
++	}
++	// Once the sender receives the request, it alone decides whether ownership was
++	// transferred. Always await that decision, even if the submit context cancels.
++	result := <-request.reply
++	if result.err != nil {
++		return nil, result.err
++	}
++	release = false
++	return result.submission, nil
++}
++func (n *nativeVoice) receive(ctx context.Context) (*Packet, error) {
++	if err := ctx.Err(); err != nil {
++		return nil, err
++	}
++	if n.ctx.Err() != nil {
++		return nil, n.err()
++	}
++	select {
++	case <-ctx.Done():
++		return nil, ctx.Err()
++	case <-n.ctx.Done():
++		return nil, n.err()
++	case packet := <-n.packets:
++		n.queueMu.Lock()
++		n.queueBytes -= len(packet.Opus)
++		n.queueMu.Unlock()
++		if n.ctx.Err() != nil {
++			return nil, n.err()
++		}
++		if err := ctx.Err(); err != nil {
++			return nil, err
++		}
++		return packet, nil
++	}
++}
++func (n *nativeVoice) shutdown(ctx context.Context) error {
++	ctx, cancel := context.WithTimeout(ctx, n.v.config.CloseTimeout)
++	defer cancel()
++	select {
++	case <-n.closeGate:
++	case <-ctx.Done():
++		return ctx.Err()
++	}
++	defer func() { n.closeGate <- struct{}{} }()
++	n.mu.Lock()
++	if n.failure != nil {
++		n.mu.Unlock()
++		return n.wait(ctx)
++	}
++	n.closing = true
++	n.readyFlag = false
++	close(n.change)
++	n.change = make(chan struct{})
++	ws := n.ws
++	n.mu.Unlock()
++	// Admission is closed. Wait for the sole non-retractable handoff to complete
++	// before clearing speaking, then close all real sockets and native owners.
++	select {
++	case <-n.outstanding:
++		defer func() { n.outstanding <- struct{}{} }()
++	case <-n.ctx.Done():
++		return n.wait(ctx)
++	case <-ctx.Done():
++		n.stop(ctx.Err())
++		return ctx.Err()
++	}
++	var speakingErr error
++	if ws != nil {
++		speakingErr = n.speaking(ctx, false)
++	}
++	if ws != nil && speakingErr == nil {
++		speakingErr = n.write(ctx, websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
++	}
++	if speakingErr != nil {
++		n.stop(speakingErr)
++	} else {
++		n.stop(ErrVoiceClosed)
++	}
++	return errors.Join(speakingErr, n.wait(ctx))
++}
+diff --git a/voice_transport_test.go b/voice_transport_test.go
+new file mode 100644
+--- /dev/null
++++ b/voice_transport_test.go
+@@ -0,0 +1,746 @@
++//go:build voice && cgo
++
++package discordgo
++
++import (
++	"bytes"
++	"context"
++	"encoding/hex"
++	"encoding/json"
++	"errors"
++	"net"
++	"net/http"
++	"net/http/httptest"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/gorilla/websocket"
++)
++
++// A public MLS ExternalSender encoded per the pinned libdave MLSpp source:
++// SEC1 P256 generator public key and BasicCredential identity 00 01 01 00.
++// This is not a private signing key or a replacement MLS implementation.
++const voiceExternalSenderFixture = "4041046b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c2964fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f500010400010100"
++
++type voiceWireFixture struct {
++	kind int
++	data []byte
++}
++
++func nativePendingTransportFixture(t *testing.T) (*nativeVoice, <-chan voiceWireFixture) {
++	t.Helper()
++	return nativePendingTransportFixtureOrder(t, true)
++}
++func nativePendingTransportFixtureOrder(t *testing.T, externalFirst bool) (*nativeVoice, <-chan voiceWireFixture) {
++	t.Helper()
++	wires := make(chan voiceWireFixture, 32)
++	serverConn := make(chan *websocket.Conn, 1)
++	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		c, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
++		if err != nil {
++			return
++		}
++		serverConn <- c
++		for {
++			kind, b, err := c.ReadMessage()
++			if err != nil {
++				return
++			}
++			select {
++			case wires <- voiceWireFixture{kind, b}:
++			default:
++				return
++			}
++		}
++	}))
++	t.Cleanup(srv.Close)
++	ws, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http"), nil)
++	if err != nil {
++		t.Fatal(err)
++	}
++	peer := <-serverConn
++	t.Cleanup(func() { peer.Close() })
++	session, _ := New("Bot fixture")
++	v := &VoiceConnection{session: session, config: voiceFixtureConfig(), GuildID: "1", ChannelID: "1", UserID: "2", credentials: make(chan struct{}, 1)}
++	engine, err := newVoiceEngine(v)
++	if err != nil {
++		t.Fatal(err)
++	}
++	n := engine.(*nativeVoice)
++	v.engine = n
++	n.ws = ws
++	close(n.setupDone)
++	if err = n.handleVoiceMessage(voiceMessage{websocket.TextMessage, []byte(`{"op":8,"d":{"heartbeat_interval":1000}}`)}); err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() {
++		n.stop(ErrVoiceClosed)
++		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
++		defer cancel()
++		if err := n.wait(ctx); err != nil {
++			t.Error(err)
++		}
++	})
++	external, err := hex.DecodeString(voiceExternalSenderFixture)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if externalFirst {
++		binaryFrame := append([]byte{0xff, 0xff, 25}, external...)
++		if err = n.handleVoiceMessage(voiceMessage{websocket.BinaryMessage, binaryFrame}); err != nil {
++			t.Fatal(err)
++		}
++	}
++	n.mode = voiceXChaChaMode
++	n.ssrc = 42
++	var key [32]int
++	description, _ := json.Marshal(struct {
++		Mode    string  `json:"mode"`
++		Key     [32]int `json:"secret_key"`
++		Version int     `json:"dave_protocol_version"`
++	}{voiceXChaChaMode, key, 1})
++	description = append(append([]byte(`{"op":4,"seq":0,"d":`), description...), '}')
++	if err = n.handleVoiceMessage(voiceMessage{websocket.TextMessage, description}); err != nil {
++		t.Fatal(err)
++	}
++	first := nextVoiceWire(t, wires)
++	if first.kind != websocket.BinaryMessage || len(first.data) < 2 || first.data[0] != 26 {
++		t.Fatalf("client KeyPackage framing: %x", first.data)
++	}
++	if n.ready() {
++		t.Fatal("transport-ready before DAVE transition")
++	}
++	return n, wires
++}
++func nativeTransportFixture(t *testing.T) (*nativeVoice, <-chan voiceWireFixture) {
++	t.Helper()
++	n, wires := nativePendingTransportFixture(t)
++	// Initial SessionDescription and its package are deliberately insufficient:
++	// this pending-self path requires authenticated24(epoch=1), then a fresh26.
++	if err := n.handleVoiceMessage(voiceMessage{websocket.TextMessage, []byte(`{"op":24,"seq":1,"d":{"epoch":1,"protocol_version":1}}`)}); err != nil {
++		t.Fatal(err)
++	}
++	reset := nextVoiceWire(t, wires)
++	if reset.kind != websocket.BinaryMessage || len(reset.data) < 2 || reset.data[0] != 26 {
++		t.Fatalf("reset key-package framing: %x", reset.data)
++	}
++	if err := n.handleVoiceMessage(voiceMessage{websocket.TextMessage, []byte(`{"op":21,"seq":2,"d":{"transition_id":0,"protocol_version":1}}`)}); err != nil {
++		t.Fatal(err)
++	}
++	if !n.ready() {
++		t.Fatal("authorized epoch-one transition0 did not activate sender")
++	}
++	return n, wires
++}
++func nextVoiceWire(t *testing.T, wires <-chan voiceWireFixture) voiceWireFixture {
++	t.Helper()
++	select {
++	case w := <-wires:
++		return w
++	case <-time.After(time.Second):
++		t.Fatal("missing bounded voice wire message")
++		return voiceWireFixture{}
++	}
++}
++func nativeUDPFixture(t *testing.T, n *nativeVoice) *net.UDPConn {
++	t.Helper()
++	peer, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() { peer.Close() })
++	conn, err := net.DialUDP("udp", nil, peer.LocalAddr().(*net.UDPAddr))
++	if err != nil {
++		t.Fatal(err)
++	}
++	n.udp = conn
++	return peer
++}
++func TestVoiceNativeInitialAndSoleMemberReset(t *testing.T) {
++	n, wires := nativeTransportFixture(t)
++	if n.seqAck != 2 {
++		t.Fatalf("latest text sequence=%d", n.seqAck)
++	}
++	old := n.changed()
++	if err := n.handleVoiceMessage(voiceMessage{websocket.TextMessage, []byte(`{"op":24,"seq":3,"d":{"epoch":1,"protocol_version":1}}`)}); err != nil {
++		t.Fatal(err)
++	}
++	packageWire := nextVoiceWire(t, wires)
++	if packageWire.kind != websocket.BinaryMessage || packageWire.data[0] != 26 {
++		t.Fatalf("fresh key package: %x", packageWire.data)
++	}
++	if !n.ready() {
++		t.Fatal("reset discarded active sender before execute")
++	}
++	if err := n.handleVoiceMessage(voiceMessage{websocket.TextMessage, []byte(`{"op":21,"seq":4,"d":{"transition_id":0,"protocol_version":1}}`)}); err != nil {
++		t.Fatal(err)
++	}
++	if !n.ready() || !n.nextRekeyDeadline().IsZero() {
++		t.Fatal("sole member immediate transition did not finish")
++	}
++	select {
++	case <-old:
++		t.Fatal("ordinary rekey spuriously lost valid sender readiness")
++	default:
++	}
++	// No Ready23/Execute22 round trip is required for immediate zero.
++	select {
++	case wire := <-wires:
++		t.Fatalf("unexpected transition0 response: %s", wire.data)
++	default:
++	}
++}
++func TestVoiceNativeV8ParticipantsAndInvalidRecovery(t *testing.T) {
++	n, wires := nativeTransportFixture(t)
++	for _, data := range []string{`{"op":11,"seq":4,"d":{"user_ids":["3"]}}`, `{"op":5,"seq":5,"d":{"user_id":"3","ssrc":99,"speaking":1}}`} {
++		if err := n.handleVoiceMessage(voiceMessage{websocket.TextMessage, []byte(data)}); err != nil {
++			t.Fatal(err)
++		}
++	}
++	if n.senders[99] != "3" {
++		t.Fatal("recognized SSRC mapping missing")
++	}
++	if err := n.handleVoiceMessage(voiceMessage{websocket.TextMessage, []byte(`{"op":13,"seq":6,"d":{"user_id":"3"}}`)}); err != nil {
++		t.Fatal(err)
++	}
++	if _, ok := n.senders[99]; ok {
++		t.Fatal("disconnected sender retained")
++	}
++	// No staged proposals/current established MLS state: pinned libdave ignores
++	// this commit before parsing it. Ignored must not produce31 or a replacement26.
++	if err := n.handleVoiceMessage(voiceMessage{websocket.BinaryMessage, []byte{0, 7, 29, 0, 9, 0xff}}); err != nil {
++		t.Fatal(err)
++	}
++	select {
++	case wire := <-wires:
++		t.Fatalf("ignored commit caused recovery: %s", wire.data)
++	default:
++	}
++	// An empty, valid TLS proposal vector creates stateWithProposals in the
++	// official parser without emitting a synthetic commit. Now ff truly fails.
++	if err := n.handleVoiceMessage(voiceMessage{websocket.BinaryMessage, []byte{0, 8, 27, 0, 0}}); err != nil {
++		t.Fatal(err)
++	}
++	if err := n.handleVoiceMessage(voiceMessage{websocket.BinaryMessage, []byte{0, 9, 29, 0, 9, 0xff}}); err != nil {
++		t.Fatal(err)
++	}
++	invalid := nextVoiceWire(t, wires)
++	fresh := nextVoiceWire(t, wires)
++	if invalid.kind != websocket.TextMessage || string(invalid.data) != `{"op":31,"d":{"transition_id":9}}` {
++		t.Fatalf("invalid recovery wire: %s", invalid.data)
++	}
++	if fresh.kind != websocket.BinaryMessage || fresh.data[0] != 26 || n.seqAck != 9 {
++		t.Fatal("invalid recovery did not refresh key package/binary seq_ack")
++	}
++	if n.resetPackageSent || n.resetAuthorizationGeneration != 0 {
++		t.Fatal("invalid-commit recovery26 alone authorized pending-self activation")
++	}
++	for _, data := range []string{`{"op":21,"d":{"protocol_version":1}}`, `{"op":22,"d":{}}`, `{"op":24,"d":{"transition_id":2,"protocol_version":1}}`, `{"op":25,"d":{}}`} {
++		if n.handleVoiceMessage(voiceMessage{websocket.TextMessage, []byte(data)}) == nil {
++			t.Fatalf("invalid control accepted: %s", data)
++		}
++	}
++}
++func TestVoiceNativeOneReceiptAndPacing(t *testing.T) {
++	n, wires := nativeTransportFixture(t)
++	peer := nativeUDPFixture(t, n)
++	n.wg.Add(1)
++	go n.senderLoop()
++	frame := []byte{0xf8, 0xff, 0xfe}
++	ctx, cancel := context.WithCancel(context.Background())
++	cancel()
++	if sub, err := n.submit(ctx, frame); !errors.Is(err, context.Canceled) || sub != nil {
++		t.Fatalf("canceled before handoff: %v %v", sub, err)
++	}
++	first, err := n.submit(context.Background(), frame)
++	if err != nil {
++		t.Fatal(err)
++	}
++	one := <-first.Done()
++	if one.Err != nil {
++		t.Fatal(one.Err)
++	}
++	n.udpWriter <- struct{}{} // Hold the second real write to make admission deterministic.
++	secondCtx, secondCancel := context.WithCancel(context.Background())
++	second, err := n.submit(secondCtx, frame)
++	if err != nil {
++		t.Fatal(err)
++	}
++	secondCancel()
++	if sub, err := n.submit(context.Background(), frame); err != ErrVoiceInFlight || sub != nil {
++		t.Fatalf("second outstanding handoff accepted: %v %v", sub, err)
++	}
++	<-n.udpWriter
++	two := <-second.Done()
++	if two.Err != nil {
++		t.Fatal("post-handoff cancellation retracted packet", two.Err)
++	}
++	if two.WrittenAt.Sub(one.WrittenAt) < 20*time.Millisecond {
++		t.Fatal("sender emitted a catch-up burst")
++	}
++	speaking := nextVoiceWire(t, wires)
++	if speaking.kind != websocket.TextMessage || !bytes.Contains(speaking.data, []byte(`"speaking":1`)) {
++		t.Fatalf("first UDP lacked speaking: %s", speaking.data)
++	}
++	packet := make([]byte, 2048)
++	if err := peer.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
++		t.Fatal(err)
++	}
++	for range 2 {
++		size, _, err := peer.ReadFromUDP(packet)
++		if err != nil {
++			t.Fatal(err)
++		}
++		plain, _, _, _, err := openVoiceRTP(make([]byte, 2048), n.aead, packet[:size])
++		if err != nil {
++			t.Fatal(err)
++		}
++		if bytes.Equal(plain, frame) || len(plain) < 2 || !bytes.Equal(plain[len(plain)-2:], []byte{0xfa, 0xfa}) {
++			t.Fatal("UDP bypassed real DAVE frame encryption")
++		}
++	}
++	if err := n.shutdown(context.Background()); err != nil {
++		t.Fatal(err)
++	}
++}
++func TestVoiceNativeReceiveOnlyRejectsUnrecognizedPlaintext(t *testing.T) {
++	n, _ := nativeTransportFixture(t)
++	peer := nativeUDPFixture(t, n)
++	n.wg.Add(1)
++	go n.receiverLoop()
++	packet, err := sealVoiceRTP(make([]byte, 0, 2048), n.aead, 123, 1, 960, 1, []byte{0xf8, 0xff, 0xfe})
++	if err != nil {
++		t.Fatal(err)
++	}
++	if _, err = peer.WriteToUDP(packet, n.udp.LocalAddr().(*net.UDPAddr)); err != nil {
++		t.Fatal(err)
++	}
++	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
++	defer cancel()
++	if p, err := n.receive(ctx); p != nil || !errors.Is(err, context.DeadlineExceeded) {
++		t.Fatalf("unknown/plaintext sender leaked: %v %v", p, err)
++	}
++	if !n.ready() {
++		t.Fatal("receive-only operation unexpectedly needs a producer")
++	}
++}
++func TestVoiceNativeExternalMoveFailsGeneration(t *testing.T) {
++	n, _ := nativeTransportFixture(t)
++	n.v.session.VoiceConnections = map[string]*VoiceConnection{"1": n.v}
++	err := n.v.session.acceptVoiceState(&VoiceStateUpdate{VoiceState: &VoiceState{GuildID: "1", ChannelID: "3", UserID: "2", SessionID: "new"}})
++	if err == nil || n.err() == nil || n.ready() {
++		t.Fatal("external move did not fail generation")
++	}
++	select {
++	case <-n.done():
++	case <-time.After(time.Second):
++		t.Fatal("failed generation cleanup did not join")
++	}
++}
++func TestVoiceJoinRequiresBothMainGatewayEvents(t *testing.T) {
++	for _, onlyServer := range []bool{false, true} {
++		t.Run(map[bool]string{false: "state-only", true: "server-only"}[onlyServer], func(t *testing.T) {
++			wires := make(chan voiceWireFixture, 8)
++			serverConn := make(chan *websocket.Conn, 1)
++			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++				c, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
++				if err != nil {
++					return
++				}
++				serverConn <- c
++				for {
++					kind, b, err := c.ReadMessage()
++					if err != nil {
++						return
++					}
++					select {
++					case wires <- voiceWireFixture{kind, b}:
++					default:
++						return
++					}
++				}
++			}))
++			defer srv.Close()
++			ws, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http"), nil)
++			if err != nil {
++				t.Fatal(err)
++			}
++			defer ws.Close()
++			peer := <-serverConn
++			defer peer.Close()
++			s, _ := New("Bot fixture")
++			s.State.User = &User{ID: "2"}
++			s.wsConn = ws
++			ctx, cancel := context.WithCancel(context.Background())
++			defer cancel()
++			result := make(chan error, 1)
++			go func() {
++				_, err := s.ChannelVoiceJoinContext(ctx, "1", "1", true, false, voiceFixtureConfig())
++				result <- err
++			}()
++			join := nextVoiceWire(t, wires)
++			if !bytes.Contains(join.data, []byte(`"channel_id":"1"`)) {
++				t.Fatalf("missing real main Gateway join: %s", join.data)
++			}
++			if onlyServer {
++				err = s.VoiceGatewayDispatch(&Event{Struct: &VoiceServerUpdate{GuildID: "1", Token: "fixture", Endpoint: "invalid-endpoint/"}})
++			} else {
++				err = s.VoiceGatewayDispatch(&Event{Struct: &VoiceStateUpdate{VoiceState: &VoiceState{GuildID: "1", ChannelID: "1", UserID: "2", SessionID: "fixture"}}})
++			}
++			if err != nil {
++				t.Fatal(err)
++			}
++			select {
++			case err := <-result:
++				t.Fatalf("join continued with only one main Gateway event: %v", err)
++			case <-time.After(20 * time.Millisecond):
++			}
++			cancel()
++			leave := nextVoiceWire(t, wires)
++			if !bytes.Contains(leave.data, []byte(`"channel_id":null`)) {
++				t.Fatalf("failed join did not leave: %s", leave.data)
++			}
++			if err := s.VoiceGatewayDispatch(&Event{Struct: &VoiceStateUpdate{VoiceState: &VoiceState{GuildID: "1", UserID: "2", SessionID: "fixture"}}}); err != nil {
++				t.Fatal("failed join did not consume its own leave acknowledgement")
++			}
++			select {
++			case err := <-result:
++				if !errors.Is(err, context.Canceled) {
++					t.Fatalf("canceled join: %v", err)
++				}
++			case <-time.After(2 * time.Second):
++				t.Fatal("join cancellation did not close real transport/native owners")
++			}
++			s.RLock()
++			retained := len(s.VoiceConnections)
++			s.RUnlock()
++			if retained != 0 {
++				t.Fatal("failed join retained guild reservation")
++			}
++		})
++	}
++}
++func TestVoiceNativeHeartbeatAcknowledgesBinarySequence(t *testing.T) {
++	n, wires := nativeTransportFixture(t)
++	// A pending-only context validly ignores this in-flight commit. Unlike
++	// replacing ExternalSender, that does not recreate an activated key domain.
++	if err := n.handleVoiceMessage(voiceMessage{websocket.BinaryMessage, []byte{0xff, 0xff, 29, 0, 9, 0xff}}); err != nil {
++		t.Fatal(err)
++	}
++	n.cryptoMu.Lock()
++	err := n.sendHeartbeat()
++	n.cryptoMu.Unlock()
++	if err != nil {
++		t.Fatal(err)
++	}
++	wire := nextVoiceWire(t, wires)
++	var heartbeat struct {
++		Op int                `json:"op"`
++		D  voiceHeartbeatData `json:"d"`
++	}
++	if err = json.Unmarshal(wire.data, &heartbeat); err != nil {
++		t.Fatal(err)
++	}
++	if heartbeat.Op != 3 || heartbeat.D.SeqAck != 65535 || heartbeat.D.T == 0 {
++		t.Fatalf("v8 binary seq_ack missing: %s", wire.data)
++	}
++	ack, _ := json.Marshal(struct {
++		Op int `json:"op"`
++		D  struct {
++			T int64 `json:"t"`
++		} `json:"d"`
++	}{Op: 6, D: struct {
++		T int64 `json:"t"`
++	}{heartbeat.D.T}})
++	if err = n.handleVoiceMessage(voiceMessage{websocket.TextMessage, bytes.Clone(ack)}); err != nil {
++		t.Fatal(err)
++	}
++	n.heartbeatMu.Lock()
++	pending := n.heartbeatPending
++	n.heartbeatMu.Unlock()
++	if pending {
++		t.Fatal("heartbeat ACK did not clear outstanding nonce")
++	}
++	if n.handleVoiceMessage(voiceMessage{websocket.TextMessage, ack}) == nil {
++		t.Fatal("duplicate ACK accepted without an outstanding heartbeat")
++	}
++}
++func TestVoiceNativeConnectionLossNeverResumes(t *testing.T) {
++	n, wires := nativeTransportFixture(t)
++	n.wg.Add(1)
++	go n.readWebSocket()
++	if err := n.ws.Close(); err != nil {
++		t.Fatal(err)
++	}
++	select {
++	case <-n.done():
++	case <-time.After(time.Second):
++		t.Fatal("real socket loss did not fail generation")
++	}
++	if n.ready() {
++		t.Fatal("lost connection remained ready")
++	}
++	select {
++	case wire := <-wires:
++		t.Fatalf("connection loss unexpectedly wrote/replayed control: %s", wire.data)
++	default:
++	}
++}
++func TestVoiceNativeRekeyDeadlineRetainsOldSenderThenFails(t *testing.T) {
++	n, wires := nativeTransportFixture(t)
++	n.v.config.RekeyTimeout = 20 * time.Millisecond
++	n.wg.Add(1)
++	go n.controlLoop()
++	n.messages <- voiceMessage{websocket.TextMessage, []byte(`{"op":24,"seq":3,"d":{"epoch":1,"protocol_version":1}}`)}
++	wire := nextVoiceWire(t, wires)
++	if wire.kind != websocket.BinaryMessage || wire.data[0] != 26 {
++		t.Fatal("missing reset key package")
++	}
++	select {
++	case <-n.done():
++	case <-time.After(time.Second):
++		t.Fatal("unfinished rekey was not bounded")
++	}
++	if !errors.Is(n.err(), ErrVoiceDAVETimeout) || !errors.Is(n.err(), context.DeadlineExceeded) {
++		t.Fatalf("rekey deadline classification: %v", n.err())
++	}
++	if n.ready() {
++		t.Fatal("failed rekey retained admission readiness")
++	}
++}
++func TestVoiceNativeDoneJoinsAndLateDisconnectReleasesOnlyOwnGeneration(t *testing.T) {
++	n, _ := nativeTransportFixture(t)
++	n.v.session.VoiceConnections = map[string]*VoiceConnection{"1": n.v}
++	// Keep one transport worker outstanding across the caller's cleanup deadline.
++	// Native destruction and Done must wait for that worker, not merely cancel it.
++	n.wg.Add(1)
++	released := false
++	defer func() {
++		if !released {
++			n.wg.Done()
++		}
++	}()
++	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
++	err := n.v.DisconnectContext(ctx)
++	cancel()
++	if !errors.Is(err, context.DeadlineExceeded) {
++		t.Fatalf("bounded disconnect: %v", err)
++	}
++	if n.err() == nil {
++		t.Fatal("failure was not published immediately")
++	}
++	select {
++	case <-n.done():
++		t.Fatal("Done closed before worker/native destruction joined")
++	default:
++	}
++	n.v.session.RLock()
++	retained := n.v.session.VoiceConnections["1"] == n.v
++	n.v.session.RUnlock()
++	if !retained {
++		t.Fatal("joining cleanup lost its guild reservation")
++	}
++	released = true
++	n.wg.Done()
++	select {
++	case <-n.done():
++	case <-time.After(time.Second):
++		t.Fatal("late native cleanup did not join")
++	}
++	n.v.session.RLock()
++	old := n.v.session.VoiceConnections["1"]
++	n.v.session.RUnlock()
++	if old != nil {
++		t.Fatal("expired main-leave context permanently retained a dead SDK generation")
++	}
++	replacement, _ := nativeTransportFixture(t)
++	replacement.v.session = n.v.session
++	n.v.session.Lock()
++	n.v.session.VoiceConnections["1"] = replacement.v
++	n.v.session.Unlock()
++	if err := n.v.DisconnectContext(context.Background()); err != nil {
++		t.Fatalf("stale cleanup attempted another main leave: %v", err)
++	}
++	n.v.session.RLock()
++	current := n.v.session.VoiceConnections["1"]
++	n.v.session.RUnlock()
++	if current != replacement.v || !replacement.ready() {
++		t.Fatal("stale disconnect affected the replacement generation")
++	}
++}
++func TestVoiceInitialDescriptionCannotAuthorizePendingSelf(t *testing.T) {
++	n, wires := nativePendingTransportFixture(t)
++	if err := n.handleVoiceMessage(voiceMessage{websocket.TextMessage, []byte(`{"op":21,"seq":1,"d":{"transition_id":0,"protocol_version":1}}`)}); err == nil {
++		t.Fatal("initial SessionDescription and generated/sent26 authorized pending-self activation without24")
++	}
++	if n.ready() {
++		t.Fatal("unauthorized pending-self activation published readiness")
++	}
++	select {
++	case wire := <-wires:
++		t.Fatalf("unauthorized activation wrote control: %s", wire.data)
++	default:
++	}
++}
++
++func TestVoiceResetPackageWriteFailureCannotAuthorizePendingSelf(t *testing.T) {
++	n, wires := nativePendingTransportFixture(t)
++	if err := n.handleVoiceMessage(voiceMessage{websocket.TextMessage, []byte(`{"op":24,"seq":1,"d":{"epoch":1,"protocol_version":1}}`)}); err != nil {
++		t.Fatal(err)
++	}
++	nextVoiceWire(t, wires)
++	if !n.resetPackageSent || n.resetAuthorizationGeneration != n.daveGeneration {
++		t.Fatal("first reset did not establish its generation-bound authorization")
++	}
++	if err := n.ws.Close(); err != nil {
++		t.Fatal(err)
++	}
++	if err := n.handleVoiceMessage(voiceMessage{websocket.TextMessage, []byte(`{"op":24,"seq":2,"d":{"epoch":1,"protocol_version":1}}`)}); err == nil {
++		t.Fatal("closed websocket accepted fresh26 write")
++	}
++	if n.resetPackageSent || n.resetAuthorizationGeneration != 0 {
++		t.Fatal("superseding failed reset retained the previous generation's authorization")
++	}
++	// The native key package was generated, but generation alone is insufficient:
++	// transport never called AuthorizePendingReset after the failed actual write.
++	if err := n.dave.PrepareTransition(n.ctx, 0, 1); err == nil {
++		t.Fatal("unsent reset key package authorized native pending-self activation")
++	}
++}
++
++func TestVoiceIgnoredCommitPreservesUnfinishedResetDeadline(t *testing.T) {
++	n, wires := nativeTransportFixture(t)
++	n.v.config.RekeyTimeout = 20 * time.Millisecond
++	if err := n.handleVoiceMessage(voiceMessage{websocket.TextMessage, []byte(`{"op":24,"seq":3,"d":{"epoch":1,"protocol_version":1}}`)}); err != nil {
++		t.Fatal(err)
++	}
++	wire := nextVoiceWire(t, wires)
++	if wire.kind != websocket.BinaryMessage || wire.data[0] != 26 {
++		t.Fatal("reset did not write its fresh key package")
++	}
++	resetDeadline := n.resetDeadline
++	if err := n.handleVoiceMessage(voiceMessage{websocket.BinaryMessage, []byte{0, 4, 29, 0, 9, 0xff}}); err != nil {
++		t.Fatal(err)
++	}
++	if resetDeadline.IsZero() || !n.resetDeadline.Equal(resetDeadline) {
++		t.Fatal("ignored in-flight commit completed or extended an unfinished reset")
++	}
++	if len(n.transitions) != 0 || !n.ready() {
++		t.Fatal("ignored commit retained a temporary transition or discarded the old sender")
++	}
++	// Run the real deadline owner after the deterministic reset/ignored sequence.
++	// A valid participant no-op wakes its existing-deadline calculation.
++	n.wg.Add(1)
++	go n.controlLoop()
++	n.messages <- voiceMessage{websocket.TextMessage, []byte(`{"op":11,"seq":5,"d":{"user_ids":["2"]}}`)}
++	select {
++	case <-n.done():
++	case <-time.After(time.Second):
++		t.Fatal("ignored commit canceled the unfinished reset timeout")
++	}
++	if !errors.Is(n.err(), ErrVoiceDAVETimeout) {
++		t.Fatalf("unfinished reset deadline: %v", n.err())
++	}
++}
++
++func TestVoiceEmptyRevokeRetiresOnlyProposalDeadlineBookkeeping(t *testing.T) {
++	for _, resetPending := range []bool{false, true} {
++		t.Run(map[bool]string{false: "healthy", true: "reset-pending"}[resetPending], func(t *testing.T) {
++			n, wires := nativeTransportFixture(t)
++			if resetPending {
++				if err := n.handleVoiceMessage(voiceMessage{websocket.TextMessage, []byte(`{"op":24,"seq":3,"d":{"epoch":1,"protocol_version":1}}`)}); err != nil {
++					t.Fatal(err)
++				}
++				nextVoiceWire(t, wires)
++			}
++			resetDeadline := n.resetDeadline
++			// Unit-state setup for the transport's proposal negotiation deadline.
++			// This does not pretend to create a signed native Add proposal: the
++			// actual queue here is empty and receives a valid empty revoke list.
++			// Real Add→last-revoke cryptographic coverage requires the separate
++			// official external-sender test harness, not fabricated MLS bytes.
++			n.proposalDeadline = time.Now().Add(n.v.config.RekeyTimeout)
++			if err := n.handleVoiceMessage(voiceMessage{websocket.BinaryMessage, []byte{0, 4, 27, 1, 0}}); err != nil {
++				t.Fatal(err)
++			}
++			if !n.proposalDeadline.IsZero() || !n.resetDeadline.Equal(resetDeadline) {
++				t.Fatal("successful empty revoke did not retire only proposal negotiation")
++			}
++			select {
++			case wire := <-wires:
++				t.Fatalf("empty proposal queue produced a synthetic commit: %x", wire.data)
++			default:
++			}
++			if !resetPending && !n.nextRekeyDeadline().IsZero() {
++				t.Fatal("healthy empty-queue negotiation retained a rekey deadline")
++			}
++		})
++	}
++}
++
++func TestVoiceDeadlineScopesDoNotCompleteEachOther(t *testing.T) {
++	now := time.Now()
++	n := &nativeVoice{
++		v:                &VoiceConnection{config: voiceFixtureConfig()},
++		resetDeadline:    now.Add(time.Second),
++		proposalDeadline: now.Add(2 * time.Second),
++		transitions:      map[uint16]time.Time{7: now.Add(3 * time.Second)},
++	}
++	reset, proposal := n.resetDeadline, n.proposalDeadline
++	n.finishTransition(7)
++	if !n.resetDeadline.Equal(reset) || !n.proposalDeadline.Equal(proposal) {
++		t.Fatal("finishing one prepared transition completed unrelated work")
++	}
++	n.proposalDeadline = time.Time{}
++	if !n.nextRekeyDeadline().Equal(reset) {
++		t.Fatal("retiring proposal-only work canceled the unfinished reset")
++	}
++}
++func TestVoiceLateExternalSenderFinishesOnlyEpochOneAuthorization(t *testing.T) {
++	n, wires := nativePendingTransportFixtureOrder(t, false)
++	if err := n.handleVoiceMessage(voiceMessage{websocket.TextMessage, []byte(`{"op":24,"seq":1,"d":{"epoch":1,"protocol_version":1}}`)}); err != nil {
++		t.Fatal(err)
++	}
++	wire := nextVoiceWire(t, wires)
++	if wire.kind != websocket.BinaryMessage || wire.data[0] != 26 {
++		t.Fatal("epoch-one reset did not write its fresh package")
++	}
++	if !n.resetPackageSent || n.resetAuthorizationGeneration != n.daveGeneration || n.resetAuthorizationVersion != 1 || n.ready() {
++		t.Fatal("reset provenance was lost or published readiness before external sender")
++	}
++	external, err := hex.DecodeString(voiceExternalSenderFixture)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err = n.handleVoiceMessage(voiceMessage{websocket.BinaryMessage, append([]byte{0, 2, 25}, external...)}); err != nil {
++		t.Fatal(err)
++	}
++	if err = n.handleVoiceMessage(voiceMessage{websocket.TextMessage, []byte(`{"op":21,"seq":3,"d":{"transition_id":0,"protocol_version":1}}`)}); err != nil {
++		t.Fatal(err)
++	}
++	if !n.ready() || n.resetPackageSent || n.resetAuthorizationGeneration != 0 {
++		t.Fatal("pending activation did not consume its matching epoch-one authorization")
++	}
++	// Do not weaken native's same-domain replacement/nonce-reuse guard.
++	if err = n.handleVoiceMessage(voiceMessage{websocket.BinaryMessage, append([]byte{0, 4, 25}, external...)}); err == nil {
++		t.Fatal("external sender replacement recreated an activated pending domain")
++	}
++}
++
++func TestVoiceLateExternalSenderDoesNotAuthorizeInitialDescription(t *testing.T) {
++	n, _ := nativePendingTransportFixtureOrder(t, false)
++	external, err := hex.DecodeString(voiceExternalSenderFixture)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err = n.handleVoiceMessage(voiceMessage{websocket.BinaryMessage, append([]byte{0, 1, 25}, external...)}); err != nil {
++		t.Fatal(err)
++	}
++	if n.resetPackageSent || n.resetAuthorizationGeneration != 0 {
++		t.Fatal("late external sender invented epoch-one reset provenance")
++	}
++	if err = n.handleVoiceMessage(voiceMessage{websocket.TextMessage, []byte(`{"op":21,"seq":2,"d":{"transition_id":0,"protocol_version":1}}`)}); err == nil {
++		t.Fatal("initial-only package plus late external sender authorized pending activation")
++	}
++}
+diff --git a/voice_udp.go b/voice_udp.go
+new file mode 100644
+--- /dev/null
++++ b/voice_udp.go
+@@ -0,0 +1,352 @@
++//go:build voice && cgo
++
++package discordgo
++
++import (
++	"context"
++	"crypto/rand"
++	"encoding/binary"
++	"errors"
++	"math"
++	"net"
++	"time"
++)
++
++func (n *nativeVoice) discoverUDP(ip string, port int) error {
++	address := net.ParseIP(ip)
++	if address == nil || port <= 0 || port > 65535 {
++		return errors.New("invalid voice UDP endpoint")
++	}
++	conn, err := net.DialUDP("udp", nil, &net.UDPAddr{IP: address, Port: port})
++	if err != nil {
++		return errors.New("voice UDP dial failed")
++	}
++	n.mu.Lock()
++	if n.failure != nil {
++		n.mu.Unlock()
++		conn.Close()
++		return n.err()
++	}
++	n.udp = conn
++	n.mu.Unlock()
++	if err = conn.SetDeadline(time.Now().Add(n.v.config.UDPDiscoveryTimeout)); err != nil {
++		return err
++	}
++	var packet [74]byte
++	binary.BigEndian.PutUint16(packet[:2], 1)
++	binary.BigEndian.PutUint16(packet[2:4], 70)
++	binary.BigEndian.PutUint32(packet[4:8], n.ssrc)
++	if count, err := conn.Write(packet[:]); err != nil || count != len(packet) {
++		return errors.New("voice UDP discovery write failed")
++	}
++	var response [75]byte
++	size, _, flags, _, err := conn.ReadMsgUDP(response[:], nil)
++	if err != nil || flags != 0 || size != 74 {
++		return errors.New("voice UDP discovery response failed")
++	}
++	if binary.BigEndian.Uint16(response[:2]) != 2 || binary.BigEndian.Uint16(response[2:4]) != 70 || binary.BigEndian.Uint32(response[4:8]) != n.ssrc {
++		return errors.New("invalid voice UDP discovery response")
++	}
++	end := 8
++	for end < 72 && response[end] != 0 {
++		end++
++	}
++	if end == 72 || end == 8 {
++		return errors.New("invalid voice discovery address")
++	}
++	discovered := string(response[8:end])
++	if net.ParseIP(discovered) == nil {
++		return errors.New("invalid voice discovery IP")
++	}
++	discoveredPort := binary.BigEndian.Uint16(response[72:74])
++	if discoveredPort == 0 {
++		return errors.New("invalid voice discovery port")
++	}
++	if err = conn.SetDeadline(time.Time{}); err != nil {
++		return err
++	}
++	var seed [6]byte
++	if _, err = rand.Read(seed[:]); err != nil {
++		return errors.New("voice RTP initialization failed")
++	}
++	n.rtpSequence = binary.BigEndian.Uint16(seed[:2])
++	n.rtpTimestamp = binary.BigEndian.Uint32(seed[2:])
++	selectData := struct {
++		Protocol string `json:"protocol"`
++		Data     struct {
++			Address string `json:"address"`
++			Port    uint16 `json:"port"`
++			Mode    string `json:"mode"`
++		} `json:"data"`
++	}{Protocol: "udp"}
++	selectData.Data.Address = discovered
++	selectData.Data.Port = discoveredPort
++	selectData.Data.Mode = n.mode
++	if err = n.writeJSON(n.ctx, 1, selectData); err != nil {
++		return err
++	}
++	n.wg.Add(2)
++	go n.receiverLoop()
++	go n.keepAliveLoop()
++	return nil
++}
++
++func (n *nativeVoice) writeUDP(ctx context.Context, p []byte) error {
++	// Both media and NAT keepalive use the same deadline/writer admission gate.
++	select {
++	case n.udpWriter <- struct{}{}:
++	case <-ctx.Done():
++		return ctx.Err()
++	case <-n.ctx.Done():
++		return n.err()
++	}
++	defer func() { <-n.udpWriter }()
++	if err := ctx.Err(); err != nil {
++		return err
++	}
++	deadline := time.Now().Add(n.v.config.WriteTimeout)
++	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
++		deadline = d
++	}
++	if err := n.udp.SetWriteDeadline(deadline); err != nil {
++		return err
++	}
++	count, err := n.udp.Write(p)
++	if err != nil {
++		return errors.New("voice UDP write failed")
++	}
++	if count != len(p) {
++		return errors.New("short voice UDP write")
++	}
++	return nil
++}
++func (n *nativeVoice) keepAliveLoop() {
++	defer n.wg.Done()
++	timer := time.NewTicker(n.v.config.UDPKeepAliveInterval)
++	defer timer.Stop()
++	var seq uint64
++	var b [8]byte
++	for {
++		select {
++		case <-n.ctx.Done():
++			return
++		case <-timer.C:
++			if seq == math.MaxUint64 {
++				n.stop(errors.New("voice UDP keepalive counter exhausted"))
++				return
++			}
++			binary.LittleEndian.PutUint64(b[:], seq)
++			seq++
++			if err := n.writeUDP(n.ctx, b[:]); err != nil {
++				n.stop(err)
++				return
++			}
++		}
++	}
++}
++func (n *nativeVoice) speaking(ctx context.Context, active bool) error {
++	mask := 0
++	if active {
++		mask = 1
++	}
++	return n.writeJSON(ctx, 5, struct {
++		Speaking int    `json:"speaking"`
++		Delay    int    `json:"delay"`
++		SSRC     uint32 `json:"ssrc"`
++	}{mask, 0, n.ssrc})
++}
++func (n *nativeVoice) senderLoop() {
++	defer n.wg.Done()
++	packetStorage := make([]byte, n.v.config.MaxUDPPacketBytes)
++	encrypted := packetStorage[12 : 12+n.v.config.MaxEncryptedFrameBytes]
++	packet := packetStorage[:0]
++	var lastWrite time.Time
++	speaking := false
++	idle := time.NewTimer(20 * time.Millisecond)
++	if !idle.Stop() {
++		<-idle.C
++	}
++	defer idle.Stop()
++	for {
++		select {
++		case <-n.ctx.Done():
++			return
++		case <-idle.C:
++			if speaking {
++				if err := n.speaking(n.ctx, false); err != nil {
++					n.stop(err)
++					return
++				}
++				speaking = false
++			}
++		case request := <-n.handoffs:
++			if err := request.ctx.Err(); err != nil {
++				request.reply <- handoffResult{err: err}
++				continue
++			}
++			if !n.ready() {
++				err := n.err()
++				if err == nil {
++					err = ErrVoiceNotReady
++				}
++				request.reply <- handoffResult{err: err}
++				continue
++			}
++			if err := request.ctx.Err(); err != nil {
++				request.reply <- handoffResult{err: err}
++				continue
++			}
++			submission := &OpusSubmission{done: make(chan OpusWriteResult, 1)}
++			request.reply <- handoffResult{submission: submission}
++			if !idle.Stop() {
++				select {
++				case <-idle.C:
++				default:
++				}
++			}
++			// The packet is now non-retractably owned. Only the connection lifetime and
++			// receipt deadline apply; canceling the submission call cannot replay it.
++			receiptCtx, cancel := context.WithTimeout(n.ctx, n.v.config.ReceiptTimeout)
++			result := OpusWriteResult{}
++			if !lastWrite.IsZero() {
++				wait := time.Until(lastWrite.Add(20 * time.Millisecond))
++				if wait > 0 {
++					timer := time.NewTimer(wait)
++					select {
++					case <-timer.C:
++					case <-receiptCtx.Done():
++						result.Err = receiptCtx.Err()
++					}
++					if !timer.Stop() {
++						select {
++						case <-timer.C:
++						default:
++						}
++					}
++				}
++			}
++			if result.Err == nil && !speaking {
++				result.Err = n.speaking(receiptCtx, true)
++				speaking = result.Err == nil
++			}
++			if result.Err == nil {
++				if err := n.cryptoMu.lockContext(receiptCtx); err != nil {
++					result.Err = err
++				} else {
++					if n.aead == nil || !n.dave.Ready() {
++						result.Err = ErrVoiceNotReady
++					} else {
++						maxSize, err := n.dave.MaxCiphertextSize(len(request.opus))
++						if err != nil || maxSize > len(encrypted) {
++							result.Err = errors.New("DAVE encrypted frame exceeds bound")
++						} else {
++							count, err := n.dave.EncryptOpus(receiptCtx, n.ssrc, request.opus, encrypted)
++							if err != nil {
++								result.Err = err
++							} else if count <= 0 || count > len(encrypted) {
++								result.Err = errors.New("invalid DAVE encrypted frame length")
++							} else {
++								packet, result.Err = sealVoiceRTP(packet[:0], n.aead, n.ssrc, n.rtpSequence, n.rtpTimestamp, n.nonce, encrypted[:count])
++								n.nonce++
++								n.rtpSequence++
++								n.rtpTimestamp += voiceFrameIntervalSamples
++							}
++						}
++					}
++					n.cryptoMu.Unlock()
++				}
++			}
++			if result.Err == nil {
++				result.Err = n.writeUDP(receiptCtx, packet)
++				if result.Err == nil {
++					lastWrite = time.Now()
++					result.WrittenAt = lastWrite
++				}
++			}
++			cancel()
++			n.outstanding <- struct{}{}
++			submission.done <- result
++			close(submission.done)
++			if result.Err != nil {
++				n.stop(result.Err)
++				return
++			}
++			if !idle.Stop() {
++				select {
++				case <-idle.C:
++				default:
++				}
++			}
++			idle.Reset(20 * time.Millisecond)
++		}
++	}
++}
++func (n *nativeVoice) receiverLoop() {
++	defer n.wg.Done()
++	packet := make([]byte, n.v.config.MaxUDPPacketBytes+1)
++	transportPlain := make([]byte, n.v.config.MaxUDPPacketBytes)
++	opus := make([]byte, n.v.config.MaxEncryptedFrameBytes)
++	for {
++		size, _, flags, _, err := n.udp.ReadMsgUDP(packet, nil)
++		if err != nil {
++			if n.ctx.Err() == nil {
++				n.stop(errors.New("voice UDP receive failed"))
++			}
++			return
++		}
++		if flags != 0 || size > n.v.config.MaxUDPPacketBytes || size < 12 {
++			continue
++		}
++		received := time.Now()
++		n.cryptoMu.Lock()
++		if n.aead == nil {
++			n.cryptoMu.Unlock()
++			continue
++		}
++		frame, ssrc, seq, timestamp, err := openVoiceRTP(transportPlain, n.aead, packet[:size])
++		if err != nil {
++			n.cryptoMu.Unlock()
++			continue
++		}
++		sender, known := n.senders[ssrc]
++		_, recognized := n.participants[sender]
++		if !known || !recognized || len(frame) > n.v.config.MaxEncryptedFrameBytes {
++			n.cryptoMu.Unlock()
++			continue
++		}
++		maxSize, err := n.dave.MaxPlaintextSize(sender, len(frame))
++		if err != nil || maxSize > len(opus) {
++			n.cryptoMu.Unlock()
++			continue
++		}
++		count, err := n.dave.DecryptOpus(n.ctx, sender, frame, opus)
++		n.cryptoMu.Unlock()
++		if err != nil || count <= 0 || count > len(opus) {
++			continue
++		}
++		if err := validateOpusPacket(opus[:count], n.v.config.MaxOpusBytes, 0); err != nil {
++			continue
++		}
++		p := &Packet{SSRC: ssrc, Sequence: seq, Timestamp: timestamp, Opus: append([]byte(nil), opus[:count]...), ReceivedAt: received}
++		n.queueMu.Lock()
++		if n.queueBytes > n.v.config.ReceiveQueueBytes-len(p.Opus) {
++			n.queueMu.Unlock()
++			n.stop(errors.New("voice receive byte queue exhausted"))
++			return
++		}
++		n.queueBytes += len(p.Opus)
++		select {
++		case n.packets <- p:
++			n.queueMu.Unlock()
++		case <-n.ctx.Done():
++			n.queueBytes -= len(p.Opus)
++			n.queueMu.Unlock()
++			return
++		default:
++			n.queueBytes -= len(p.Opus)
++			n.queueMu.Unlock()
++			n.stop(errors.New("voice receive packet queue exhausted"))
++			return
++		}
++	}
++}

@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "platform": "linux/amd64",
+  "target_glibc": "2.34",
+  "abi_compatibility_gate": "Every required ELF version must be defined by its actual loader-selected provider; actual target loader and eager relocation must succeed. target_glibc is distro metadata, not a numeric export-version ceiling or a generic EL9 compatibility claim.",
+  "builder_base": "docker.io/library/almalinux@sha256:7b72041988f07ef5020f7f5da036a9aad9165d996d02946bce29c9a38e99ba59",
+  "repositories": {
+    "BaseOS": {"url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os", "repomd_sha256": "723b20c4ccba9794afd8db85a28aff88d1f5ae3c5daaf83b00008275c6c75fdf"},
+    "AppStream": {"url": "https://repo.almalinux.org/vault/9.7/AppStream/x86_64/os", "repomd_sha256": "7b3ec4bd8ed70cd91fb54ff1dae82484a92947caba5b103876a0e63c745515c0"},
+    "CRB": {"url": "https://repo.almalinux.org/vault/9.7/CRB/x86_64/os", "repomd_sha256": "90cbbf8c7395ba2d05c141c838aa7a675b97330a19cd427a49fd1ff42305daeb"}
+  },
+  "libdave": {"repository": "https://github.com/discord/libdave.git", "commit": "6396c90aedbb9a6ee117ea9ce1ce9832af6a3375", "patches": {"0001-flexmodule-abi.patch": "80df80ce9fb3c59c019cd9364e4e09732f3d3c40def6b6f2ca10d2d6d311a4a6"}, "distribution": "source-patched fork; not the upstream release binary"},
+  "vcpkg_commit": "16c71a39e5a0fc0bdb3fad03beef8f38ee00ee3b",
+  "builtin_baseline": "7adc2e4d49e8d0efc07a369079faa6bc3dbb90f3",
+  "mlspp_commit": "1cc50a124a3bc4e143a787ec934280dc70c1034d",
+  "required_extensions": ["flexDaveSessionSetProposalLimits", "flexDaveSessionActivatePendingGroup"],
+  "upstream_prebuilt": {"sha256": "e9688ba3a1b0908e5e7aa037f400a2f59c69c98677a83a857ed0f2849c338312", "used": false, "reason": "GLIBC_2.38/GLIBCXX_3.4.32 incompatible with EL9"}
+}

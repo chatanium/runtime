@@ -1,0 +1,4170 @@
+{
+  "scope": "All 154 top-level messages and 23 enums in discordgo.proto; ChannelEdit is separately defined in helper.proto. Counts measure converter presence, not correctness. Parser AST comparisons are candidate omission sets: explicit zero assignments, nested inline conversions, enum semantics and deliberate runtime-only exclusions require the reviewed notes. Root currently fails compilation.",
+  "counts": {
+    "active_named_both_directions": 72,
+    "active_named_one_direction": 2,
+    "inline_in_Message_both_directions": 2,
+    "no_converter": 28,
+    "disabled_only_both_directions": 39,
+    "scalar_wrapper_no_standalone_converter": 11
+  },
+  "activeFunctionsPerDirection": {
+    "struct2buf": 77,
+    "buf2struct": 77
+  },
+  "disabledFunctionsPerDirection": {
+    "struct2buf": 43,
+    "buf2struct": 43
+  },
+  "messages": [
+    {
+      "type": "Message",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:34",
+      "protoFields": [
+        "Activity",
+        "Application",
+        "Attachments",
+        "Author",
+        "ChannelId",
+        "Components",
+        "Content",
+        "EditedTimestamp",
+        "Embeds",
+        "Flags",
+        "GuildId",
+        "Id",
+        "Interaction",
+        "InteractionMetadata",
+        "Member",
+        "MentionChannels",
+        "MentionEveryone",
+        "MentionRoles",
+        "Mentions",
+        "MessageReference",
+        "MessageSnapshots",
+        "Pinned",
+        "Poll",
+        "Reactions",
+        "ReferencedMessage",
+        "StickerItems",
+        "Thread",
+        "Timestamp",
+        "Tts",
+        "Type",
+        "WebhookId"
+      ],
+      "localGo": {
+        "file": "discordgo/message.go",
+        "line": 49,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/message.go:12",
+        "protoFieldsNotWritten": [
+          "Flags",
+          "Interaction",
+          "InteractionMetadata",
+          "Mentions",
+          "MessageReference",
+          "MessageSnapshots",
+          "Poll",
+          "Reactions",
+          "ReferencedMessage",
+          "StickerItems",
+          "Thread"
+        ],
+        "goFieldsNotRead": [
+          "Flags",
+          "Interaction",
+          "InteractionMetadata",
+          "Mentions",
+          "MessageReference",
+          "MessageSnapshots",
+          "Poll",
+          "Reactions",
+          "ReferencedMessage",
+          "StickerItems",
+          "Thread"
+        ]
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/message.go:9",
+        "protoFieldsNotRead": [
+          "Flags",
+          "Interaction",
+          "InteractionMetadata",
+          "Mentions",
+          "MessageReference",
+          "MessageSnapshots",
+          "Poll",
+          "Reactions",
+          "ReferencedMessage",
+          "StickerItems",
+          "Thread"
+        ]
+      }
+    },
+    {
+      "type": "File",
+      "classification": "active_named_one_direction",
+      "schema": "proto/discord-v1/discordgo.proto:85",
+      "protoFields": [
+        "ContentType",
+        "Name"
+      ],
+      "localGo": {
+        "file": "discordgo/message.go",
+        "line": 238,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/misc.go.disabled:99"
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/interactions.go:411",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "MessageSend",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:93",
+      "protoFields": [
+        "AllowedMentions",
+        "Components",
+        "Content",
+        "Embeds",
+        "Files",
+        "Flags",
+        "Poll",
+        "Reference",
+        "StickerIds",
+        "Tts"
+      ],
+      "localGo": {
+        "file": "discordgo/message.go",
+        "line": 245,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/message.go:242",
+        "protoFieldsNotWritten": [
+          "AllowedMentions",
+          "Components",
+          "Flags",
+          "Poll",
+          "Reference"
+        ],
+        "goFieldsNotRead": [
+          "AllowedMentions",
+          "Components",
+          "Embed",
+          "File",
+          "Flags",
+          "Poll",
+          "Reference"
+        ]
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/message.go:223",
+        "protoFieldsNotRead": [
+          "AllowedMentions",
+          "Components",
+          "Flags",
+          "Poll",
+          "Reference"
+        ]
+      }
+    },
+    {
+      "type": "MessageEdit",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:107",
+      "protoFields": [
+        "AllowedMentions",
+        "Attachments",
+        "Channel",
+        "Components",
+        "Content",
+        "Embeds",
+        "Files",
+        "Flags",
+        "Id"
+      ],
+      "localGo": {
+        "file": "discordgo/message.go",
+        "line": 266,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/message.go:273",
+        "protoFieldsNotWritten": [
+          "AllowedMentions",
+          "Components",
+          "Flags"
+        ],
+        "goFieldsNotRead": [
+          "AllowedMentions",
+          "Components",
+          "Embed",
+          "Flags"
+        ]
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/message.go:254",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "MessageAllowedMentions",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:130",
+      "protoFields": [
+        "Parse",
+        "RepliedUser",
+        "Roles",
+        "Users"
+      ],
+      "localGo": {
+        "file": "discordgo/message.go",
+        "line": 334,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/message.go:315",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/message.go:316",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "MessageAttachment",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:138",
+      "protoFields": [
+        "ContentType",
+        "Ephemeral",
+        "Filename",
+        "Height",
+        "Id",
+        "ProxyUrl",
+        "Size",
+        "Url",
+        "Width"
+      ],
+      "localGo": {
+        "file": "discordgo/message.go",
+        "line": 354,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/message.go:82",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": [
+          "DurationSecs",
+          "Flags",
+          "Waveform"
+        ]
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/message.go:80",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "MessageEmbedFooter",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:151",
+      "protoFields": [
+        "IconUrl",
+        "ProxyIconUrl",
+        "Text"
+      ],
+      "localGo": {
+        "file": "discordgo/message.go",
+        "line": 378,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/message.go:157",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/message.go:137",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "MessageEmbedImage",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:158",
+      "protoFields": [
+        "Height",
+        "ProxyUrl",
+        "Url",
+        "Width"
+      ],
+      "localGo": {
+        "file": "discordgo/message.go",
+        "line": 385,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/message.go:169",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/message.go:149",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "MessageEmbedThumbnail",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:166",
+      "protoFields": [
+        "Height",
+        "ProxyUrl",
+        "Url",
+        "Width"
+      ],
+      "localGo": {
+        "file": "discordgo/message.go",
+        "line": 393,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/message.go:182",
+        "protoFieldsNotWritten": [
+          "Width"
+        ],
+        "goFieldsNotRead": [
+          "Width"
+        ]
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/message.go:162",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "MessageEmbedVideo",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:174",
+      "protoFields": [
+        "Height",
+        "Url",
+        "Width"
+      ],
+      "localGo": {
+        "file": "discordgo/message.go",
+        "line": 401,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/message.go:194",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/message.go:175",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "MessageEmbedProvider",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:181",
+      "protoFields": [
+        "Name",
+        "Url"
+      ],
+      "localGo": {
+        "file": "discordgo/message.go",
+        "line": 408,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/message.go:206",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/message.go:187",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "MessageEmbedAuthor",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:187",
+      "protoFields": [
+        "IconUrl",
+        "Name",
+        "ProxyIconUrl",
+        "Url"
+      ],
+      "localGo": {
+        "file": "discordgo/message.go",
+        "line": 414,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/message.go:217",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/message.go:198",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "MessageEmbedField",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:195",
+      "protoFields": [
+        "Inline",
+        "Name",
+        "Value"
+      ],
+      "localGo": {
+        "file": "discordgo/message.go",
+        "line": 422,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/message.go:145",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/message.go:125",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "MessageEmbed",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:202",
+      "protoFields": [
+        "Author",
+        "Color",
+        "Description",
+        "Fields",
+        "Footer",
+        "Image",
+        "Provider",
+        "Thumbnail",
+        "Timestamp",
+        "Title",
+        "Type",
+        "Url",
+        "Video"
+      ],
+      "localGo": {
+        "file": "discordgo/message.go",
+        "line": 429,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/message.go:100",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/message.go:98",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "MessageReactions",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:230",
+      "protoFields": [
+        "Count",
+        "Emoji",
+        "Me"
+      ],
+      "localGo": {
+        "file": "discordgo/message.go",
+        "line": 460,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/message.go:230",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/message.go:211",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "MessageActivity",
+      "classification": "inline_in_Message_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:237",
+      "protoFields": [
+        "PartyId",
+        "Type"
+      ],
+      "localGo": {
+        "file": "discordgo/message.go",
+        "line": 467,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "MessageApplication",
+      "classification": "inline_in_Message_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:251",
+      "protoFields": [
+        "CoverImage",
+        "Description",
+        "Icon",
+        "Id",
+        "Name"
+      ],
+      "localGo": {
+        "file": "discordgo/message.go",
+        "line": 484,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "MessageSnapshot",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:261",
+      "protoFields": [
+        "Message"
+      ],
+      "localGo": {
+        "file": "discordgo/message.go",
+        "line": 494,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "MessageReference",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:272",
+      "protoFields": [
+        "ChannelId",
+        "FailIfNotExists",
+        "GuildId",
+        "MessageId",
+        "Type"
+      ],
+      "localGo": {
+        "file": "discordgo/message.go",
+        "line": 509,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "MessageInteraction",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:281",
+      "protoFields": [
+        "Id",
+        "Member",
+        "Name",
+        "Type",
+        "User"
+      ],
+      "localGo": {
+        "file": "discordgo/message.go",
+        "line": 609,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "MessageInteractionMetadata",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:292",
+      "protoFields": [
+        "AuthorizingIntegrationOwners",
+        "Id",
+        "InteractedMessageId",
+        "OriginalResponseMessageId",
+        "TriggeringInteractionMetadata",
+        "Type",
+        "User"
+      ],
+      "localGo": {
+        "file": "discordgo/message.go",
+        "line": 620,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "Session",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:306",
+      "protoFields": [
+        "Compress",
+        "DataReady",
+        "Debug",
+        "Identify",
+        "LastHeartbeatAck",
+        "LastHeartbeatSent",
+        "LogLevel",
+        "MaxRestRetries",
+        "Mfa",
+        "ShardCount",
+        "ShardId",
+        "ShouldReconnectOnError",
+        "ShouldReconnectVoiceOnSessionError",
+        "ShouldRetryOnRateLimit",
+        "State",
+        "StateEnabled",
+        "Status",
+        "SyncEvents",
+        "Token",
+        "UdpReady",
+        "UserAgent",
+        "VoiceReady"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 27,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/activity.go:141",
+        "protoFieldsNotWritten": [
+          "Status"
+        ],
+        "goFieldsNotRead": [
+          "Client",
+          "Dialer",
+          "Ratelimiter",
+          "VoiceConnections"
+        ]
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/activity.go:150",
+        "protoFieldsNotRead": [
+          "Status"
+        ]
+      }
+    },
+    {
+      "type": "Identify",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:334",
+      "protoFields": [
+        "Compress",
+        "Intents",
+        "LargeThreshold",
+        "Presence",
+        "Properties",
+        "Shard",
+        "Token"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2310,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/activity.go:104",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/activity.go:108",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "IdentifyProperties",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:344",
+      "protoFields": [
+        "Browser",
+        "Device",
+        "Os",
+        "Referer",
+        "ReferringDomain"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2322,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/activity.go:126",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/activity.go:135",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "GatewayStatusUpdate",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:352",
+      "protoFields": [
+        "Afk",
+        "Game",
+        "Since",
+        "Status"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2214,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/activity.go:90",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/activity.go:89",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "Activity",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:359",
+      "protoFields": [
+        "ApplicationId",
+        "Assets",
+        "CreatedAt",
+        "Details",
+        "Emoji",
+        "Flags",
+        "Instance",
+        "Name",
+        "Party",
+        "Secrets",
+        "State",
+        "Timestamps",
+        "Type",
+        "Url"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2223,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/activity.go:10",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/activity.go:9",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "TimeStamps",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:376",
+      "protoFields": [
+        "EndTimestamp",
+        "StartTimestamp"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1512,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/activity.go:34",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/activity.go:33",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "Assets",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:381",
+      "protoFields": [
+        "LargeImageId",
+        "LargeText",
+        "SmallImageId",
+        "SmallText"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1533,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/activity.go:46",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/activity.go:45",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "Party",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:388",
+      "protoFields": [
+        "Id",
+        "Size"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2281,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/activity.go:60",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/activity.go:59",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "Secrets",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:393",
+      "protoFields": [
+        "Join",
+        "Match",
+        "Spectate"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2288,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/activity.go:77",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/activity.go:76",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "ApplicationIntegrationTypeConfig",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:400",
+      "protoFields": [
+        "Oauth2InstallParams"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 157,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/application.go.disabled:43"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/application.go.disabled:43"
+      }
+    },
+    {
+      "type": "ApplicationInstallParams",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:404",
+      "protoFields": [
+        "Permissions",
+        "Scopes"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 151,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/application.go.disabled:54"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/application.go.disabled:54"
+      }
+    },
+    {
+      "type": "Application",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:409",
+      "protoFields": [
+        "BotPublic",
+        "BotRequireCodeGrant",
+        "CoverImage",
+        "Description",
+        "Flags",
+        "GuildId",
+        "Icon",
+        "Id",
+        "IntegrationTypesConfig",
+        "Name",
+        "Owner",
+        "PrimarySkuId",
+        "PrivacyPolicyUrl",
+        "RpcOrigins",
+        "Slug",
+        "Summary",
+        "Team",
+        "TermsOfServiceUrl",
+        "VerifyKey"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 162,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/application.go.disabled:9"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/application.go.disabled:9"
+      }
+    },
+    {
+      "type": "ApplicationRoleConnectionMetadata",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:431",
+      "protoFields": [
+        "Description",
+        "DescriptionLocalizations",
+        "Key",
+        "Name",
+        "NameLocalizations",
+        "Type"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 200,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/application.go.disabled:66"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/application.go.disabled:66"
+      }
+    },
+    {
+      "type": "ApplicationRoleConnection",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:440",
+      "protoFields": [
+        "Metadata",
+        "PlatformName",
+        "PlatformUsername"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 210,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/application.go.disabled:92"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/application.go.disabled:92"
+      }
+    },
+    {
+      "type": "UserConnection",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:446",
+      "protoFields": [
+        "Id",
+        "Integrations",
+        "Name",
+        "Revoked",
+        "Type"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 217,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/application.go.disabled:140"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/application.go.disabled:140"
+      }
+    },
+    {
+      "type": "Integration",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:454",
+      "protoFields": [
+        "Account",
+        "EnableEmoticons",
+        "Enabled",
+        "ExpireBehavior",
+        "ExpireGracePeriod",
+        "Id",
+        "Name",
+        "RoleId",
+        "SyncedAt",
+        "Syncing",
+        "Type",
+        "User"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 226,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/application.go.disabled:160"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/application.go.disabled:160"
+      }
+    },
+    {
+      "type": "IntegrationAccount",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:469",
+      "protoFields": [
+        "Id",
+        "Name"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 253,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/application.go.disabled:182"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/application.go.disabled:182"
+      }
+    },
+    {
+      "type": "VoiceRegion",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:474",
+      "protoFields": [
+        "Custom",
+        "Deprecated",
+        "Id",
+        "Name",
+        "Optimal"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 260,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/minimal.go:10",
+        "protoFieldsNotWritten": [
+          "Custom",
+          "Deprecated",
+          "Optimal"
+        ],
+        "goFieldsNotRead": [
+          "Custom",
+          "Deprecated",
+          "Optimal"
+        ]
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/minimal.go:10",
+        "protoFieldsNotRead": [
+          "Custom",
+          "Deprecated",
+          "Optimal"
+        ]
+      }
+    },
+    {
+      "type": "Invite",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:482",
+      "protoFields": [
+        "ApproximateMemberCount",
+        "ApproximatePresenceCount",
+        "Channel",
+        "Code",
+        "CreatedAt",
+        "ExpiresAt",
+        "Guild",
+        "Inviter",
+        "MaxAge",
+        "MaxUses",
+        "Revoked",
+        "TargetApplication",
+        "TargetType",
+        "TargetUser",
+        "Temporary",
+        "Unique",
+        "Uses"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 279,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/misc.go.disabled:177"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/misc.go.disabled:176"
+      }
+    },
+    {
+      "type": "Channel",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:502",
+      "protoFields": [
+        "ApplicationId",
+        "AppliedTags",
+        "AvailableTags",
+        "Bitrate",
+        "DefaultForumLayout",
+        "DefaultReactionEmoji",
+        "DefaultSortOrder",
+        "DefaultThreadRateLimitPerUser",
+        "Flags",
+        "GuildId",
+        "Icon",
+        "Id",
+        "LastMessageId",
+        "LastPinTimestamp",
+        "Member",
+        "MemberCount",
+        "Members",
+        "MessageCount",
+        "Messages",
+        "Name",
+        "Nsfw",
+        "OwnerId",
+        "ParentId",
+        "PermissionOverwrites",
+        "Position",
+        "RateLimitPerUser",
+        "Recipients",
+        "ThreadMetadata",
+        "Topic",
+        "Type",
+        "UserLimit"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 359,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/structs.go:57",
+        "protoFieldsNotWritten": [
+          "Members",
+          "Messages"
+        ],
+        "goFieldsNotRead": [
+          "Members",
+          "Messages"
+        ]
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/structs.go:56",
+        "protoFieldsNotRead": [
+          "Members",
+          "Messages"
+        ]
+      }
+    },
+    {
+      "type": "PermissionOverwrite",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:536",
+      "protoFields": [
+        "Allow",
+        "Deny",
+        "Id",
+        "Type"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 519,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/structs.go:126",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/structs.go:124",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "ThreadStart",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:543",
+      "protoFields": [
+        "AppliedTags",
+        "AutoArchiveDuration",
+        "Invitable",
+        "Name",
+        "RateLimitPerUser",
+        "Type"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 527,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/misc.go.disabled:125"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/misc.go.disabled:124"
+      }
+    },
+    {
+      "type": "ThreadMetadata",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:552",
+      "protoFields": [
+        "ArchiveTimestamp",
+        "Archived",
+        "AutoArchiveDuration",
+        "Invitable",
+        "Locked"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 539,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/structs.go:139",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/structs.go:137",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "ThreadMember",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:560",
+      "protoFields": [
+        "Flags",
+        "Id",
+        "JoinTimestamp",
+        "Member",
+        "UserId"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 554,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/structs.go:153",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/structs.go:151",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "ThreadsList",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:568",
+      "protoFields": [
+        "HasMore",
+        "Members",
+        "Threads"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 570,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/misc.go.disabled:141"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/misc.go.disabled:140"
+      }
+    },
+    {
+      "type": "AddedThreadMember",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:574",
+      "protoFields": [
+        "Member",
+        "Presence",
+        "ThreadMember"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 577,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/misc.go.disabled:164"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/misc.go.disabled:163"
+      }
+    },
+    {
+      "type": "ForumDefaultReaction",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:580",
+      "protoFields": [
+        "EmojiId",
+        "EmojiName"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 585,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/structs.go:115",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/structs.go:113",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "ForumTag",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:585",
+      "protoFields": [
+        "EmojiId",
+        "EmojiName",
+        "Id",
+        "Moderated",
+        "Name"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 593,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/structs.go:167",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/structs.go:165",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "Emoji",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:594",
+      "protoFields": [
+        "Animated",
+        "Available",
+        "Id",
+        "Managed",
+        "Name",
+        "RequireColons",
+        "Roles",
+        "User"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 602,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/structs.go:181",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/structs.go:179",
+        "protoFieldsNotRead": [
+          "Available"
+        ]
+      }
+    },
+    {
+      "type": "EmojiParams",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:605",
+      "protoFields": [
+        "Image",
+        "Name",
+        "Roles"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 643,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/misc.go.disabled:219"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/misc.go.disabled:218"
+      }
+    },
+    {
+      "type": "Sticker",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:611",
+      "protoFields": [
+        "Available",
+        "Description",
+        "FormatType",
+        "GuildId",
+        "Id",
+        "Name",
+        "PackId",
+        "SortValue",
+        "Tags",
+        "Type",
+        "User"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 675,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "StickerItem",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:625",
+      "protoFields": [
+        "FormatType",
+        "Id",
+        "Name"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 690,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "StickerPack",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:631",
+      "protoFields": [
+        "BannerAssetId",
+        "CoverStickerId",
+        "Description",
+        "Id",
+        "Name",
+        "SkuId",
+        "Stickers"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 697,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "Guild",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:641",
+      "protoFields": [
+        "AfkChannelId",
+        "AfkTimeout",
+        "ApplicationId",
+        "ApproximateMemberCount",
+        "ApproximatePresenceCount",
+        "Banner",
+        "Channels",
+        "DefaultMessageNotifications",
+        "Description",
+        "DiscoverySplash",
+        "Emojis",
+        "ExplicitContentFilter",
+        "Features",
+        "Icon",
+        "Id",
+        "JoinedAt",
+        "Large",
+        "MaxMembers",
+        "MaxPresences",
+        "MaxVideoChannelUsers",
+        "MemberCount",
+        "Members",
+        "MfaLevel",
+        "Name",
+        "NsfwLevel",
+        "Owner",
+        "OwnerId",
+        "Permissions",
+        "PreferredLocale",
+        "PremiumSubscriptionCount",
+        "PremiumTier",
+        "Presences",
+        "PublicUpdatesChannelId",
+        "Region",
+        "Roles",
+        "RulesChannelId",
+        "Splash",
+        "StageInstances",
+        "Stickers",
+        "SystemChannelFlags",
+        "SystemChannelId",
+        "Threads",
+        "Unavailable",
+        "VanityUrlCode",
+        "VerificationLevel",
+        "VoiceStates",
+        "WidgetChannelId",
+        "WidgetEnabled"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 762,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/structs.go:199",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/structs.go:343",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "GuildPreview",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:692",
+      "protoFields": [
+        "ApproximateMemberCount",
+        "ApproximatePresenceCount",
+        "Description",
+        "DiscoverySplash",
+        "Emojis",
+        "Features",
+        "Icon",
+        "Id",
+        "Name",
+        "Splash"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 928,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "GuildScheduledEvent",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:705",
+      "protoFields": [
+        "ChannelId",
+        "Creator",
+        "CreatorId",
+        "Description",
+        "EntityId",
+        "EntityMetadata",
+        "EntityType",
+        "GuildId",
+        "Id",
+        "Image",
+        "Name",
+        "PrivacyLevel",
+        "ScheduledEndTime",
+        "ScheduledStartTime",
+        "Status",
+        "UserCount"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 973,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "GuildScheduledEventParams",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:724",
+      "protoFields": [
+        "ChannelId",
+        "Description",
+        "EntityMetadata",
+        "EntityType",
+        "Image",
+        "Name",
+        "PrivacyLevel",
+        "ScheduledEndTime",
+        "ScheduledStartTime",
+        "Status"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1014,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "GuildScheduledEventEntityMetadata",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:737",
+      "protoFields": [
+        "Location"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1059,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "GuildScheduledEventUser",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:741",
+      "protoFields": [
+        "GuildScheduledEventId",
+        "Member",
+        "User"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1108,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "GuildOnboardingMode",
+      "classification": "scalar_wrapper_no_standalone_converter",
+      "schema": "proto/discord-v1/discordgo.proto:747",
+      "protoFields": [
+        "Value"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1116,
+        "kind": "int"
+      }
+    },
+    {
+      "type": "GuildOnboarding",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:752",
+      "protoFields": [
+        "DefaultChannelIds",
+        "Enabled",
+        "GuildId",
+        "Mode",
+        "Prompts"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1128,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "GuildOnboardingPromptType",
+      "classification": "scalar_wrapper_no_standalone_converter",
+      "schema": "proto/discord-v1/discordgo.proto:760",
+      "protoFields": [
+        "Value"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1147,
+        "kind": "int"
+      }
+    },
+    {
+      "type": "GuildOnboardingPrompt",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:765",
+      "protoFields": [
+        "Id",
+        "InOnboarding",
+        "Options",
+        "Required",
+        "SingleSelect",
+        "Title",
+        "Type"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1157,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "GuildOnboardingPromptOption",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:775",
+      "protoFields": [
+        "ChannelIds",
+        "Description",
+        "Emoji",
+        "EmojiAnimated",
+        "EmojiId",
+        "EmojiName",
+        "Id",
+        "RoleIds",
+        "Title"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1185,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "GuildTemplate",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:787",
+      "protoFields": [
+        "Code",
+        "CreatedAt",
+        "Creator",
+        "CreatorId",
+        "Description",
+        "IsDirty",
+        "Name",
+        "SerializedSourceGuild",
+        "SourceGuildId",
+        "UpdatedAt",
+        "UsageCount"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1218,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "GuildTemplateParams",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:801",
+      "protoFields": [
+        "Description",
+        "Name"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1254,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "UserGuild",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:806",
+      "protoFields": [
+        "ApproximateMemberCount",
+        "ApproximatePresenceCount",
+        "Features",
+        "Icon",
+        "Id",
+        "Name",
+        "Owner",
+        "Permissions"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1300,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "GuildParams",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:817",
+      "protoFields": [
+        "AfkChannelId",
+        "AfkTimeout",
+        "Banner",
+        "DefaultMessageNotifications",
+        "Description",
+        "DiscoverySplash",
+        "ExplicitContentFilter",
+        "Features",
+        "Icon",
+        "Name",
+        "OwnerId",
+        "PreferredLocale",
+        "PremiumProgressBarEnabled",
+        "PublicUpdatesChannelId",
+        "Region",
+        "RulesChannelId",
+        "Splash",
+        "SystemChannelFlags",
+        "SystemChannelId",
+        "VerificationLevel"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1354,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "Role",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:840",
+      "protoFields": [
+        "Color",
+        "Flags",
+        "Hoist",
+        "Icon",
+        "Id",
+        "Managed",
+        "Mentionable",
+        "Name",
+        "Permissions",
+        "Position",
+        "UnicodeEmoji"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1378,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/structs.go:319",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/structs.go:196",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "RoleFlags",
+      "classification": "scalar_wrapper_no_standalone_converter",
+      "schema": "proto/discord-v1/discordgo.proto:854",
+      "protoFields": [
+        "Value"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1420,
+        "kind": "int"
+      }
+    },
+    {
+      "type": "RoleParams",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:860",
+      "protoFields": [
+        "Color",
+        "Hoist",
+        "Icon",
+        "Mentionable",
+        "Name",
+        "Permissions",
+        "UnicodeEmoji"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1451,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "VoiceState",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:870",
+      "protoFields": [
+        "ChannelId",
+        "Deaf",
+        "GuildId",
+        "Member",
+        "Mute",
+        "RequestToSpeakTimestamp",
+        "SelfDeaf",
+        "SelfMute",
+        "SelfStream",
+        "SelfVideo",
+        "SessionId",
+        "Suppress",
+        "UserId"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1486,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/structs.go:431",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/structs.go:304",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "Presence",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:886",
+      "protoFields": [
+        "Activities",
+        "ClientStatus",
+        "Since",
+        "Status",
+        "User"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1503,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/structs.go:380",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/structs.go:254",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "MemberFlags",
+      "classification": "scalar_wrapper_no_standalone_converter",
+      "schema": "proto/discord-v1/discordgo.proto:894",
+      "protoFields": [
+        "Value"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1542,
+        "kind": "int"
+      }
+    },
+    {
+      "type": "Member",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:899",
+      "protoFields": [
+        "Avatar",
+        "Banner",
+        "CommunicationDisabledUntil",
+        "Deaf",
+        "Flags",
+        "GuildId",
+        "JoinedAt",
+        "Mute",
+        "Nick",
+        "Pending",
+        "Permissions",
+        "PremiumSince",
+        "Roles",
+        "User"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1558,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/structs.go:29",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/structs.go:28",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "ClientStatus",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:916",
+      "protoFields": [
+        "Desktop",
+        "Mobile",
+        "Web"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1650,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/structs.go:418",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/structs.go:292",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "TooManyRequests",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:922",
+      "protoFields": [
+        "Bucket",
+        "Message",
+        "RetryAfter"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1670,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/misc.go.disabled:49"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/misc.go.disabled:48"
+      }
+    },
+    {
+      "type": "ReadState",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:928",
+      "protoFields": [
+        "Id",
+        "LastMessageId",
+        "MentionCount"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1697,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/misc.go.disabled:62"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/misc.go.disabled:61"
+      }
+    },
+    {
+      "type": "GuildRole",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:934",
+      "protoFields": [
+        "GuildId",
+        "Role"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1704,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/misc.go.disabled:75"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/misc.go.disabled:74"
+      }
+    },
+    {
+      "type": "GuildBan",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:939",
+      "protoFields": [
+        "Reason",
+        "User"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1710,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/misc.go.disabled:87"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/misc.go.disabled:86"
+      }
+    },
+    {
+      "type": "AutoModerationRule",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:944",
+      "protoFields": [
+        "Actions",
+        "CreatorId",
+        "Enabled",
+        "EventType",
+        "ExemptChannels",
+        "ExemptRoles",
+        "GuildId",
+        "Id",
+        "Name",
+        "TriggerMetadata",
+        "TriggerType"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1716,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/moderation_audit.go.disabled:9"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/moderation_audit.go.disabled:9"
+      }
+    },
+    {
+      "type": "AutoModerationTriggerMetadata",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:958",
+      "protoFields": [
+        "AllowList",
+        "KeywordFilter",
+        "MentionTotalLimit",
+        "Presets",
+        "RegexPatterns"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1761,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/moderation_audit.go.disabled:50"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/moderation_audit.go.disabled:39"
+      }
+    },
+    {
+      "type": "AutoModerationActionType",
+      "classification": "scalar_wrapper_no_standalone_converter",
+      "schema": "proto/discord-v1/discordgo.proto:966",
+      "protoFields": [
+        "Value"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1783,
+        "kind": "int"
+      }
+    },
+    {
+      "type": "AutoModerationActionMetadata",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:971",
+      "protoFields": [
+        "ChannelId",
+        "CustomMessage",
+        "Duration"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1793,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/moderation_audit.go.disabled:87"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/moderation_audit.go.disabled:76"
+      }
+    },
+    {
+      "type": "AutoModerationAction",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:977",
+      "protoFields": [
+        "Metadata",
+        "Type"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1808,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/moderation_audit.go.disabled:75"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/moderation_audit.go.disabled:64"
+      }
+    },
+    {
+      "type": "GuildEmbed",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:982",
+      "protoFields": [
+        "ChannelId",
+        "Enabled"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1814,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "GuildAuditLog",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:987",
+      "protoFields": [
+        "AuditLogEntries",
+        "Integrations",
+        "Users",
+        "Webhooks"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1821,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/moderation_audit.go.disabled:100"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/moderation_audit.go.disabled:89"
+      }
+    },
+    {
+      "type": "AuditLogEntry",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:994",
+      "protoFields": [
+        "ActionType",
+        "Changes",
+        "Id",
+        "Options",
+        "Reason",
+        "TargetId",
+        "UserId"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1830,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/moderation_audit.go.disabled:134"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/moderation_audit.go.disabled:123"
+      }
+    },
+    {
+      "type": "AuditLogChange",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1004",
+      "protoFields": [
+        "Key",
+        "NewValue",
+        "OldValue"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1841,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/moderation_audit.go.disabled:161"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/moderation_audit.go.disabled:147"
+      }
+    },
+    {
+      "type": "AuditLogOptions",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1013",
+      "protoFields": [
+        "ApplicationId",
+        "AutoModerationRuleName",
+        "AutoModerationRuleTriggerType",
+        "ChannelId",
+        "Count",
+        "DeleteMemberDays",
+        "Id",
+        "IntegrationType",
+        "MembersRemoved",
+        "MessageId",
+        "RoleName",
+        "Type"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 1999,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/moderation_audit.go.disabled:186"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/moderation_audit.go.disabled:167"
+      }
+    },
+    {
+      "type": "GuildMemberParams",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:1028",
+      "protoFields": [
+        "ChannelId",
+        "CommunicationDisabledUntil",
+        "Deaf",
+        "Mute",
+        "Nick",
+        "Roles"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2113,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "GuildMemberAddParams",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:1037",
+      "protoFields": [
+        "AccessToken",
+        "Deaf",
+        "Mute",
+        "Nick",
+        "Roles"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2169,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "APIErrorMessage",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1045",
+      "protoFields": [
+        "Code",
+        "Message"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2183,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/misc.go.disabled:37"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/misc.go.disabled:36"
+      }
+    },
+    {
+      "type": "MessageReaction",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:1050",
+      "protoFields": [
+        "ChannelId",
+        "Emoji",
+        "GuildId",
+        "MessageId",
+        "UserId"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2189,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "GatewayBotResponse",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1058",
+      "protoFields": [
+        "SessionStartLimit",
+        "Shards",
+        "Url"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2198,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/minimal.go:22",
+        "protoFieldsNotWritten": [
+          "SessionStartLimit"
+        ],
+        "goFieldsNotRead": [
+          "SessionStartLimit"
+        ]
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/minimal.go:22",
+        "protoFieldsNotRead": [
+          "SessionStartLimit"
+        ]
+      }
+    },
+    {
+      "type": "SessionInformation",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1064",
+      "protoFields": [
+        "MaxConcurrency",
+        "Remaining",
+        "ResetAfter",
+        "Total"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2205,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/misc.go.disabled:23"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/misc.go.disabled:22"
+      }
+    },
+    {
+      "type": "StageInstance",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1071",
+      "protoFields": [
+        "ChannelId",
+        "DiscoverableDisabled",
+        "GuildId",
+        "GuildScheduledEventId",
+        "Id",
+        "PrivacyLevel",
+        "Topic"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2332,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/structs.go:454",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/structs.go:326",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "StageInstanceParams",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:1081",
+      "protoFields": [
+        "ChannelId",
+        "PrivacyLevel",
+        "SendStartNotification",
+        "Topic"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2351,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "PollLayoutType",
+      "classification": "scalar_wrapper_no_standalone_converter",
+      "schema": "proto/discord-v1/discordgo.proto:1088",
+      "protoFields": [
+        "Value"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2374,
+        "kind": "int"
+      }
+    },
+    {
+      "type": "PollMedia",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1093",
+      "protoFields": [
+        "Emoji",
+        "Text"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2382,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/monetization.go.disabled:31"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/monetization.go.disabled:31"
+      }
+    },
+    {
+      "type": "PollAnswer",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1098",
+      "protoFields": [
+        "AnswerId",
+        "Media"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2388,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/monetization.go.disabled:43"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/monetization.go.disabled:43"
+      }
+    },
+    {
+      "type": "PollAnswerCount",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1103",
+      "protoFields": [
+        "Count",
+        "Id",
+        "MeVoted"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2395,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/monetization.go.disabled:55"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/monetization.go.disabled:55"
+      }
+    },
+    {
+      "type": "PollResults",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1109",
+      "protoFields": [
+        "AnswerCounts",
+        "Finalized"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2402,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/monetization.go.disabled:68"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/monetization.go.disabled:68"
+      }
+    },
+    {
+      "type": "Poll",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1114",
+      "protoFields": [
+        "AllowMultiselect",
+        "Answers",
+        "Duration",
+        "Expiry",
+        "LayoutType",
+        "Question",
+        "Results"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2408,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/monetization.go.disabled:9"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/monetization.go.disabled:9"
+      }
+    },
+    {
+      "type": "SKUType",
+      "classification": "scalar_wrapper_no_standalone_converter",
+      "schema": "proto/discord-v1/discordgo.proto:1124",
+      "protoFields": [
+        "Value"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2426,
+        "kind": "int"
+      }
+    },
+    {
+      "type": "SKUFlags",
+      "classification": "scalar_wrapper_no_standalone_converter",
+      "schema": "proto/discord-v1/discordgo.proto:1129",
+      "protoFields": [
+        "Value"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2439,
+        "kind": "int"
+      }
+    },
+    {
+      "type": "SKU",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1134",
+      "protoFields": [
+        "ApplicationId",
+        "Flags",
+        "Id",
+        "Name",
+        "Slug",
+        "Type"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2451,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/monetization.go.disabled:154"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/monetization.go.disabled:151"
+      }
+    },
+    {
+      "type": "SubscriptionStatus",
+      "classification": "scalar_wrapper_no_standalone_converter",
+      "schema": "proto/discord-v1/discordgo.proto:1143",
+      "protoFields": [
+        "Value"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2508,
+        "kind": "int"
+      }
+    },
+    {
+      "type": "Subscription",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1148",
+      "protoFields": [
+        "CanceledAt",
+        "Country",
+        "CurrentPeriodEnd",
+        "CurrentPeriodStart",
+        "EntitlementIds",
+        "Id",
+        "RenewalSkuIds",
+        "SkuIds",
+        "Status",
+        "UserId"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2474,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/monetization.go.disabled:170"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/monetization.go.disabled:167"
+      }
+    },
+    {
+      "type": "EntitlementType",
+      "classification": "scalar_wrapper_no_standalone_converter",
+      "schema": "proto/discord-v1/discordgo.proto:1161",
+      "protoFields": [
+        "Value"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2519,
+        "kind": "int"
+      }
+    },
+    {
+      "type": "Entitlement",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1166",
+      "protoFields": [
+        "ApplicationId",
+        "Consumed",
+        "Deleted",
+        "EndsAt",
+        "GuildId",
+        "Id",
+        "SkuId",
+        "StartsAt",
+        "SubscriptionId",
+        "Type",
+        "UserId"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2535,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/monetization.go.disabled:98"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/monetization.go.disabled:98"
+      }
+    },
+    {
+      "type": "EntitlementOwnerType",
+      "classification": "scalar_wrapper_no_standalone_converter",
+      "schema": "proto/discord-v1/discordgo.proto:1180",
+      "protoFields": [
+        "Value"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2577,
+        "kind": "int"
+      }
+    },
+    {
+      "type": "EntitlementTest",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1185",
+      "protoFields": [
+        "OwnerId",
+        "OwnerType",
+        "SkuId"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2586,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/monetization.go.disabled:124"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/monetization.go.disabled:121"
+      }
+    },
+    {
+      "type": "EntitlementFilterOptions",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1191",
+      "protoFields": [
+        "After",
+        "Before",
+        "ExcludeEnded",
+        "GuildId",
+        "Limit",
+        "SkuIds",
+        "UserId"
+      ],
+      "localGo": {
+        "file": "discordgo/structs.go",
+        "line": 2598,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/monetization.go.disabled:137"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/monetization.go.disabled:134"
+      }
+    },
+    {
+      "type": "State",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1201",
+      "protoFields": [
+        "ChannelMap",
+        "GuildMap",
+        "MaxMessageCount",
+        "Ready",
+        "TrackChannels",
+        "TrackEmojis",
+        "TrackMembers",
+        "TrackPresences",
+        "TrackRoles",
+        "TrackThreadMembers",
+        "TrackThreads",
+        "TrackVoice"
+      ],
+      "localGo": {
+        "file": "discordgo/state.go",
+        "line": 36,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/activity.go:173",
+        "protoFieldsNotWritten": [
+          "ChannelMap",
+          "GuildMap",
+          "TrackPresences"
+        ],
+        "goFieldsNotRead": [
+          "Ready",
+          "TrackPresences",
+          "TrackStickers"
+        ]
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/activity.go:187",
+        "protoFieldsNotRead": [
+          "ChannelMap",
+          "GuildMap",
+          "Ready",
+          "TrackPresences"
+        ]
+      }
+    },
+    {
+      "type": "User",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1280",
+      "protoFields": [
+        "AccentColor",
+        "Avatar",
+        "Banner",
+        "Bot",
+        "Discriminator",
+        "Email",
+        "Flags",
+        "GlobalName",
+        "Id",
+        "Locale",
+        "MfaEnabled",
+        "PremiumType",
+        "PublicFlagsValue",
+        "System",
+        "Token",
+        "Username",
+        "Verified"
+      ],
+      "localGo": {
+        "file": "discordgo/user.go",
+        "line": 44,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/structs.go:10",
+        "protoFieldsNotWritten": [
+          "AccentColor",
+          "Banner",
+          "GlobalName",
+          "MfaEnabled",
+          "PremiumType",
+          "System",
+          "Token"
+        ],
+        "goFieldsNotRead": [
+          "AccentColor",
+          "Banner",
+          "GlobalName",
+          "MFAEnabled",
+          "PremiumType",
+          "System",
+          "Token"
+        ]
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/structs.go:9",
+        "protoFieldsNotRead": [
+          "AccentColor",
+          "Banner",
+          "GlobalName",
+          "MfaEnabled",
+          "PremiumType",
+          "System",
+          "Token"
+        ]
+      }
+    },
+    {
+      "type": "TeamMember",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1352",
+      "protoFields": [
+        "MembershipState",
+        "Permissions",
+        "TeamId",
+        "User"
+      ],
+      "localGo": {
+        "file": "discordgo/oauth2.go",
+        "line": 26,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/application.go.disabled:126"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/application.go.disabled:126"
+      }
+    },
+    {
+      "type": "Team",
+      "classification": "disabled_only_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1360",
+      "protoFields": [
+        "Description",
+        "Icon",
+        "Id",
+        "Members",
+        "Name",
+        "OwnerUserId"
+      ],
+      "localGo": {
+        "file": "discordgo/oauth2.go",
+        "line": 34,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "inactiveSource": "shared/discord-v1/convert/struct2buf/application.go.disabled:105"
+      },
+      "buf2struct": {
+        "inactiveSource": "shared/discord-v1/convert/buf2struct/application.go.disabled:105"
+      }
+    },
+    {
+      "type": "Webhook",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1380",
+      "protoFields": [
+        "ApplicationId",
+        "Avatar",
+        "ChannelId",
+        "GuildId",
+        "Id",
+        "Name",
+        "Token",
+        "Type",
+        "User"
+      ],
+      "localGo": {
+        "file": "discordgo/webhook.go",
+        "line": 4,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/structs.go:471",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/structs.go:466",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "WebhookParams",
+      "classification": "active_named_one_direction",
+      "schema": "proto/discord-v1/discordgo.proto:1396",
+      "protoFields": [
+        "AllowedMentions",
+        "Attachments",
+        "AvatarUrl",
+        "Components",
+        "Content",
+        "Embeds",
+        "Files",
+        "Flags",
+        "ThreadName",
+        "Tts",
+        "Username"
+      ],
+      "localGo": {
+        "file": "discordgo/webhook.go",
+        "line": 29,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/interactions.go:442",
+        "protoFieldsNotWritten": [
+          "Components",
+          "Files",
+          "Flags"
+        ],
+        "goFieldsNotRead": [
+          "Components",
+          "Files",
+          "Flags"
+        ]
+      }
+    },
+    {
+      "type": "WebhookEdit",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1434",
+      "protoFields": [
+        "AllowedMentions",
+        "Attachments",
+        "Components",
+        "Content",
+        "Embeds",
+        "Files"
+      ],
+      "localGo": {
+        "file": "discordgo/webhook.go",
+        "line": 48,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/interactions.go:427",
+        "protoFieldsNotWritten": [
+          "AllowedMentions",
+          "Attachments",
+          "Components",
+          "Embeds",
+          "Files"
+        ],
+        "goFieldsNotRead": [
+          "AllowedMentions",
+          "Attachments",
+          "Components",
+          "Embeds",
+          "Files"
+        ]
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/interactions.go:424",
+        "protoFieldsNotRead": [
+          "AllowedMentions",
+          "Attachments",
+          "Components",
+          "Embeds",
+          "Files"
+        ]
+      }
+    },
+    {
+      "type": "ComponentEmoji",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1453",
+      "protoFields": [
+        "Animated",
+        "Id",
+        "Name"
+      ],
+      "localGo": {
+        "file": "discordgo/components.go",
+        "line": 158,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/components.go:190",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/components.go:80",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "MessageComponent",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1527",
+      "protoFields": [
+        "Component"
+      ],
+      "localGo": {
+        "file": "discordgo/components.go",
+        "line": 31,
+        "kind": "interface{}"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/components.go:9",
+        "protoFieldsNotWritten": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/components.go:9",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "SelectMenuOption",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1544",
+      "protoFields": [
+        "Description",
+        "Emoji",
+        "IsDefault",
+        "Label",
+        "Value"
+      ],
+      "localGo": {
+        "file": "discordgo/components.go",
+        "line": 203,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/components.go:244",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/components.go:138",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "SelectMenuDefaultValue",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1553",
+      "protoFields": [
+        "Id",
+        "Type"
+      ],
+      "localGo": {
+        "file": "discordgo/components.go",
+        "line": 223,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/components.go:259",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/components.go:153",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "UnfurledMediaItem",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1559",
+      "protoFields": [
+        "Url"
+      ],
+      "localGo": {
+        "file": "discordgo/components.go",
+        "line": 582,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/components.go:331",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/components.go:225",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "MediaGalleryItem",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1564",
+      "protoFields": [
+        "Description",
+        "Media",
+        "Spoiler"
+      ],
+      "localGo": {
+        "file": "discordgo/components.go",
+        "line": 462,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/components.go:361",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/components.go:258",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "ActionsRow",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1571",
+      "protoFields": [
+        "Components",
+        "Id"
+      ],
+      "localGo": {
+        "file": "discordgo/components.go",
+        "line": 91,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/components.go:153",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/components.go:43",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "Button",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1577",
+      "protoFields": [
+        "CustomId",
+        "Disabled",
+        "Emoji",
+        "Id",
+        "Label",
+        "SkuId",
+        "Style",
+        "Url"
+      ],
+      "localGo": {
+        "file": "discordgo/components.go",
+        "line": 165,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/components.go:172",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/components.go:62",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "SelectMenu",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1589",
+      "protoFields": [
+        "ChannelTypes",
+        "CustomId",
+        "DefaultValues",
+        "Disabled",
+        "Id",
+        "MaxValues",
+        "MenuType",
+        "MinValues",
+        "Options",
+        "Placeholder"
+      ],
+      "localGo": {
+        "file": "discordgo/components.go",
+        "line": 243,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/components.go:203",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/components.go:93",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "TextInput",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1603",
+      "protoFields": [
+        "CustomId",
+        "Id",
+        "Label",
+        "MaxLength",
+        "MinLength",
+        "Placeholder",
+        "Required",
+        "Style",
+        "Value"
+      ],
+      "localGo": {
+        "file": "discordgo/components.go",
+        "line": 291,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/components.go:281",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/components.go:175",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "Section",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1616",
+      "protoFields": [
+        "Accessory",
+        "Components",
+        "Id"
+      ],
+      "localGo": {
+        "file": "discordgo/components.go",
+        "line": 333,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/components.go:300",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/components.go:194",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "TextDisplay",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1623",
+      "protoFields": [
+        "Content"
+      ],
+      "localGo": {
+        "file": "discordgo/components.go",
+        "line": 386,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/components.go:320",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/components.go:214",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "Thumbnail",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1628",
+      "protoFields": [
+        "Description",
+        "Id",
+        "Media",
+        "Spoiler"
+      ],
+      "localGo": {
+        "file": "discordgo/components.go",
+        "line": 409,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/components.go:342",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/components.go:236",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "MediaGallery",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1636",
+      "protoFields": [
+        "Id",
+        "Items"
+      ],
+      "localGo": {
+        "file": "discordgo/components.go",
+        "line": 436,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/components.go:379",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/components.go:279",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "FileComponent",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1642",
+      "protoFields": [
+        "File",
+        "Id",
+        "Spoiler"
+      ],
+      "localGo": {
+        "file": "discordgo/components.go",
+        "line": 469,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/components.go:396",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/components.go:298",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "Separator",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1649",
+      "protoFields": [
+        "Divider",
+        "Id",
+        "Spacing"
+      ],
+      "localGo": {
+        "file": "discordgo/components.go",
+        "line": 504,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/components.go:409",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/components.go:316",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "Container",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1656",
+      "protoFields": [
+        "AccentColor",
+        "Components",
+        "Id",
+        "Spoiler"
+      ],
+      "localGo": {
+        "file": "discordgo/components.go",
+        "line": 532,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/components.go:431",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/components.go:338",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "ApplicationCommand",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1701",
+      "protoFields": [
+        "ApplicationId",
+        "Contexts",
+        "DefaultMemberPermissions",
+        "DefaultPermission",
+        "Description",
+        "DescriptionLocalizations",
+        "DmPermission",
+        "GuildId",
+        "Id",
+        "IntegrationTypes",
+        "Name",
+        "NameLocalizations",
+        "Nsfw",
+        "Options",
+        "Type",
+        "Version"
+      ],
+      "localGo": {
+        "file": "discordgo/interactions.go",
+        "line": 33,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/interactions.go:10",
+        "protoFieldsNotWritten": [
+          "Contexts",
+          "DefaultPermission",
+          "DmPermission",
+          "IntegrationTypes"
+        ],
+        "goFieldsNotRead": [
+          "Contexts",
+          "DMPermission",
+          "DefaultPermission",
+          "IntegrationTypes"
+        ]
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/interactions.go:11",
+        "protoFieldsNotRead": [
+          "Contexts",
+          "DefaultPermission",
+          "DmPermission",
+          "IntegrationTypes"
+        ]
+      }
+    },
+    {
+      "type": "ApplicationCommandOption",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1745",
+      "protoFields": [
+        "Autocomplete",
+        "ChannelTypes",
+        "Choices",
+        "Description",
+        "DescriptionLocalizations",
+        "MaxLength",
+        "MaxValue",
+        "MinLength",
+        "MinValue",
+        "Name",
+        "NameLocalizations",
+        "Options",
+        "Required",
+        "Type"
+      ],
+      "localGo": {
+        "file": "discordgo/interactions.go",
+        "line": 106,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/interactions.go:71",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/interactions.go:53",
+        "protoFieldsNotRead": [
+          "Autocomplete"
+        ]
+      }
+    },
+    {
+      "type": "ApplicationCommandOptionChoice",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1776",
+      "protoFields": [
+        "Name",
+        "NameLocalizations",
+        "Value"
+      ],
+      "localGo": {
+        "file": "discordgo/interactions.go",
+        "line": 134,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/interactions.go:121",
+        "protoFieldsNotWritten": [
+          "NameLocalizations"
+        ],
+        "goFieldsNotRead": [
+          "NameLocalizations"
+        ]
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/interactions.go:114",
+        "protoFieldsNotRead": [
+          "NameLocalizations"
+        ]
+      }
+    },
+    {
+      "type": "ApplicationCommandPermissions",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:1800",
+      "protoFields": [
+        "Id",
+        "Permission",
+        "Type"
+      ],
+      "localGo": {
+        "file": "discordgo/interactions.go",
+        "line": 141,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "ApplicationCommandPermissionsList",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:1808",
+      "protoFields": [
+        "Permissions"
+      ],
+      "localGo": {
+        "file": "discordgo/interactions.go",
+        "line": 160,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "GuildApplicationCommandPermissions",
+      "classification": "no_converter",
+      "schema": "proto/discord-v1/discordgo.proto:1813",
+      "protoFields": [
+        "ApplicationId",
+        "GuildId",
+        "Id",
+        "Permissions"
+      ],
+      "localGo": {
+        "file": "discordgo/interactions.go",
+        "line": 165,
+        "kind": "struct"
+      }
+    },
+    {
+      "type": "Interaction",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1832",
+      "protoFields": [
+        "AppId",
+        "AppPermissions",
+        "AuthorizingIntegrationOwners",
+        "ChannelId",
+        "Context",
+        "Data",
+        "Entitlements",
+        "GuildId",
+        "GuildLocale",
+        "Id",
+        "Locale",
+        "Member",
+        "Message",
+        "Token",
+        "Type",
+        "User",
+        "Version"
+      ],
+      "localGo": {
+        "file": "discordgo/interactions.go",
+        "line": 221,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/interactions.go:150",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": [
+          "AuthorizingIntegrationOwners",
+          "Context",
+          "Entitlements"
+        ]
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/interactions.go:138",
+        "protoFieldsNotRead": [
+          "AuthorizingIntegrationOwners",
+          "Context",
+          "Entitlements"
+        ]
+      }
+    },
+    {
+      "type": "ApplicationCommandInteractionData",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1890",
+      "protoFields": [
+        "CommandType",
+        "Id",
+        "Name",
+        "Options",
+        "Resolved",
+        "TargetId"
+      ],
+      "localGo": {
+        "file": "discordgo/interactions.go",
+        "line": 340,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/interactions.go:205",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/interactions.go:185",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "ApplicationCommandInteractionDataResolved",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1907",
+      "protoFields": [
+        "Attachments",
+        "Channels",
+        "Members",
+        "Messages",
+        "Roles",
+        "Users"
+      ],
+      "localGo": {
+        "file": "discordgo/interactions.go",
+        "line": 368,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/interactions.go:290",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/interactions.go:251",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "MessageComponentInteractionData",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1917",
+      "protoFields": [
+        "ComponentType",
+        "CustomId",
+        "Resolved",
+        "Values"
+      ],
+      "localGo": {
+        "file": "discordgo/interactions.go",
+        "line": 383,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/interactions.go:335",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/interactions.go:296",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "MessageComponentInteractionDataResolved",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1928",
+      "protoFields": [
+        "Channels",
+        "Members",
+        "Roles",
+        "Users"
+      ],
+      "localGo": {
+        "file": "discordgo/interactions.go",
+        "line": 393,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/interactions.go:348",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/interactions.go:309",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "ModalSubmitInteractionData",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1936",
+      "protoFields": [
+        "Components",
+        "CustomId"
+      ],
+      "localGo": {
+        "file": "discordgo/interactions.go",
+        "line": 406,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/interactions.go:381",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/interactions.go:342",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "ApplicationCommandInteractionDataOption",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1942",
+      "protoFields": [
+        "Focused",
+        "Name",
+        "Options",
+        "Type",
+        "Value"
+      ],
+      "localGo": {
+        "file": "discordgo/interactions.go",
+        "line": 436,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/interactions.go:225",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/interactions.go:205",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "InteractionResponse",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1988",
+      "protoFields": [
+        "Data",
+        "Type"
+      ],
+      "localGo": {
+        "file": "discordgo/interactions.go",
+        "line": 592,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/interactions.go:400",
+        "protoFieldsNotWritten": [],
+        "goFieldsNotRead": []
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/interactions.go:361",
+        "protoFieldsNotRead": []
+      }
+    },
+    {
+      "type": "InteractionResponseData",
+      "classification": "active_named_both_directions",
+      "schema": "proto/discord-v1/discordgo.proto:1994",
+      "protoFields": [
+        "AllowedMentions",
+        "Attachments",
+        "Choices",
+        "Components",
+        "Content",
+        "CustomId",
+        "Embeds",
+        "Files",
+        "Flags",
+        "Poll",
+        "Title",
+        "Tts"
+      ],
+      "localGo": {
+        "file": "discordgo/interactions.go",
+        "line": 598,
+        "kind": "struct"
+      },
+      "struct2buf": {
+        "source": "shared/discord-v1/convert/struct2buf/interactions.go:411",
+        "protoFieldsNotWritten": [
+          "Attachments",
+          "Choices",
+          "CustomId",
+          "Files",
+          "Poll",
+          "Title"
+        ],
+        "goFieldsNotRead": [
+          "Attachments",
+          "Choices",
+          "CustomID",
+          "Files",
+          "Poll",
+          "Title"
+        ]
+      },
+      "buf2struct": {
+        "source": "shared/discord-v1/convert/buf2struct/interactions.go:372",
+        "protoFieldsNotRead": [
+          "Choices",
+          "CustomId",
+          "Poll",
+          "Title"
+        ]
+      }
+    }
+  ],
+  "enums": [
+    {
+      "name": "MessageType",
+      "schema": "proto/discord-v1/discordgo.proto:10"
+    },
+    {
+      "name": "MessageFlags",
+      "schema": "proto/discord-v1/discordgo.proto:70"
+    },
+    {
+      "name": "AllowedMentionType",
+      "schema": "proto/discord-v1/discordgo.proto:122"
+    },
+    {
+      "name": "EmbedType",
+      "schema": "proto/discord-v1/discordgo.proto:220"
+    },
+    {
+      "name": "MessageActivityType",
+      "schema": "proto/discord-v1/discordgo.proto:243"
+    },
+    {
+      "name": "MessageReferenceType",
+      "schema": "proto/discord-v1/discordgo.proto:266"
+    },
+    {
+      "name": "UserFlags",
+      "schema": "proto/discord-v1/discordgo.proto:1233"
+    },
+    {
+      "name": "UserPremiumType",
+      "schema": "proto/discord-v1/discordgo.proto:1260"
+    },
+    {
+      "name": "MembershipState",
+      "schema": "proto/discord-v1/discordgo.proto:1344"
+    },
+    {
+      "name": "WebhookType",
+      "schema": "proto/discord-v1/discordgo.proto:1371"
+    },
+    {
+      "name": "ChannelType",
+      "schema": "proto/discord-v1/discordgo.proto:1460"
+    },
+    {
+      "name": "ComponentType",
+      "schema": "proto/discord-v1/discordgo.proto:1469"
+    },
+    {
+      "name": "ButtonStyle",
+      "schema": "proto/discord-v1/discordgo.proto:1489"
+    },
+    {
+      "name": "TextInputStyle",
+      "schema": "proto/discord-v1/discordgo.proto:1500"
+    },
+    {
+      "name": "SeparatorSpacingSize",
+      "schema": "proto/discord-v1/discordgo.proto:1507"
+    },
+    {
+      "name": "SelectMenuDefaultValueType",
+      "schema": "proto/discord-v1/discordgo.proto:1514"
+    },
+    {
+      "name": "ApplicationCommandType",
+      "schema": "proto/discord-v1/discordgo.proto:1664"
+    },
+    {
+      "name": "InteractionContextType",
+      "schema": "proto/discord-v1/discordgo.proto:1678"
+    },
+    {
+      "name": "ApplicationIntegrationType",
+      "schema": "proto/discord-v1/discordgo.proto:1692"
+    },
+    {
+      "name": "ApplicationCommandOptionType",
+      "schema": "proto/discord-v1/discordgo.proto:1729"
+    },
+    {
+      "name": "ApplicationCommandPermissionType",
+      "schema": "proto/discord-v1/discordgo.proto:1792"
+    },
+    {
+      "name": "InteractionType",
+      "schema": "proto/discord-v1/discordgo.proto:1822"
+    },
+    {
+      "name": "InteractionResponseType",
+      "schema": "proto/discord-v1/discordgo.proto:1969"
+    }
+  ],
+  "helperRPCs": {
+    "declared": [
+      "ChannelMessageSend",
+      "ChannelMessageSendComplex",
+      "ChannelMessageSendEmbed",
+      "ChannelMessageSendEmbeds",
+      "ChannelMessageEdit",
+      "ChannelMessageEditComplex",
+      "ChannelMessageDelete",
+      "ChannelMessages",
+      "ChannelMessage",
+      "Channel",
+      "ChannelEdit",
+      "ChannelDelete",
+      "ChannelTyping",
+      "Guild",
+      "GuildChannels",
+      "GuildMembers",
+      "GuildMember",
+      "GuildRoles",
+      "User",
+      "UserChannelCreate",
+      "InteractionRespond",
+      "InteractionResponseEdit",
+      "ApplicationCommandCreate",
+      "ApplicationCommandEdit",
+      "ApplicationCommandDelete",
+      "ApplicationCommands",
+      "MessageReactionAdd",
+      "MessageReactionRemove",
+      "MessageReactionsRemoveAll",
+      "ThreadStart",
+      "ThreadJoin",
+      "ThreadLeave",
+      "ThreadMemberAdd",
+      "ThreadMemberRemove",
+      "VoiceRegions",
+      "WebhookCreate",
+      "WebhookExecute",
+      "UserChannelPermissions",
+      "Gateway",
+      "GatewayBot"
+    ],
+    "serverImplemented": [
+      "ChannelMessageSend",
+      "ChannelMessageSendComplex",
+      "ChannelMessageSendEmbed",
+      "ChannelMessageSendEmbeds",
+      "ChannelMessageEdit",
+      "ChannelMessageEditComplex",
+      "ChannelMessageDelete",
+      "ChannelMessages",
+      "ChannelMessage",
+      "Channel",
+      "ChannelEdit",
+      "ChannelDelete",
+      "ChannelTyping",
+      "Guild",
+      "GuildChannels",
+      "GuildMembers",
+      "GuildMember",
+      "GuildRoles",
+      "User",
+      "UserChannelCreate",
+      "InteractionRespond",
+      "InteractionResponseEdit"
+    ],
+    "inheritedUnimplemented": [
+      "ApplicationCommandCreate",
+      "ApplicationCommandEdit",
+      "ApplicationCommandDelete",
+      "ApplicationCommands",
+      "MessageReactionAdd",
+      "MessageReactionRemove",
+      "MessageReactionsRemoveAll",
+      "ThreadStart",
+      "ThreadJoin",
+      "ThreadLeave",
+      "ThreadMemberAdd",
+      "ThreadMemberRemove",
+      "VoiceRegions",
+      "WebhookCreate",
+      "WebhookExecute",
+      "UserChannelPermissions",
+      "Gateway",
+      "GatewayBot"
+    ]
+  },
+  "reviewedAdditionalGaps": {
+    "Interaction": "Context hardcoded 0; AuthorizingIntegrationOwners/Entitlements hardcoded nil; actual local Go has all three fields",
+    "Presence.Activities": "Party, Assets, Secrets, Instance, Flags omitted in inline mapping both directions",
+    "Emoji": "reverse Available reads Animated",
+    "MessageEmbed": "reverse numeric enum cast yields Unicode codepoint, and forward empty Type panics",
+    "MessageAllowedMentions": "reverse enum cast yields Unicode codepoints rather than roles/users/everyone",
+    "MessageEdit": "nil versus explicit empty Content/Embeds/Attachments lost; Components rebuilt nonnil even if absent",
+    "ApplicationCommandInteractionDataOption": "role/mentionable/attachment encode absent; integer decoded to int64 conflicts with IntValue expecting float64",
+    "ApplicationCommandInteractionDataResolved": "reverse map keys rebuilt from embedded IDs; Member.User may be nil",
+    "schemaMissingFields": {
+      "File": [
+        "Reader content"
+      ],
+      "MessageAttachment": [
+        "DurationSecs",
+        "Waveform",
+        "Flags"
+      ],
+      "Application": [
+        "PrivacyProxyURL"
+      ],
+      "State": [
+        "TrackStickers"
+      ],
+      "ChannelEdit": [
+        "AvailableTags",
+        "DefaultReactionEmoji",
+        "DefaultSortOrder",
+        "DefaultForumLayout"
+      ]
+    },
+    "notWireData": "Session Client/Dialer/Ratelimiter/VoiceConnections intentionally not transportable; Channel/State caches require explicit snapshot policy; User.Token must not be blindly exposed to untrusted modules",
+    "ChannelEdit": {
+      "bothDirectionsMissing": [
+        "PermissionOverwrites",
+        "Flags",
+        "DefaultThreadRateLimitPerUser",
+        "Archived",
+        "AutoArchiveDuration",
+        "Locked",
+        "Invitable",
+        "AppliedTags"
+      ]
+    },
+    "enumContractMismatches": [
+      "MessageFlags",
+      "MessageActivityType",
+      "ChannelType",
+      "InteractionContextType",
+      "ApplicationIntegrationType"
+    ]
+  }
+}
