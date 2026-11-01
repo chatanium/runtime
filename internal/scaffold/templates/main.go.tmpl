@@ -1,0 +1,268 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	_ "embed"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/hashicorp/go-plugin"
+	corewire "github.com/thirdscam/chatanium/proto/core-v2"
+	wire "github.com/thirdscam/chatanium/proto/discord-v2"
+	core "github.com/thirdscam/chatanium/shared/core-v2"
+	discord "github.com/thirdscam/chatanium/shared/discord-v2"
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/encoding/protojson"
+)
+
+// This exact file is also the OCI image's manifest declaration.
+//go:embed manifest.json
+var manifestJSON []byte
+
+type Config struct {
+	GuildID   string `json:"guild_id"`
+	ChannelID string `json:"channel_id"`
+}
+
+type Bot struct {
+	mu      sync.Mutex
+	core    core.CoreClient
+	api     *discord.Client
+	config  Config
+	ready   bool
+	running bool
+	stopped bool
+	life    context.Context
+	cancel  context.CancelFunc
+	active  int
+	changed chan struct{}
+}
+
+func (b *Bot) bind(_ context.Context, conn grpc.ClientConnInterface) error {
+	var err error
+	b.core, err = core.NewCoreClient(conn, core.JSONLimits{MaxBytes: 4096, MaxDepth: 4})
+	if err != nil {
+		return err
+	}
+	b.api, err = discord.NewClient(conn)
+	return err
+}
+
+func (b *Bot) GetManifest(ctx context.Context) (*corewire.ModuleManifest, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	out := new(corewire.ModuleManifest)
+	if err := (protojson.UnmarshalOptions{DiscardUnknown: false}).Unmarshal(manifestJSON, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (b *Bot) GetStatus(ctx context.Context) (*corewire.Status, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	readiness := corewire.Readiness_READINESS_NOT_READY
+	if b.ready {
+		readiness = corewire.Readiness_READINESS_READY
+	}
+	return &corewire.Status{Readiness: readiness}, nil
+}
+
+func (b *Bot) OnStage(ctx context.Context, req *corewire.StageRequest) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if req == nil {
+		return errors.New("missing lifecycle stage")
+	}
+	switch req.Stage {
+	case corewire.Stage_STAGE_INIT:
+		return b.initialize(ctx, req.InitContext)
+	case corewire.Stage_STAGE_START:
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		if !b.ready || b.running || b.stopped {
+			return errors.New("invalid START")
+		}
+		b.running = true
+		return nil
+	case corewire.Stage_STAGE_DRAIN, corewire.Stage_STAGE_STOP:
+		b.mu.Lock()
+		b.ready, b.running = false, false
+		if req.Stage == corewire.Stage_STAGE_STOP {
+			b.stopped = true
+		}
+		if b.cancel != nil {
+			b.cancel()
+		}
+		b.mu.Unlock()
+		return b.join(ctx)
+	default:
+		return errors.New("unsupported lifecycle stage")
+	}
+}
+
+func (b *Bot) initialize(ctx context.Context, init *corewire.InitContext) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.life != nil || b.stopped || b.core == nil || b.api == nil || init == nil || init.Grants == nil {
+		return errors.New("invalid INIT or missing helpers/grants")
+	}
+	if !allows(init.Grants.CoreCapabilities, "core.config.read", map[string]string{}, false) {
+		return errors.New("core.config.read grant required")
+	}
+	raw, err := b.core.GetConfig(ctx)
+	if err != nil {
+		return err
+	}
+	if raw == nil {
+		return errors.New("module config required")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw.Json))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&b.config); err != nil {
+		return errors.New("invalid module config")
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return errors.New("module config must contain one JSON object")
+	}
+	if !snowflake(b.config.GuildID) || !snowflake(b.config.ChannelID) {
+		return errors.New("guild_id and channel_id must be Discord snowflakes")
+	}
+	var grants []*corewire.CapabilityGrant
+	for _, backend := range init.Grants.Backends {
+		if backend != nil && backend.BackendId == "discord" && backend.ProtocolMajor == 2 {
+			grants = append(grants, backend.Capabilities...)
+		}
+	}
+	scope := map[string]string{"guild_id": b.config.GuildID, "channel_id": b.config.ChannelID}
+	if !allows(grants, "discord.event.MESSAGE_CREATE", scope, true) || !allows(grants, "discord.rest.ChannelMessageSendComplex", scope, false) {
+		return errors.New("scoped MESSAGE_CREATE and ChannelMessageSendComplex grants required")
+	}
+	b.life, b.cancel = context.WithCancel(context.Background())
+	b.changed = make(chan struct{})
+	b.ready = true
+	return nil
+}
+
+// Event preflight permits constraints on future event fields (such as the
+// authenticated author). Only the host authorizes delivery against the complete
+// event scope. Helper grants must match the complete known mutation destination.
+func allows(grants []*corewire.CapabilityGrant, name string, known map[string]string, event bool) bool {
+	for _, grant := range grants {
+		if grant == nil || grant.Name != name {
+			continue
+		}
+		for _, scope := range grant.ResourceScopes {
+			if scope.GetAllResources() {
+				return true
+			}
+			selector := scope.GetSelector()
+			if selector == nil || (len(selector.ResourceIds) == 0 && len(known) != 0) {
+				continue
+			}
+			match := true
+			for key, value := range selector.ResourceIds {
+				actual, present := known[key]
+				if (!present && !event) || (present && actual != value) {
+					match = false
+					break
+				}
+			}
+			if match {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func snowflake(s string) bool {
+	if len(s) < 1 || len(s) > 20 || s[0] == '0' {
+		return false
+	}
+	value, err := strconv.ParseUint(s, 10, 64)
+	return err == nil && value != 0
+}
+
+func (b *Bot) join(ctx context.Context) error {
+	for {
+		b.mu.Lock()
+		if b.active == 0 {
+			b.mu.Unlock()
+			return nil
+		}
+		changed := b.changed
+		b.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-changed:
+		}
+	}
+}
+
+func (b *Bot) OnEvent(ctx context.Context, event *corewire.EventEnvelope) error {
+	b.mu.Lock()
+	if !b.running || b.stopped {
+		b.mu.Unlock()
+		return errors.New("event outside RUNNING")
+	}
+	b.active++
+	life, config := b.life, b.config
+	b.mu.Unlock()
+	defer func() {
+		b.mu.Lock()
+		b.active--
+		close(b.changed)
+		b.changed = make(chan struct{})
+		b.mu.Unlock()
+	}()
+	bounded, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	stop := context.AfterFunc(life, cancel)
+	defer stop()
+	payload, err := discord.DecodeEvent(event)
+	if err != nil {
+		return err
+	}
+	created, ok := payload.(*wire.MessageCreateEvent)
+	if !ok {
+		return nil
+	}
+	message := created.Message.GetValue()
+	if message == nil || message.GuildId.GetValue() != config.GuildID || message.ChannelId.GetValue() != config.ChannelID {
+		return nil
+	}
+	author := message.Author.GetValue()
+	if author == nil || author.Bot.GetValue() || !snowflake(author.Id.GetValue()) || strings.TrimSpace(message.Content.GetValue()) != "!ping" {
+		return nil
+	}
+	_, err = b.api.ChannelMessageSendComplex(bounded, config.ChannelID, &discord.MessageSendView{Content: "pong"})
+	return err
+}
+
+func main() {
+	bot := new(Bot)
+	p, err := core.NewModulePlugin(context.Background(), bot, bot.bind, core.TransportLimits{MaxReceiveBytes: 4 << 20, MaxSendBytes: 4 << 20})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "module bootstrap failed")
+		os.Exit(1)
+	}
+	defer p.Close()
+	plugin.Serve(p.ServeConfig())
+}
+
+var _ core.ModuleHooks = (*Bot)(nil)

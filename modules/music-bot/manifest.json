@@ -1,0 +1,25 @@
+{
+  "protocolMajor": 2,
+  "name": "MusicBot",
+  "version": "2.0.0",
+  "author": "ANTEGRAL",
+  "repository": "https://github.com/thirdscam/chatanium",
+  "requiredCapabilities": [
+    {"name": "core.config.read", "resourceScopes": [{"selector": {"resourceIds": {}}}]},
+    {"name": "core.network.public_egress", "resourceScopes": [{"selector": {"resourceIds": {}}}]}
+  ],
+  "backendRequirements": [{
+    "backendId": "discord",
+    "protocolMajor": 2,
+    "required": true,
+    "optionalCapabilities": [
+      {"name": "discord.event.INTERACTION_CREATE", "resourceScopes": [{"allResources": true}]},
+      {"name": "discord.rest.ApplicationCommandCreate", "resourceScopes": [{"allResources": true}]},
+      {"name": "discord.rest.UserVoiceState", "resourceScopes": [{"allResources": true}]},
+      {"name": "discord.rest.InteractionRespond", "resourceScopes": [{"allResources": true}]},
+      {"name": "discord.rest.WebhookMessageEdit", "resourceScopes": [{"allResources": true}]},
+      {"name": "discord.rest.ChannelMessageSendComplex", "resourceScopes": [{"allResources": true}]},
+      {"name": "discord.voice.play", "resourceScopes": [{"allResources": true}]}
+    ]
+  }]
+}

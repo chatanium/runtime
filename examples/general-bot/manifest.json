@@ -1,0 +1,232 @@
+{
+  "protocolMajor": 2,
+  "name": "general-example",
+  "version": "2.0.0",
+  "author": "Chatanium contributors",
+  "repository": "https://github.com/thirdscam/chatanium",
+  "requiredCapabilities": [
+    {
+      "name": "core.config.read",
+      "resourceScopes": [
+        {
+          "selector": {
+            "resourceIds": {}
+          }
+        }
+      ]
+    }
+  ],
+  "optionalCapabilities": [
+    {
+      "name": "core.upload",
+      "resourceScopes": [
+        {
+          "selector": {
+            "resourceIds": {}
+          }
+        }
+      ]
+    }
+  ],
+  "backendRequirements": [
+    {
+      "backendId": "discord",
+      "protocolMajor": 2,
+      "required": true,
+      "optionalCapabilities": [
+        {
+          "name": "discord.rest.ApplicationCommandCreate",
+          "resourceScopes": [
+            {
+              "allResources": true
+            }
+          ]
+        },
+        {
+          "name": "discord.rest.InteractionRespond",
+          "resourceScopes": [
+            {
+              "allResources": true
+            }
+          ]
+        },
+        {
+          "name": "discord.rest.WebhookMessageEdit",
+          "resourceScopes": [
+            {
+              "allResources": true
+            }
+          ]
+        },
+        {
+          "name": "discord.rest.WebhookThreadExecute",
+          "resourceScopes": [
+            {
+              "allResources": true
+            }
+          ]
+        },
+        {
+          "name": "discord.rest.WebhookMessageDelete",
+          "resourceScopes": [
+            {
+              "allResources": true
+            }
+          ]
+        },
+        {
+          "name": "discord.rest.ChannelMessageSendComplex",
+          "resourceScopes": [
+            {
+              "allResources": true
+            }
+          ]
+        },
+        {
+          "name": "discord.rest.ChannelMessageEditComplex",
+          "resourceScopes": [
+            {
+              "allResources": true
+            }
+          ]
+        },
+        {
+          "name": "discord.rest.ChannelMessageDelete",
+          "resourceScopes": [
+            {
+              "allResources": true
+            }
+          ]
+        },
+        {
+          "name": "discord.rest.GuildMember",
+          "resourceScopes": [
+            {
+              "allResources": true
+            }
+          ]
+        },
+        {
+          "name": "discord.rest.GuildRoles",
+          "resourceScopes": [
+            {
+              "allResources": true
+            }
+          ]
+        },
+        {
+          "name": "discord.rest.GuildMemberRoleAdd",
+          "resourceScopes": [
+            {
+              "allResources": true
+            }
+          ]
+        },
+        {
+          "name": "discord.rest.GuildMemberRoleRemove",
+          "resourceScopes": [
+            {
+              "allResources": true
+            }
+          ]
+        },
+        {
+          "name": "discord.rest.GuildChannelCreateComplex",
+          "resourceScopes": [
+            {
+              "allResources": true
+            }
+          ]
+        },
+        {
+          "name": "discord.rest.ChannelEdit",
+          "resourceScopes": [
+            {
+              "allResources": true
+            }
+          ]
+        },
+        {
+          "name": "discord.rest.ChannelDelete",
+          "resourceScopes": [
+            {
+              "allResources": true
+            }
+          ]
+        },
+        {
+          "name": "discord.rest.GuildBanCreateWithReason",
+          "resourceScopes": [
+            {
+              "allResources": true
+            }
+          ]
+        },
+        {
+          "name": "discord.rest.GuildBanDelete",
+          "resourceScopes": [
+            {
+              "allResources": true
+            }
+          ]
+        },
+        {
+          "name": "discord.rest.GuildMemberEdit",
+          "resourceScopes": [
+            {
+              "allResources": true
+            }
+          ]
+        },
+        {
+          "name": "discord.rest.GuildAuditLog",
+          "resourceScopes": [
+            {
+              "allResources": true
+            }
+          ]
+        },
+        {
+          "name": "discord.event.INTERACTION_CREATE",
+          "resourceScopes": [
+            {
+              "allResources": true
+            }
+          ]
+        },
+        {
+          "name": "discord.event.MESSAGE_CREATE",
+          "resourceScopes": [
+            {
+              "allResources": true
+            }
+          ]
+        },
+        {
+          "name": "discord.event.MESSAGE_UPDATE",
+          "resourceScopes": [
+            {
+              "allResources": true
+            }
+          ]
+        },
+        {
+          "name": "discord.event.MESSAGE_DELETE",
+          "resourceScopes": [
+            {
+              "allResources": true
+            }
+          ]
+        },
+        {
+          "name": "discord.routes.manage",
+          "resourceScopes": [
+            {
+              "allResources": true
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

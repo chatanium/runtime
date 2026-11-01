@@ -1,0 +1,14 @@
+module {{.ModulePath}}
+
+go 1.27.0
+
+require (
+	github.com/hashicorp/go-plugin v1.8.0
+	github.com/thirdscam/chatanium v0.0.0-00010101000000-000000000000
+	google.golang.org/grpc v1.85.0
+	google.golang.org/protobuf v1.36.12
+)
+
+replace github.com/thirdscam/chatanium => {{.SDKPath}}
+
+replace github.com/bwmarrin/discordgo => {{.DiscordPath}}
