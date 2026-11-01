@@ -4,46 +4,42 @@ Copyright © 2025 ANTEGRAL <antegral@antegral.net>
 package cmd
 
 import (
+	"os"
+	"os/signal"
+	"syscall"
+
 	"github.com/spf13/cobra"
-	discord "github.com/thirdscam/chatanium/src/Backends/Discord"
-	"github.com/thirdscam/chatanium/src/Database"
+	"github.com/thirdscam/chatanium/internal/app"
 	"github.com/thirdscam/chatanium/src/Util"
 	"github.com/thirdscam/chatanium/src/Util/Log"
 )
 
-// startCmd represents the start command
+var startOptions app.StartOptions
+
 var startCmd = &cobra.Command{
 	Use:   "start",
-	Short: "Start the modules",
-	Long:  `Start the modules`,
-	Run: func(cmd *cobra.Command, args []string) {
-		// Init the logging system
-		Log.Init()
-
-		// Init the environment variables
-		Util.InitEnv()
-
+	Short: "Start the supervised v2 modules",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := Util.InitEnv(); err != nil {
+			return err
+		}
+		closeLog := Log.Init()
+		defer closeLog()
 		Log.Info.Println("Antegral/Chatanium: Dynamic Bot Management System")
 		Log.Info.Println("Press CTRL+C to shutdown.")
-
-		// Ignite Database
-		database := &Database.DB{}
-		database.Start()
-		defer database.Shutdown()
-
-		// Create a new Discord session using the provided bot token.
-		discord := &discord.Backend{
-			Token:    Util.GetEnv("DISCORD_TOKEN"),
-			Database: database,
-		}
-		discord.Start()
-		defer discord.Shutdown()
-
-		// Wait for a signal to shutdown
-		Util.WaitSignal()
+		ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return app.Start(ctx, startOptions)
 	},
 }
 
 func init() {
+	flags := startCmd.Flags()
+	flags.StringVar(&startOptions.ConfigPath, "config", "", "absolute operator JSON configuration")
+	flags.StringVar(&startOptions.SupervisorSocket, "supervisor-socket", "", "absolute independently supervised host socket")
+	flags.Int64Var(&startOptions.SupervisorUID, "supervisor-uid", -1, "trusted supervisor UID")
+	flags.IntVar(&startOptions.SupervisorMaxBytes, "supervisor-max-bytes", 0, "supervisor packet bound")
+	flags.DurationVar(&startOptions.Duration, "duration", 0, "optional finite observation duration before orderly stop")
 	rootCmd.AddCommand(startCmd)
 }

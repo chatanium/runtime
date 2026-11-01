@@ -1,0 +1,21 @@
+{
+  "protocolMajor": 2,
+  "name": "{{.Name}}",
+  "version": "0.1.0",
+  "author": "Module contributors",
+  "repository": "https://{{.ModulePath}}",
+  "requiredCapabilities": [
+    {"name": "core.config.read", "resourceScopes": [{"selector": {"resourceIds": {}}}]}
+  ],
+  "backendRequirements": [
+    {
+      "backendId": "discord",
+      "protocolMajor": 2,
+      "required": true,
+      "optionalCapabilities": [
+        {"name": "discord.event.MESSAGE_CREATE", "resourceScopes": [{"allResources": true}]},
+        {"name": "discord.rest.ChannelMessageSendComplex", "resourceScopes": [{"allResources": true}]}
+      ]
+    }
+  ]
+}

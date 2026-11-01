@@ -3,48 +3,41 @@ package Database
 import (
 	"context"
 	"database/sql"
-	"time"
-
-	_ "embed"
+	"fmt"
 
 	embed "github.com/thirdscam/chatanium/database"
 	"github.com/thirdscam/chatanium/src/Database/Internal"
-	"github.com/thirdscam/chatanium/src/Util/Log"
 	_ "modernc.org/sqlite"
 )
 
-// Database is a struct that contains the database client.
+// DB is the host-owned, process-local recording database.
 type DB struct {
 	Conn    *sql.DB
 	Queries *Internal.Queries
 }
 
-// Establish database connection. and, database must connected before start modules.
-func (t *DB) Start() {
-	ctx := context.Background()
-	start := time.Now()
-
-	// Connect to database
-	db, err := sql.Open("sqlite", ":memory:") // TODO: change to config
+func (t *DB) Start(ctx context.Context) error {
+	conn, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
-		Log.Error.Fatalf("Failed to connect to database: %v", err)
+		return fmt.Errorf("open host database: %w", err)
 	}
-
-	// Create tables
-	if _, err := db.ExecContext(ctx, embed.DDL); err != nil {
-		Log.Error.Fatalf("Failed to execute DDL: %v", err)
+	// Each SQLite :memory: connection has its own database. Keep the schema and
+	// all concurrent Gateway callbacks on the same connection for its lifetime.
+	conn.SetMaxOpenConns(1)
+	conn.SetMaxIdleConns(1)
+	if _, err := conn.ExecContext(ctx, embed.DDL); err != nil {
+		conn.Close()
+		return fmt.Errorf("initialize host database: %w", err)
 	}
-
-	Log.Info.Printf("Connected to database. (took %s)", time.Since(start).Truncate(time.Millisecond))
-	t.Queries = Internal.New(db)
-	t.Conn = db
+	t.Conn = conn
+	t.Queries = Internal.New(conn)
+	return nil
 }
 
-// Close Database connection. must be called after all modules are shutdown.
-func (t *DB) Shutdown() {
-	Log.Verbose.Println("Shutting down database connection...")
-	if err := t.Conn.Close(); err != nil {
-		Log.Error.Panicf("Cannot close database connection: %v", err)
+// Shutdown is called only after host callbacks have been detached and drained.
+func (t *DB) Shutdown() error {
+	if t.Conn == nil {
+		return nil
 	}
-	Log.Verbose.Println("Successfully closed!")
+	return t.Conn.Close()
 }

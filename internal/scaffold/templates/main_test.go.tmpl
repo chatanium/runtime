@@ -1,0 +1,46 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"testing"
+
+	corewire "github.com/thirdscam/chatanium/proto/core-v2"
+	discord "github.com/thirdscam/chatanium/shared/discord-v2"
+	"google.golang.org/protobuf/encoding/protojson"
+)
+
+type testConfigSource struct {
+	guildID string
+}
+
+func (s testConfigSource) GetConfig(context.Context) (*corewire.JSONValue, error) {
+	return &corewire.JSONValue{Json: []byte(fmt.Sprintf(`{"guild_id":%q,"channel_id":"123"}`, s.guildID))}, nil
+}
+
+func TestInitializationSnowflakeBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name, guildID string
+		ready         bool
+	}{
+		{"largest valid ID", "18446744073709551615", true},
+		{"overflow", "18446744073709551616", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			init := new(corewire.InitContext)
+			if err := protojson.Unmarshal([]byte(`{"grants":{"coreCapabilities":[{"name":"core.config.read","resourceScopes":[{"selector":{}}]}],"backends":[{"backendId":"discord","protocolMajor":2,"capabilities":[{"name":"discord.event.MESSAGE_CREATE","resourceScopes":[{"allResources":true}]},{"name":"discord.rest.ChannelMessageSendComplex","resourceScopes":[{"allResources":true}]}]}]}}`), init); err != nil {
+				t.Fatal(err)
+			}
+			bot := &Bot{core: testConfigSource{guildID: tc.guildID}, api: new(discord.Client)}
+			defer bot.OnStage(context.Background(), &corewire.StageRequest{Stage: corewire.Stage_STAGE_STOP})
+			err := bot.OnStage(context.Background(), &corewire.StageRequest{Stage: corewire.Stage_STAGE_INIT, InitContext: init})
+			if (err == nil) != tc.ready {
+				t.Fatalf("INIT readiness=%v, want %v; err=%v", err == nil, tc.ready, err)
+			}
+			status, err := bot.GetStatus(context.Background())
+			if err != nil || (status.Readiness == corewire.Readiness_READINESS_READY) != tc.ready {
+				t.Fatalf("GetStatus=%v err=%v, want ready=%v", status, err, tc.ready)
+			}
+		})
+	}
+}

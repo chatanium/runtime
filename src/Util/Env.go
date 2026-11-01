@@ -1,17 +1,23 @@
 package Util
 
 import (
+	"errors"
 	"os"
 
 	"github.com/joho/godotenv"
 	"github.com/thirdscam/chatanium/src/Util/Log"
 )
 
-func InitEnv() {
+// InitEnv optionally loads local defaults without replacing provisioned values.
+func InitEnv() error {
 	err := godotenv.Load(".env")
-	if err != nil {
-		Log.Error.Fatalf("Error loading .env file: %v", err)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
 	}
+	if err != nil {
+		return errors.New("cannot load optional .env defaults")
+	}
+	return nil
 }
 
 func GetEnv(EnvName string) string {
