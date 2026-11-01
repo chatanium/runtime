@@ -1,0 +1,203 @@
+syntax = "proto3";
+
+package flexmodule.core.v2;
+
+option go_package = "github.com/thirdscam/chatanium/proto/core-v2;corev2";
+
+import "google/protobuf/any.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+// Resource selectors are backend-defined conjunctions; scope lists are disjunctions.
+message ResourceSelector { map<string, string> resource_ids = 1; }
+message ResourceScope {
+  oneof selector_kind {
+    bool all_resources = 1;
+    ResourceSelector selector = 2;
+  }
+}
+message CapabilityRequest {
+  string name = 1;
+  repeated ResourceScope resource_scopes = 2;
+}
+message BackendRequirement {
+  string backend_id = 1;
+  uint32 protocol_major = 2;
+  bool required = 3;
+  repeated CapabilityRequest required_capabilities = 4;
+  repeated CapabilityRequest optional_capabilities = 5;
+}
+message ModuleManifest {
+  uint32 protocol_major = 1;
+  string name = 2;
+  string version = 3;
+  string author = 4;
+  string repository = 5;
+  repeated CapabilityRequest required_capabilities = 6;
+  repeated CapabilityRequest optional_capabilities = 7;
+  repeated BackendRequirement backend_requirements = 8;
+}
+message CapabilityGrant {
+  string name = 1;
+  repeated ResourceScope resource_scopes = 2;
+  google.protobuf.Any constraints = 3;
+}
+message BackendGrant {
+  string backend_id = 1;
+  uint32 protocol_major = 2;
+  repeated CapabilityGrant capabilities = 3;
+}
+enum ResourceClass {
+  RESOURCE_CLASS_UNSPECIFIED = 0;
+  RESOURCE_CLASS_GENERAL = 1;
+  RESOURCE_CLASS_MEDIA = 2;
+}
+enum EgressPolicy {
+  EGRESS_POLICY_UNSPECIFIED = 0;
+  EGRESS_POLICY_NONE = 1;
+  EGRESS_POLICY_PUBLIC_INTERNET = 2;
+}
+message ResourceLimits {
+  uint32 cpu_millicores = 1;
+  uint64 memory_bytes = 2;
+  uint32 max_pids = 3;
+  uint64 persistent_bytes = 4;
+  uint64 scratch_bytes = 5;
+}
+// Grants are the host-approved immutable snapshot for one authenticated execution.
+message Grants {
+  repeated CapabilityGrant core_capabilities = 1;
+  repeated BackendGrant backends = 2;
+  ResourceClass resource_class = 3;
+  ResourceLimits resource_limits = 4;
+  EgressPolicy egress_policy = 5;
+}
+message InitContext {
+  string module_id = 1;
+  string instance_id = 2;
+  Grants grants = 3;
+  string persistent_directory = 4;
+  string scratch_directory = 5;
+}
+enum Stage {
+  STAGE_UNSPECIFIED = 0;
+  STAGE_INIT = 1;
+  STAGE_START = 2;
+  STAGE_DRAIN = 3;
+  STAGE_STOP = 4;
+}
+message StageRequest {
+  Stage stage = 1;
+  InitContext init_context = 2;
+}
+enum Readiness {
+  READINESS_UNSPECIFIED = 0;
+  READINESS_NOT_READY = 1;
+  READINESS_READY = 2;
+  READINESS_FAILED = 3;
+}
+message Status {
+  Readiness readiness = 1;
+  optional string detail = 2;
+}
+message EventEnvelope {
+  string backend_id = 1;
+  uint32 backend_major = 2;
+  string event_type = 3;
+  uint64 ingress_sequence = 4;
+  google.protobuf.Timestamp received_at = 5;
+  google.protobuf.Any payload = 6;
+}
+// Metadata is descriptive only; the host vault is authoritative on every use.
+message CredentialRef {
+  string opaque_id = 1;
+  string backend_id = 2;
+  string purpose = 3;
+  ResourceSelector resource_scope = 4;
+  google.protobuf.Timestamp expires_at = 5;
+}
+// Exactly one complete UTF-8 JSON value; number lexemes are preserved.
+message JSONValue { bytes json = 1; }
+message UploadMetadata {
+  string file_name = 1;
+  string content_type = 2;
+  uint64 declared_size_bytes = 3;
+}
+message FileChunk {
+  uint64 offset = 1;
+  bytes data = 2;
+}
+message UploadChunk {
+  oneof part {
+    UploadMetadata metadata = 1;
+    FileChunk chunk = 2;
+  }
+}
+message UploadedFileRef {
+  string opaque_id = 1;
+  string file_name = 2;
+  string content_type = 3;
+  uint64 size_bytes = 4;
+  google.protobuf.Timestamp expires_at = 5;
+}
+message DeleteUploadRequest { UploadedFileRef file = 1; }
+message NullableString {
+  oneof kind {
+    string value = 1;
+    google.protobuf.NullValue null_value = 2;
+  }
+}
+message NullableTimestamp {
+  oneof kind {
+    google.protobuf.Timestamp value = 1;
+    google.protobuf.NullValue null_value = 2;
+  }
+}
+message StringList { repeated string values = 1; }
+message StringMap { map<string, string> values = 1; }
+enum ErrorOrigin {
+  ERROR_ORIGIN_UNSPECIFIED = 0;
+  ERROR_ORIGIN_FLEXMODULE = 1;
+  ERROR_ORIGIN_BACKEND = 2;
+  ERROR_ORIGIN_TRANSPORT = 3;
+}
+enum RemoteOutcome {
+  REMOTE_OUTCOME_UNSPECIFIED = 0;
+  REMOTE_OUTCOME_NOT_SENT = 1;
+  REMOTE_OUTCOME_RESPONSE_RECEIVED = 2;
+  REMOTE_OUTCOME_UNKNOWN = 3;
+}
+message FieldViolation {
+  string field_path = 1;
+  string reason = 2;
+  string description = 3;
+}
+message ErrorDetail {
+  ErrorOrigin origin = 1;
+  string reason = 2;
+  string operation = 3;
+  string backend_id = 4;
+  RemoteOutcome remote_outcome = 5;
+  repeated FieldViolation violations = 6;
+  google.protobuf.Any backend_detail = 7;
+}
+service Hook {
+  // Artifact metadata only; does not activate the module.
+  rpc GetManifest(google.protobuf.Empty) returns (ModuleManifest);
+  rpc GetStatus(google.protobuf.Empty) returns (Status);
+  // InitContext is required on INIT and forbidden on every other stage.
+  rpc OnStage(StageRequest) returns (google.protobuf.Empty);
+  // Acknowledges callback completion, not durable or exactly-once processing.
+  rpc OnEvent(EventEnvelope) returns (google.protobuf.Empty);
+}
+service Core {
+  // Only this connection's approved JSON object; never the host environment.
+  rpc GetConfig(google.protobuf.Empty) returns (JSONValue);
+}
+service FileTransfer {
+  // Metadata first, then nonempty ordered chunks. Only a committed ref succeeds.
+  rpc Upload(stream UploadChunk) returns (UploadedFileRef);
+  // Owned cleanup; repeated deletion is valid only before the original expiry.
+  rpc DeleteUpload(DeleteUploadRequest) returns (google.protobuf.Empty);
+}

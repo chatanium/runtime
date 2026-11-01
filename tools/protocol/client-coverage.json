@@ -1,0 +1,3510 @@
+{
+  "generator": "python3 tools/protocol/generate-client.py",
+  "inputSHA256": {
+    "api-mapping.json": "53c756e07051429ca3ef7b42651f032be96f6f60cb795f37291fc6b6e280bca1",
+    "conversions_generated.go": "52fcb73347e7b9fee1f91637736543ff8d01a6c24b16b9220127530b69d5b79d"
+  },
+  "counts": {
+    "canonical": 153,
+    "aliases": 43,
+    "ownership": 3
+  },
+  "evidence": "Source implementation coverage only; no claim of compiled, tested or exercised backend behavior.",
+  "methods": [
+    {
+      "name": "Application",
+      "kind": "canonical",
+      "signature": "func (c *Client) Application(ctx context.Context, appID string, options ...RequestOption) (*discordgo.Application, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/Application",
+      "request": "ApplicationRequest",
+      "response": "ApplicationResponse",
+      "inputFields": [
+        "app_id",
+        "options"
+      ],
+      "output": "*discordgo.Application",
+      "source": "discordgo/oauth2.go:45-54"
+    },
+    {
+      "name": "ApplicationCommand",
+      "kind": "canonical",
+      "signature": "func (c *Client) ApplicationCommand(ctx context.Context, appID string, guildID string, cmdID string, options ...RequestOption) (*ApplicationCommandView, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ApplicationCommand",
+      "request": "ApplicationCommandRequest",
+      "response": "ApplicationCommandResponse",
+      "inputFields": [
+        "app_id",
+        "guild_id",
+        "cmd_id",
+        "options"
+      ],
+      "output": "*ApplicationCommandView",
+      "source": "discordgo/restapi.go:3094-3108"
+    },
+    {
+      "name": "ApplicationCommandBulkOverwrite",
+      "kind": "canonical",
+      "signature": "func (c *Client) ApplicationCommandBulkOverwrite(ctx context.Context, appID string, guildID string, commands []*ApplicationCommandView, options ...RequestOption) ([]*ApplicationCommandView, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ApplicationCommandBulkOverwrite",
+      "request": "ApplicationCommandBulkOverwriteRequest",
+      "response": "ApplicationCommandBulkOverwriteResponse",
+      "inputFields": [
+        "app_id",
+        "guild_id",
+        "commands",
+        "options"
+      ],
+      "output": "[]*ApplicationCommandView",
+      "source": "discordgo/restapi.go:3059-3073"
+    },
+    {
+      "name": "ApplicationCommandCreate",
+      "kind": "canonical",
+      "signature": "func (c *Client) ApplicationCommandCreate(ctx context.Context, appID string, guildID string, cmd *ApplicationCommandView, options ...RequestOption) (*ApplicationCommandView, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ApplicationCommandCreate",
+      "request": "ApplicationCommandCreateRequest",
+      "response": "ApplicationCommandCreateResponse",
+      "inputFields": [
+        "app_id",
+        "guild_id",
+        "cmd",
+        "options"
+      ],
+      "output": "*ApplicationCommandView",
+      "source": "discordgo/restapi.go:3019-3033"
+    },
+    {
+      "name": "ApplicationCommandDelete",
+      "kind": "canonical",
+      "signature": "func (c *Client) ApplicationCommandDelete(ctx context.Context, appID string, guildID string, cmdID string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ApplicationCommandDelete",
+      "request": "ApplicationCommandDeleteRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "app_id",
+        "guild_id",
+        "cmd_id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:3079-3088"
+    },
+    {
+      "name": "ApplicationCommandEdit",
+      "kind": "canonical",
+      "signature": "func (c *Client) ApplicationCommandEdit(ctx context.Context, appID string, guildID string, cmdID string, cmd *ApplicationCommandView, options ...RequestOption) (*ApplicationCommandView, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ApplicationCommandEdit",
+      "request": "ApplicationCommandEditRequest",
+      "response": "ApplicationCommandEditResponse",
+      "inputFields": [
+        "app_id",
+        "guild_id",
+        "cmd_id",
+        "cmd",
+        "options"
+      ],
+      "output": "*ApplicationCommandView",
+      "source": "discordgo/restapi.go:3040-3054"
+    },
+    {
+      "name": "ApplicationCommandPermissions",
+      "kind": "canonical",
+      "signature": "func (c *Client) ApplicationCommandPermissions(ctx context.Context, appID string, guildID string, cmdID string, options ...RequestOption) (*discordgo.GuildApplicationCommandPermissions, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ApplicationCommandPermissions",
+      "request": "ApplicationCommandPermissionsRequest",
+      "response": "ApplicationCommandPermissionsResponse",
+      "inputFields": [
+        "app_id",
+        "guild_id",
+        "cmd_id",
+        "options"
+      ],
+      "output": "*discordgo.GuildApplicationCommandPermissions",
+      "source": "discordgo/restapi.go:3149-3160"
+    },
+    {
+      "name": "ApplicationCommands",
+      "kind": "canonical",
+      "signature": "func (c *Client) ApplicationCommands(ctx context.Context, appID string, guildID string, options ...RequestOption) ([]*ApplicationCommandView, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ApplicationCommands",
+      "request": "ApplicationCommandsRequest",
+      "response": "ApplicationCommandsResponse",
+      "inputFields": [
+        "app_id",
+        "guild_id",
+        "options"
+      ],
+      "output": "[]*ApplicationCommandView",
+      "source": "discordgo/restapi.go:3113-3127"
+    },
+    {
+      "name": "ApplicationEmoji",
+      "kind": "canonical",
+      "signature": "func (c *Client) ApplicationEmoji(ctx context.Context, appID string, emojiID string, options ...RequestOption) (*discordgo.Emoji, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ApplicationEmoji",
+      "request": "ApplicationEmojiRequest",
+      "response": "ApplicationEmojiResponse",
+      "inputFields": [
+        "app_id",
+        "emoji_id",
+        "options"
+      ],
+      "output": "*discordgo.Emoji",
+      "source": "discordgo/restapi.go:1521-1530"
+    },
+    {
+      "name": "ApplicationEmojiCreate",
+      "kind": "canonical",
+      "signature": "func (c *Client) ApplicationEmojiCreate(ctx context.Context, appID string, data *discordgo.EmojiParams, options ...RequestOption) (*discordgo.Emoji, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ApplicationEmojiCreate",
+      "request": "ApplicationEmojiCreateRequest",
+      "response": "ApplicationEmojiCreateResponse",
+      "inputFields": [
+        "app_id",
+        "data",
+        "options"
+      ],
+      "output": "*discordgo.Emoji",
+      "source": "discordgo/restapi.go:1535-1543"
+    },
+    {
+      "name": "ApplicationEmojiDelete",
+      "kind": "canonical",
+      "signature": "func (c *Client) ApplicationEmojiDelete(ctx context.Context, appID string, emojiID string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ApplicationEmojiDelete",
+      "request": "ApplicationEmojiDeleteRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "app_id",
+        "emoji_id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:1562-1565"
+    },
+    {
+      "name": "ApplicationEmojiEdit",
+      "kind": "canonical",
+      "signature": "func (c *Client) ApplicationEmojiEdit(ctx context.Context, appID string, emojiID string, data *discordgo.EmojiParams, options ...RequestOption) (*discordgo.Emoji, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ApplicationEmojiEdit",
+      "request": "ApplicationEmojiEditRequest",
+      "response": "ApplicationEmojiEditResponse",
+      "inputFields": [
+        "app_id",
+        "emoji_id",
+        "data",
+        "options"
+      ],
+      "output": "*discordgo.Emoji",
+      "source": "discordgo/restapi.go:1549-1557"
+    },
+    {
+      "name": "ApplicationEmojis",
+      "kind": "canonical",
+      "signature": "func (c *Client) ApplicationEmojis(ctx context.Context, appID string, options ...RequestOption) ([]*discordgo.Emoji, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ApplicationEmojis",
+      "request": "ApplicationEmojisRequest",
+      "response": "ApplicationEmojisResponse",
+      "inputFields": [
+        "app_id",
+        "options"
+      ],
+      "output": "[]*discordgo.Emoji",
+      "source": "discordgo/restapi.go:1499-1516"
+    },
+    {
+      "name": "ApplicationRoleConnectionMetadata",
+      "kind": "canonical",
+      "signature": "func (c *Client) ApplicationRoleConnectionMetadata(ctx context.Context, appID string, options ...RequestOption) ([]*discordgo.ApplicationRoleConnectionMetadata, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ApplicationRoleConnectionMetadata",
+      "request": "ApplicationRoleConnectionMetadataRequest",
+      "response": "ApplicationRoleConnectionMetadataResponse",
+      "inputFields": [
+        "app_id",
+        "options"
+      ],
+      "output": "[]*discordgo.ApplicationRoleConnectionMetadata",
+      "source": "discordgo/restapi.go:3527-3537"
+    },
+    {
+      "name": "ApplicationRoleConnectionMetadataUpdate",
+      "kind": "canonical",
+      "signature": "func (c *Client) ApplicationRoleConnectionMetadataUpdate(ctx context.Context, appID string, metadata []*discordgo.ApplicationRoleConnectionMetadata, options ...RequestOption) ([]*discordgo.ApplicationRoleConnectionMetadata, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ApplicationRoleConnectionMetadataUpdate",
+      "request": "ApplicationRoleConnectionMetadataUpdateRequest",
+      "response": "ApplicationRoleConnectionMetadataUpdateResponse",
+      "inputFields": [
+        "app_id",
+        "metadata",
+        "options"
+      ],
+      "output": "[]*discordgo.ApplicationRoleConnectionMetadata",
+      "source": "discordgo/restapi.go:3542-3552"
+    },
+    {
+      "name": "AutoModerationRule",
+      "kind": "canonical",
+      "signature": "func (c *Client) AutoModerationRule(ctx context.Context, guildID string, ruleID string, options ...RequestOption) (*discordgo.AutoModerationRule, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/AutoModerationRule",
+      "request": "AutoModerationRuleRequest",
+      "response": "AutoModerationRuleResponse",
+      "inputFields": [
+        "guild_id",
+        "rule_id",
+        "options"
+      ],
+      "output": "*discordgo.AutoModerationRule",
+      "source": "discordgo/restapi.go:3470-3481"
+    },
+    {
+      "name": "AutoModerationRuleCreate",
+      "kind": "canonical",
+      "signature": "func (c *Client) AutoModerationRuleCreate(ctx context.Context, guildID string, rule *discordgo.AutoModerationRule, options ...RequestOption) (*discordgo.AutoModerationRule, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/AutoModerationRuleCreate",
+      "request": "AutoModerationRuleCreateRequest",
+      "response": "AutoModerationRuleCreateResponse",
+      "inputFields": [
+        "guild_id",
+        "rule",
+        "options"
+      ],
+      "output": "*discordgo.AutoModerationRule",
+      "source": "discordgo/restapi.go:3486-3497"
+    },
+    {
+      "name": "AutoModerationRuleDelete",
+      "kind": "canonical",
+      "signature": "func (c *Client) AutoModerationRuleDelete(ctx context.Context, guildID string, ruleID string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/AutoModerationRuleDelete",
+      "request": "AutoModerationRuleDeleteRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "guild_id",
+        "rule_id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:3519-3523"
+    },
+    {
+      "name": "AutoModerationRuleEdit",
+      "kind": "canonical",
+      "signature": "func (c *Client) AutoModerationRuleEdit(ctx context.Context, guildID string, ruleID string, rule *discordgo.AutoModerationRule, options ...RequestOption) (*discordgo.AutoModerationRule, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/AutoModerationRuleEdit",
+      "request": "AutoModerationRuleEditRequest",
+      "response": "AutoModerationRuleEditResponse",
+      "inputFields": [
+        "guild_id",
+        "rule_id",
+        "rule",
+        "options"
+      ],
+      "output": "*discordgo.AutoModerationRule",
+      "source": "discordgo/restapi.go:3503-3514"
+    },
+    {
+      "name": "AutoModerationRules",
+      "kind": "canonical",
+      "signature": "func (c *Client) AutoModerationRules(ctx context.Context, guildID string, options ...RequestOption) ([]*discordgo.AutoModerationRule, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/AutoModerationRules",
+      "request": "AutoModerationRulesRequest",
+      "response": "AutoModerationRulesResponse",
+      "inputFields": [
+        "guild_id",
+        "options"
+      ],
+      "output": "[]*discordgo.AutoModerationRule",
+      "source": "discordgo/restapi.go:3454-3465"
+    },
+    {
+      "name": "Channel",
+      "kind": "canonical",
+      "signature": "func (c *Client) Channel(ctx context.Context, channelID string, options ...RequestOption) (*discordgo.Channel, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/Channel",
+      "request": "ChannelRequest",
+      "response": "ChannelResponse",
+      "inputFields": [
+        "channel_id",
+        "options"
+      ],
+      "output": "*discordgo.Channel",
+      "source": "discordgo/restapi.go:1665-1673"
+    },
+    {
+      "name": "ChannelDelete",
+      "kind": "canonical",
+      "signature": "func (c *Client) ChannelDelete(ctx context.Context, channelID string, options ...RequestOption) (*discordgo.Channel, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ChannelDelete",
+      "request": "ChannelDeleteRequest",
+      "response": "ChannelDeleteResponse",
+      "inputFields": [
+        "channel_id",
+        "options"
+      ],
+      "output": "*discordgo.Channel",
+      "source": "discordgo/restapi.go:1699-1708"
+    },
+    {
+      "name": "ChannelEdit",
+      "kind": "canonical",
+      "signature": "func (c *Client) ChannelEdit(ctx context.Context, channelID string, data *ChannelEditView, options ...RequestOption) (*discordgo.Channel, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ChannelEdit",
+      "request": "ChannelEditRequest",
+      "response": "ChannelEditResponse",
+      "inputFields": [
+        "channel_id",
+        "data",
+        "options"
+      ],
+      "output": "*discordgo.Channel",
+      "source": "discordgo/restapi.go:1678-1687"
+    },
+    {
+      "name": "ChannelInviteCreate",
+      "kind": "canonical",
+      "signature": "func (c *Client) ChannelInviteCreate(ctx context.Context, channelID string, i discordgo.Invite, options ...RequestOption) (*discordgo.Invite, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ChannelInviteCreate",
+      "request": "ChannelInviteCreateRequest",
+      "response": "ChannelInviteCreateResponse",
+      "inputFields": [
+        "channel_id",
+        "i",
+        "options"
+      ],
+      "output": "*discordgo.Invite",
+      "source": "discordgo/restapi.go:2084-2100"
+    },
+    {
+      "name": "ChannelInvites",
+      "kind": "canonical",
+      "signature": "func (c *Client) ChannelInvites(ctx context.Context, channelID string, options ...RequestOption) ([]*discordgo.Invite, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ChannelInvites",
+      "request": "ChannelInvitesRequest",
+      "response": "ChannelInvitesResponse",
+      "inputFields": [
+        "channel_id",
+        "options"
+      ],
+      "output": "[]*discordgo.Invite",
+      "source": "discordgo/restapi.go:2070-2079"
+    },
+    {
+      "name": "ChannelMessage",
+      "kind": "canonical",
+      "signature": "func (c *Client) ChannelMessage(ctx context.Context, channelID string, messageID string, options ...RequestOption) (*discordgo.Message, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ChannelMessage",
+      "request": "ChannelMessageRequest",
+      "response": "ChannelMessageResponse",
+      "inputFields": [
+        "channel_id",
+        "message_id",
+        "options"
+      ],
+      "output": "*discordgo.Message",
+      "source": "discordgo/restapi.go:1759-1768"
+    },
+    {
+      "name": "ChannelMessageCrosspost",
+      "kind": "canonical",
+      "signature": "func (c *Client) ChannelMessageCrosspost(ctx context.Context, channelID string, messageID string, options ...RequestOption) (*discordgo.Message, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ChannelMessageCrosspost",
+      "request": "ChannelMessageCrosspostRequest",
+      "response": "ChannelMessageCrosspostResponse",
+      "inputFields": [
+        "channel_id",
+        "message_id",
+        "options"
+      ],
+      "output": "*discordgo.Message",
+      "source": "discordgo/restapi.go:2130-2141"
+    },
+    {
+      "name": "ChannelMessageDelete",
+      "kind": "canonical",
+      "signature": "func (c *Client) ChannelMessageDelete(ctx context.Context, channelID string, messageID string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ChannelMessageDelete",
+      "request": "ChannelMessageDeleteRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "channel_id",
+        "message_id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:1967-1971"
+    },
+    {
+      "name": "ChannelMessageEditComplex",
+      "kind": "canonical",
+      "signature": "func (c *Client) ChannelMessageEditComplex(ctx context.Context, m *MessageEditPatch, options ...RequestOption) (*discordgo.Message, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ChannelMessageEditComplex",
+      "request": "ChannelMessageEditComplexRequest",
+      "response": "ChannelMessageEditComplexResponse",
+      "inputFields": [
+        "m",
+        "options"
+      ],
+      "output": "*discordgo.Message",
+      "source": "discordgo/restapi.go:1911-1948"
+    },
+    {
+      "name": "ChannelMessagePin",
+      "kind": "canonical",
+      "signature": "func (c *Client) ChannelMessagePin(ctx context.Context, channelID string, messageID string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ChannelMessagePin",
+      "request": "ChannelMessagePinRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "channel_id",
+        "message_id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:2004-2008"
+    },
+    {
+      "name": "ChannelMessageSendComplex",
+      "kind": "canonical",
+      "signature": "func (c *Client) ChannelMessageSendComplex(ctx context.Context, channelID string, data *MessageSendView, options ...RequestOption) (*discordgo.Message, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ChannelMessageSendComplex",
+      "request": "ChannelMessageSendComplexRequest",
+      "response": "ChannelMessageSendComplexResponse",
+      "inputFields": [
+        "channel_id",
+        "data",
+        "options"
+      ],
+      "output": "*discordgo.Message",
+      "source": "discordgo/restapi.go:1784-1836"
+    },
+    {
+      "name": "ChannelMessageUnpin",
+      "kind": "canonical",
+      "signature": "func (c *Client) ChannelMessageUnpin(ctx context.Context, channelID string, messageID string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ChannelMessageUnpin",
+      "request": "ChannelMessageUnpinRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "channel_id",
+        "message_id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:2013-2017"
+    },
+    {
+      "name": "ChannelMessages",
+      "kind": "canonical",
+      "signature": "func (c *Client) ChannelMessages(ctx context.Context, channelID string, limit int, beforeID string, afterID string, aroundID string, options ...RequestOption) ([]*discordgo.Message, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ChannelMessages",
+      "request": "ChannelMessagesRequest",
+      "response": "ChannelMessagesResponse",
+      "inputFields": [
+        "channel_id",
+        "limit",
+        "before_id",
+        "after_id",
+        "around_id",
+        "options"
+      ],
+      "output": "[]*discordgo.Message",
+      "source": "discordgo/restapi.go:1726-1754"
+    },
+    {
+      "name": "ChannelMessagesBulkDelete",
+      "kind": "canonical",
+      "signature": "func (c *Client) ChannelMessagesBulkDelete(ctx context.Context, channelID string, messages []string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ChannelMessagesBulkDelete",
+      "request": "ChannelMessagesBulkDeleteRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "channel_id",
+        "messages",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:1978-1999"
+    },
+    {
+      "name": "ChannelMessagesPinned",
+      "kind": "canonical",
+      "signature": "func (c *Client) ChannelMessagesPinned(ctx context.Context, channelID string, before *time.Time, limit int, options ...RequestOption) (*discordgo.ChannelMessagePinsList, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ChannelMessagesPinned",
+      "request": "ChannelMessagesPinnedRequest",
+      "response": "ChannelMessagesPinnedResponse",
+      "inputFields": [
+        "channel_id",
+        "before",
+        "limit",
+        "options"
+      ],
+      "output": "*discordgo.ChannelMessagePinsList",
+      "source": "discordgo/restapi.go:2024-2048"
+    },
+    {
+      "name": "ChannelNewsFollow",
+      "kind": "canonical",
+      "signature": "func (c *Client) ChannelNewsFollow(ctx context.Context, channelID string, targetID string, options ...RequestOption) (*discordgo.ChannelFollow, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ChannelNewsFollow",
+      "request": "ChannelNewsFollowRequest",
+      "response": "ChannelNewsFollowResponse",
+      "inputFields": [
+        "channel_id",
+        "target_id",
+        "options"
+      ],
+      "output": "*discordgo.ChannelFollow",
+      "source": "discordgo/restapi.go:2146-2161"
+    },
+    {
+      "name": "ChannelPermissionDelete",
+      "kind": "canonical",
+      "signature": "func (c *Client) ChannelPermissionDelete(ctx context.Context, channelID string, targetID string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ChannelPermissionDelete",
+      "request": "ChannelPermissionDeleteRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "channel_id",
+        "target_id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:2120-2124"
+    },
+    {
+      "name": "ChannelPermissionSet",
+      "kind": "canonical",
+      "signature": "func (c *Client) ChannelPermissionSet(ctx context.Context, channelID string, targetID string, targetType discordgo.PermissionOverwriteType, allow int64, deny int64, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ChannelPermissionSet",
+      "request": "ChannelPermissionSetRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "channel_id",
+        "target_id",
+        "target_type",
+        "allow",
+        "deny",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:2105-2116"
+    },
+    {
+      "name": "ChannelTyping",
+      "kind": "canonical",
+      "signature": "func (c *Client) ChannelTyping(ctx context.Context, channelID string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ChannelTyping",
+      "request": "ChannelTypingRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "channel_id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:1713-1717"
+    },
+    {
+      "name": "ChannelWebhooks",
+      "kind": "canonical",
+      "signature": "func (c *Client) ChannelWebhooks(ctx context.Context, channelID string, options ...RequestOption) ([]*WebhookHandle, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ChannelWebhooks",
+      "request": "ChannelWebhooksRequest",
+      "response": "ChannelWebhooksResponse",
+      "inputFields": [
+        "channel_id",
+        "options"
+      ],
+      "output": "[]*WebhookHandle",
+      "source": "discordgo/restapi.go:2345-2355"
+    },
+    {
+      "name": "EntitlementConsume",
+      "kind": "canonical",
+      "signature": "func (c *Client) EntitlementConsume(ctx context.Context, appID string, entitlementID string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/EntitlementConsume",
+      "request": "EntitlementConsumeRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "app_id",
+        "entitlement_id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:3689-3692"
+    },
+    {
+      "name": "EntitlementTestCreate",
+      "kind": "canonical",
+      "signature": "func (c *Client) EntitlementTestCreate(ctx context.Context, appID string, data *discordgo.EntitlementTest, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/EntitlementTestCreate",
+      "request": "EntitlementTestCreateRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "app_id",
+        "data",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:3696-3701"
+    },
+    {
+      "name": "EntitlementTestDelete",
+      "kind": "canonical",
+      "signature": "func (c *Client) EntitlementTestDelete(ctx context.Context, appID string, entitlementID string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/EntitlementTestDelete",
+      "request": "EntitlementTestDeleteRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "app_id",
+        "entitlement_id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:3705-3708"
+    },
+    {
+      "name": "Entitlements",
+      "kind": "canonical",
+      "signature": "func (c *Client) Entitlements(ctx context.Context, appID string, filterOptions *discordgo.EntitlementFilterOptions, options ...RequestOption) ([]*discordgo.Entitlement, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/Entitlements",
+      "request": "EntitlementsRequest",
+      "response": "EntitlementsResponse",
+      "inputFields": [
+        "app_id",
+        "filter_options",
+        "options"
+      ],
+      "output": "[]*discordgo.Entitlement",
+      "source": "discordgo/restapi.go:3651-3686"
+    },
+    {
+      "name": "ForumThreadStartComplex",
+      "kind": "canonical",
+      "signature": "func (c *Client) ForumThreadStartComplex(ctx context.Context, channelID string, threadData *discordgo.ThreadStart, messageData *MessageSendView, options ...RequestOption) (*discordgo.Channel, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ForumThreadStartComplex",
+      "request": "ForumThreadStartComplexRequest",
+      "response": "ForumThreadStartComplexResponse",
+      "inputFields": [
+        "channel_id",
+        "thread_data",
+        "message_data",
+        "options"
+      ],
+      "output": "*discordgo.Channel",
+      "source": "discordgo/restapi.go:2729-2781"
+    },
+    {
+      "name": "Gateway",
+      "kind": "canonical",
+      "signature": "func (c *Client) Gateway(ctx context.Context, options ...RequestOption) (string, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/Gateway",
+      "request": "GatewayRequest",
+      "response": "GatewayResponse",
+      "inputFields": [
+        "options"
+      ],
+      "output": "string",
+      "source": "discordgo/restapi.go:2271-2296"
+    },
+    {
+      "name": "GatewayBot",
+      "kind": "canonical",
+      "signature": "func (c *Client) GatewayBot(ctx context.Context, options ...RequestOption) (*discordgo.GatewayBotResponse, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GatewayBot",
+      "request": "GatewayBotRequest",
+      "response": "GatewayBotResponse",
+      "inputFields": [
+        "options"
+      ],
+      "output": "*discordgo.GatewayBotResponse",
+      "source": "discordgo/restapi.go:2299-2318"
+    },
+    {
+      "name": "Guild",
+      "kind": "canonical",
+      "signature": "func (c *Client) Guild(ctx context.Context, guildID string, options ...RequestOption) (*discordgo.Guild, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/Guild",
+      "request": "GuildRequest",
+      "response": "GuildResponse",
+      "inputFields": [
+        "guild_id",
+        "options",
+        "with_counts"
+      ],
+      "output": "*discordgo.Guild",
+      "source": "discordgo/restapi.go:591-599"
+    },
+    {
+      "name": "GuildApplicationCommandsPermissions",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildApplicationCommandsPermissions(ctx context.Context, appID string, guildID string, options ...RequestOption) ([]*discordgo.GuildApplicationCommandPermissions, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildApplicationCommandsPermissions",
+      "request": "GuildApplicationCommandsPermissionsRequest",
+      "response": "GuildApplicationCommandsPermissionsResponse",
+      "inputFields": [
+        "app_id",
+        "guild_id",
+        "options"
+      ],
+      "output": "[]*discordgo.GuildApplicationCommandPermissions",
+      "source": "discordgo/restapi.go:3132-3143"
+    },
+    {
+      "name": "GuildAuditLog",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildAuditLog(ctx context.Context, guildID string, userID string, beforeID string, actionType int, limit int, options ...RequestOption) (*GuildAuditLogView, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildAuditLog",
+      "request": "GuildAuditLogRequest",
+      "response": "GuildAuditLogResponse",
+      "inputFields": [
+        "guild_id",
+        "user_id",
+        "before_id",
+        "action_type",
+        "limit",
+        "options"
+      ],
+      "output": "*GuildAuditLogView",
+      "source": "discordgo/restapi.go:1404-1432"
+    },
+    {
+      "name": "GuildBan",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildBan(ctx context.Context, guildID string, userID string, options ...RequestOption) (*discordgo.GuildBan, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildBan",
+      "request": "GuildBanRequest",
+      "response": "GuildBanResponse",
+      "inputFields": [
+        "guild_id",
+        "user_id",
+        "options"
+      ],
+      "output": "*discordgo.GuildBan",
+      "source": "discordgo/restapi.go:743-753"
+    },
+    {
+      "name": "GuildBanCreateWithReason",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildBanCreateWithReason(ctx context.Context, guildID string, userID string, reason *string, days int, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildBanCreateWithReason",
+      "request": "GuildBanCreateWithReasonRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "guild_id",
+        "user_id",
+        "reason",
+        "days",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:760-778"
+    },
+    {
+      "name": "GuildBanDelete",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildBanDelete(ctx context.Context, guildID string, userID string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildBanDelete",
+      "request": "GuildBanDeleteRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "guild_id",
+        "user_id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:783-787"
+    },
+    {
+      "name": "GuildBans",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildBans(ctx context.Context, guildID string, limit int, beforeID string, afterID string, options ...RequestOption) ([]*discordgo.GuildBan, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildBans",
+      "request": "GuildBansRequest",
+      "response": "GuildBansResponse",
+      "inputFields": [
+        "guild_id",
+        "limit",
+        "before_id",
+        "after_id",
+        "options"
+      ],
+      "output": "[]*discordgo.GuildBan",
+      "source": "discordgo/restapi.go:706-732"
+    },
+    {
+      "name": "GuildChannelCreateComplex",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildChannelCreateComplex(ctx context.Context, guildID string, data discordgo.GuildChannelCreateData, options ...RequestOption) (*discordgo.Channel, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildChannelCreateComplex",
+      "request": "GuildChannelCreateComplexRequest",
+      "response": "GuildChannelCreateComplexResponse",
+      "inputFields": [
+        "guild_id",
+        "data",
+        "options"
+      ],
+      "output": "*discordgo.Channel",
+      "source": "discordgo/restapi.go:1053-1061"
+    },
+    {
+      "name": "GuildChannels",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildChannels(ctx context.Context, guildID string, options ...RequestOption) ([]*discordgo.Channel, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildChannels",
+      "request": "GuildChannelsRequest",
+      "response": "GuildChannelsResponse",
+      "inputFields": [
+        "guild_id",
+        "options"
+      ],
+      "output": "[]*discordgo.Channel",
+      "source": "discordgo/restapi.go:1024-1034"
+    },
+    {
+      "name": "GuildChannelsReorder",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildChannelsReorder(ctx context.Context, guildID string, channels []*discordgo.Channel, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildChannelsReorder",
+      "request": "GuildChannelsReorderRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "guild_id",
+        "channels",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:1077-1091"
+    },
+    {
+      "name": "GuildEdit",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildEdit(ctx context.Context, guildID string, g *GuildParamsView, options ...RequestOption) (*discordgo.Guild, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildEdit",
+      "request": "GuildEditRequest",
+      "response": "GuildEditResponse",
+      "inputFields": [
+        "guild_id",
+        "g",
+        "options"
+      ],
+      "output": "*discordgo.Guild",
+      "source": "discordgo/restapi.go:646-683"
+    },
+    {
+      "name": "GuildEmbed",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildEmbed(ctx context.Context, guildID string, options ...RequestOption) (*discordgo.GuildEmbed, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildEmbed",
+      "request": "GuildEmbedRequest",
+      "response": "GuildEmbedResponse",
+      "inputFields": [
+        "guild_id",
+        "options"
+      ],
+      "output": "*discordgo.GuildEmbed",
+      "source": "discordgo/restapi.go:1379-1388"
+    },
+    {
+      "name": "GuildEmbedEdit",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildEmbedEdit(ctx context.Context, guildID string, data *discordgo.GuildEmbed, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildEmbedEdit",
+      "request": "GuildEmbedEditRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "guild_id",
+        "data",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:1393-1396"
+    },
+    {
+      "name": "GuildEmoji",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildEmoji(ctx context.Context, guildID string, emojiID string, options ...RequestOption) (*discordgo.Emoji, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildEmoji",
+      "request": "GuildEmojiRequest",
+      "response": "GuildEmojiResponse",
+      "inputFields": [
+        "guild_id",
+        "emoji_id",
+        "options"
+      ],
+      "output": "*discordgo.Emoji",
+      "source": "discordgo/restapi.go:1450-1459"
+    },
+    {
+      "name": "GuildEmojiCreate",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildEmojiCreate(ctx context.Context, guildID string, data *discordgo.EmojiParams, options ...RequestOption) (*discordgo.Emoji, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildEmojiCreate",
+      "request": "GuildEmojiCreateRequest",
+      "response": "GuildEmojiCreateResponse",
+      "inputFields": [
+        "guild_id",
+        "data",
+        "options"
+      ],
+      "output": "*discordgo.Emoji",
+      "source": "discordgo/restapi.go:1464-1472"
+    },
+    {
+      "name": "GuildEmojiDelete",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildEmojiDelete(ctx context.Context, guildID string, emojiID string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildEmojiDelete",
+      "request": "GuildEmojiDeleteRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "guild_id",
+        "emoji_id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:1491-1495"
+    },
+    {
+      "name": "GuildEmojiEdit",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildEmojiEdit(ctx context.Context, guildID string, emojiID string, data *discordgo.EmojiParams, options ...RequestOption) (*discordgo.Emoji, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildEmojiEdit",
+      "request": "GuildEmojiEditRequest",
+      "response": "GuildEmojiEditResponse",
+      "inputFields": [
+        "guild_id",
+        "emoji_id",
+        "data",
+        "options"
+      ],
+      "output": "*discordgo.Emoji",
+      "source": "discordgo/restapi.go:1478-1486"
+    },
+    {
+      "name": "GuildEmojis",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildEmojis(ctx context.Context, guildID string, options ...RequestOption) ([]*discordgo.Emoji, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildEmojis",
+      "request": "GuildEmojisRequest",
+      "response": "GuildEmojisResponse",
+      "inputFields": [
+        "guild_id",
+        "options"
+      ],
+      "output": "[]*discordgo.Emoji",
+      "source": "discordgo/restapi.go:1436-1445"
+    },
+    {
+      "name": "GuildIntegrationDelete",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildIntegrationDelete(ctx context.Context, guildID string, integrationID string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildIntegrationDelete",
+      "request": "GuildIntegrationDeleteRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "guild_id",
+        "integration_id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:1327-1331"
+    },
+    {
+      "name": "GuildIntegrations",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildIntegrations(ctx context.Context, guildID string, options ...RequestOption) ([]*discordgo.Integration, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildIntegrations",
+      "request": "GuildIntegrationsRequest",
+      "response": "GuildIntegrationsResponse",
+      "inputFields": [
+        "guild_id",
+        "options"
+      ],
+      "output": "[]*discordgo.Integration",
+      "source": "discordgo/restapi.go:1278-1288"
+    },
+    {
+      "name": "GuildInvites",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildInvites(ctx context.Context, guildID string, options ...RequestOption) ([]*discordgo.Invite, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildInvites",
+      "request": "GuildInvitesRequest",
+      "response": "GuildInvitesResponse",
+      "inputFields": [
+        "guild_id",
+        "options"
+      ],
+      "output": "[]*discordgo.Invite",
+      "source": "discordgo/restapi.go:1095-1103"
+    },
+    {
+      "name": "GuildLeave",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildLeave(ctx context.Context, guildID string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildLeave",
+      "request": "GuildLeaveRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "guild_id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:695-699"
+    },
+    {
+      "name": "GuildMember",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildMember(ctx context.Context, guildID string, userID string, options ...RequestOption) (*discordgo.Member, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildMember",
+      "request": "GuildMemberRequest",
+      "response": "GuildMemberResponse",
+      "inputFields": [
+        "guild_id",
+        "user_id",
+        "options"
+      ],
+      "output": "*discordgo.Member",
+      "source": "discordgo/restapi.go:850-861"
+    },
+    {
+      "name": "GuildMemberAdd",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildMemberAdd(ctx context.Context, guildID string, userID string, data *GuildMemberAddParamsView, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildMemberAdd",
+      "request": "GuildMemberAddRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "guild_id",
+        "user_id",
+        "data",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:867-875"
+    },
+    {
+      "name": "GuildMemberDeleteWithReason",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildMemberDeleteWithReason(ctx context.Context, guildID string, userID string, reason *string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildMemberDeleteWithReason",
+      "request": "GuildMemberDeleteWithReasonRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "guild_id",
+        "user_id",
+        "reason",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:889-898"
+    },
+    {
+      "name": "GuildMemberEdit",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildMemberEdit(ctx context.Context, guildID string, userID string, data *GuildMemberParamsView, options ...RequestOption) (*discordgo.Member, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildMemberEdit",
+      "request": "GuildMemberEditRequest",
+      "response": "GuildMemberEditResponse",
+      "inputFields": [
+        "guild_id",
+        "user_id",
+        "data",
+        "options"
+      ],
+      "output": "*discordgo.Member",
+      "source": "discordgo/restapi.go:904-913"
+    },
+    {
+      "name": "GuildMemberNickname",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildMemberNickname(ctx context.Context, guildID string, userID string, nickname string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildMemberNickname",
+      "request": "GuildMemberNicknameRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "guild_id",
+        "user_id",
+        "nickname",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:946-958"
+    },
+    {
+      "name": "GuildMemberRoleAdd",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildMemberRoleAdd(ctx context.Context, guildID string, userID string, roleID string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildMemberRoleAdd",
+      "request": "GuildMemberRoleAddRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "guild_id",
+        "user_id",
+        "role_id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:1003-1008"
+    },
+    {
+      "name": "GuildMemberRoleRemove",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildMemberRoleRemove(ctx context.Context, guildID string, userID string, roleID string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildMemberRoleRemove",
+      "request": "GuildMemberRoleRemoveRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "guild_id",
+        "user_id",
+        "role_id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:1014-1019"
+    },
+    {
+      "name": "GuildMembers",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildMembers(ctx context.Context, guildID string, after string, limit int, options ...RequestOption) ([]*discordgo.Member, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildMembers",
+      "request": "GuildMembersRequest",
+      "response": "GuildMembersResponse",
+      "inputFields": [
+        "guild_id",
+        "after",
+        "limit",
+        "options"
+      ],
+      "output": "[]*discordgo.Member",
+      "source": "discordgo/restapi.go:793-822"
+    },
+    {
+      "name": "GuildMembersSearch",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildMembersSearch(ctx context.Context, guildID string, query string, limit int, options ...RequestOption) ([]*discordgo.Member, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildMembersSearch",
+      "request": "GuildMembersSearchRequest",
+      "response": "GuildMembersSearchResponse",
+      "inputFields": [
+        "guild_id",
+        "query",
+        "limit",
+        "options"
+      ],
+      "output": "[]*discordgo.Member",
+      "source": "discordgo/restapi.go:828-845"
+    },
+    {
+      "name": "GuildOnboarding",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildOnboarding(ctx context.Context, guildID string, options ...RequestOption) (*discordgo.GuildOnboarding, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildOnboarding",
+      "request": "GuildOnboardingRequest",
+      "response": "GuildOnboardingResponse",
+      "inputFields": [
+        "guild_id",
+        "options"
+      ],
+      "output": "*discordgo.GuildOnboarding",
+      "source": "discordgo/restapi.go:3419-3430"
+    },
+    {
+      "name": "GuildOnboardingEdit",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildOnboardingEdit(ctx context.Context, guildID string, o *discordgo.GuildOnboarding, options ...RequestOption) (*discordgo.GuildOnboarding, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildOnboardingEdit",
+      "request": "GuildOnboardingEditRequest",
+      "response": "GuildOnboardingEditResponse",
+      "inputFields": [
+        "guild_id",
+        "o",
+        "options"
+      ],
+      "output": "*discordgo.GuildOnboarding",
+      "source": "discordgo/restapi.go:3435-3446"
+    },
+    {
+      "name": "GuildPreview",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildPreview(ctx context.Context, guildID string, options ...RequestOption) (*discordgo.GuildPreview, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildPreview",
+      "request": "GuildPreviewRequest",
+      "response": "GuildPreviewResponse",
+      "inputFields": [
+        "guild_id",
+        "options"
+      ],
+      "output": "*discordgo.GuildPreview",
+      "source": "discordgo/restapi.go:616-624"
+    },
+    {
+      "name": "GuildPrune",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildPrune(ctx context.Context, guildID string, days uint32, options ...RequestOption) (uint32, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildPrune",
+      "request": "GuildPruneRequest",
+      "response": "GuildPruneResponse",
+      "inputFields": [
+        "guild_id",
+        "days",
+        "options"
+      ],
+      "output": "uint32",
+      "source": "discordgo/restapi.go:1244-1274"
+    },
+    {
+      "name": "GuildPruneCount",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildPruneCount(ctx context.Context, guildID string, days uint32, options ...RequestOption) (uint32, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildPruneCount",
+      "request": "GuildPruneCountRequest",
+      "response": "GuildPruneCountResponse",
+      "inputFields": [
+        "guild_id",
+        "days",
+        "options"
+      ],
+      "output": "uint32",
+      "source": "discordgo/restapi.go:1212-1238"
+    },
+    {
+      "name": "GuildRole",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildRole(ctx context.Context, guildID string, roleID string, options ...RequestOption) (*discordgo.Role, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildRole",
+      "request": "GuildRoleRequest",
+      "response": "GuildRoleResponse",
+      "inputFields": [
+        "guild_id",
+        "role_id",
+        "options"
+      ],
+      "output": "*discordgo.Role",
+      "source": "discordgo/restapi.go:1122-1131"
+    },
+    {
+      "name": "GuildRoleCreate",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildRoleCreate(ctx context.Context, guildID string, data *RoleParamsView, options ...RequestOption) (*discordgo.Role, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildRoleCreate",
+      "request": "GuildRoleCreateRequest",
+      "response": "GuildRoleCreateResponse",
+      "inputFields": [
+        "guild_id",
+        "data",
+        "options"
+      ],
+      "output": "*discordgo.Role",
+      "source": "discordgo/restapi.go:1136-1145"
+    },
+    {
+      "name": "GuildRoleDelete",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildRoleDelete(ctx context.Context, guildID string, roleID string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildRoleDelete",
+      "request": "GuildRoleDeleteRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "guild_id",
+        "role_id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:1186-1191"
+    },
+    {
+      "name": "GuildRoleEdit",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildRoleEdit(ctx context.Context, guildID string, roleID string, data *RoleParamsView, options ...RequestOption) (*discordgo.Role, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildRoleEdit",
+      "request": "GuildRoleEditRequest",
+      "response": "GuildRoleEditResponse",
+      "inputFields": [
+        "guild_id",
+        "role_id",
+        "data",
+        "options"
+      ],
+      "output": "*discordgo.Role",
+      "source": "discordgo/restapi.go:1151-1166"
+    },
+    {
+      "name": "GuildRoleMemberCounts",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildRoleMemberCounts(ctx context.Context, guildID string, options ...RequestOption) (map[string]uint64, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildRoleMemberCounts",
+      "request": "GuildRoleMemberCountsRequest",
+      "response": "GuildRoleMemberCountsResponse",
+      "inputFields": [
+        "guild_id",
+        "options"
+      ],
+      "output": "map[string]uint64",
+      "source": "discordgo/restapi.go:1198-1206"
+    },
+    {
+      "name": "GuildRoleReorder",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildRoleReorder(ctx context.Context, guildID string, roles []*discordgo.Role, options ...RequestOption) ([]*discordgo.Role, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildRoleReorder",
+      "request": "GuildRoleReorderRequest",
+      "response": "GuildRoleReorderResponse",
+      "inputFields": [
+        "guild_id",
+        "roles",
+        "options"
+      ],
+      "output": "[]*discordgo.Role",
+      "source": "discordgo/restapi.go:1171-1181"
+    },
+    {
+      "name": "GuildRoles",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildRoles(ctx context.Context, guildID string, options ...RequestOption) ([]*discordgo.Role, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildRoles",
+      "request": "GuildRolesRequest",
+      "response": "GuildRolesResponse",
+      "inputFields": [
+        "guild_id",
+        "options"
+      ],
+      "output": "[]*discordgo.Role",
+      "source": "discordgo/restapi.go:1107-1117"
+    },
+    {
+      "name": "GuildScheduledEvent",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildScheduledEvent(ctx context.Context, guildID string, eventID string, userCount bool, options ...RequestOption) (*discordgo.GuildScheduledEvent, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildScheduledEvent",
+      "request": "GuildScheduledEventRequest",
+      "response": "GuildScheduledEventResponse",
+      "inputFields": [
+        "guild_id",
+        "event_id",
+        "user_count",
+        "options"
+      ],
+      "output": "*discordgo.GuildScheduledEvent",
+      "source": "discordgo/restapi.go:3331-3344"
+    },
+    {
+      "name": "GuildScheduledEventCreate",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildScheduledEventCreate(ctx context.Context, guildID string, event *GuildScheduledEventParamsView, options ...RequestOption) (*discordgo.GuildScheduledEvent, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildScheduledEventCreate",
+      "request": "GuildScheduledEventCreateRequest",
+      "response": "GuildScheduledEventCreateResponse",
+      "inputFields": [
+        "guild_id",
+        "event",
+        "options"
+      ],
+      "output": "*discordgo.GuildScheduledEvent",
+      "source": "discordgo/restapi.go:3349-3357"
+    },
+    {
+      "name": "GuildScheduledEventDelete",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildScheduledEventDelete(ctx context.Context, guildID string, eventID string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildScheduledEventDelete",
+      "request": "GuildScheduledEventDeleteRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "guild_id",
+        "event_id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:3375-3378"
+    },
+    {
+      "name": "GuildScheduledEventEdit",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildScheduledEventEdit(ctx context.Context, guildID string, eventID string, event *GuildScheduledEventParamsView, options ...RequestOption) (*discordgo.GuildScheduledEvent, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildScheduledEventEdit",
+      "request": "GuildScheduledEventEditRequest",
+      "response": "GuildScheduledEventEditResponse",
+      "inputFields": [
+        "guild_id",
+        "event_id",
+        "event",
+        "options"
+      ],
+      "output": "*discordgo.GuildScheduledEvent",
+      "source": "discordgo/restapi.go:3362-3370"
+    },
+    {
+      "name": "GuildScheduledEventUsers",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildScheduledEventUsers(ctx context.Context, guildID string, eventID string, limit int, withMember bool, beforeID string, afterID string, options ...RequestOption) ([]*discordgo.GuildScheduledEventUser, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildScheduledEventUsers",
+      "request": "GuildScheduledEventUsersRequest",
+      "response": "GuildScheduledEventUsersResponse",
+      "inputFields": [
+        "guild_id",
+        "event_id",
+        "limit",
+        "with_member",
+        "before_id",
+        "after_id",
+        "options"
+      ],
+      "output": "[]*discordgo.GuildScheduledEventUser",
+      "source": "discordgo/restapi.go:3387-3415"
+    },
+    {
+      "name": "GuildScheduledEvents",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildScheduledEvents(ctx context.Context, guildID string, userCount bool, options ...RequestOption) ([]*discordgo.GuildScheduledEvent, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildScheduledEvents",
+      "request": "GuildScheduledEventsRequest",
+      "response": "GuildScheduledEventsResponse",
+      "inputFields": [
+        "guild_id",
+        "user_count",
+        "options"
+      ],
+      "output": "[]*discordgo.GuildScheduledEvent",
+      "source": "discordgo/restapi.go:3312-3325"
+    },
+    {
+      "name": "GuildTemplate",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildTemplate(ctx context.Context, templateCode string, options ...RequestOption) (*discordgo.GuildTemplate, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildTemplate",
+      "request": "GuildTemplateRequest",
+      "response": "GuildTemplateResponse",
+      "inputFields": [
+        "template_code",
+        "options"
+      ],
+      "output": "*discordgo.GuildTemplate",
+      "source": "discordgo/restapi.go:1569-1578"
+    },
+    {
+      "name": "GuildTemplateCreate",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildTemplateCreate(ctx context.Context, guildID string, data *GuildTemplateParamsView, options ...RequestOption) (*discordgo.GuildTemplate, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildTemplateCreate",
+      "request": "GuildTemplateCreateRequest",
+      "response": "GuildTemplateCreateResponse",
+      "inputFields": [
+        "guild_id",
+        "data",
+        "options"
+      ],
+      "output": "*discordgo.GuildTemplate",
+      "source": "discordgo/restapi.go:1616-1624"
+    },
+    {
+      "name": "GuildTemplateDelete",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildTemplateDelete(ctx context.Context, guildID string, templateCode string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildTemplateDelete",
+      "request": "GuildTemplateDeleteRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "guild_id",
+        "template_code",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:1653-1657"
+    },
+    {
+      "name": "GuildTemplateEdit",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildTemplateEdit(ctx context.Context, guildID string, templateCode string, data *GuildTemplateParamsView, options ...RequestOption) (*discordgo.GuildTemplate, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildTemplateEdit",
+      "request": "GuildTemplateEditRequest",
+      "response": "GuildTemplateEditResponse",
+      "inputFields": [
+        "guild_id",
+        "template_code",
+        "data",
+        "options"
+      ],
+      "output": "*discordgo.GuildTemplate",
+      "source": "discordgo/restapi.go:1639-1648"
+    },
+    {
+      "name": "GuildTemplateSync",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildTemplateSync(ctx context.Context, guildID string, templateCode string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildTemplateSync",
+      "request": "GuildTemplateSyncRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "guild_id",
+        "template_code",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:1629-1633"
+    },
+    {
+      "name": "GuildTemplates",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildTemplates(ctx context.Context, guildID string, options ...RequestOption) ([]*discordgo.GuildTemplate, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildTemplates",
+      "request": "GuildTemplatesRequest",
+      "response": "GuildTemplatesResponse",
+      "inputFields": [
+        "guild_id",
+        "options"
+      ],
+      "output": "[]*discordgo.GuildTemplate",
+      "source": "discordgo/restapi.go:1602-1611"
+    },
+    {
+      "name": "GuildThreadsActive",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildThreadsActive(ctx context.Context, guildID string, options ...RequestOption) (*discordgo.ThreadsList, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildThreadsActive",
+      "request": "GuildThreadsActiveRequest",
+      "response": "GuildThreadsActiveResponse",
+      "inputFields": [
+        "guild_id",
+        "options"
+      ],
+      "output": "*discordgo.ThreadsList",
+      "source": "discordgo/restapi.go:2918-2927"
+    },
+    {
+      "name": "GuildWebhooks",
+      "kind": "canonical",
+      "signature": "func (c *Client) GuildWebhooks(ctx context.Context, guildID string, options ...RequestOption) ([]*WebhookHandle, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/GuildWebhooks",
+      "request": "GuildWebhooksRequest",
+      "response": "GuildWebhooksResponse",
+      "inputFields": [
+        "guild_id",
+        "options"
+      ],
+      "output": "[]*WebhookHandle",
+      "source": "discordgo/restapi.go:2359-2369"
+    },
+    {
+      "name": "InteractionRespond",
+      "kind": "canonical",
+      "signature": "func (c *Client) InteractionRespond(ctx context.Context, interaction *InteractionHandle, resp *InteractionResponseView, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/InteractionRespond",
+      "request": "InteractionRespondRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "interaction",
+        "resp",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:3192-3207"
+    },
+    {
+      "name": "InviteComplex",
+      "kind": "canonical",
+      "signature": "func (c *Client) InviteComplex(ctx context.Context, inviteID string, guildScheduledEventID string, withCounts bool, withExpiration bool, options ...RequestOption) (*discordgo.Invite, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/InviteComplex",
+      "request": "InviteComplexRequest",
+      "response": "InviteComplexResponse",
+      "inputFields": [
+        "invite_id",
+        "guild_scheduled_event_id",
+        "with_counts",
+        "with_expiration",
+        "options"
+      ],
+      "output": "*discordgo.Invite",
+      "source": "discordgo/restapi.go:2198-2222"
+    },
+    {
+      "name": "InviteDelete",
+      "kind": "canonical",
+      "signature": "func (c *Client) InviteDelete(ctx context.Context, inviteID string, options ...RequestOption) (*discordgo.Invite, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/InviteDelete",
+      "request": "InviteDeleteRequest",
+      "response": "InviteDeleteResponse",
+      "inputFields": [
+        "invite_id",
+        "options"
+      ],
+      "output": "*discordgo.Invite",
+      "source": "discordgo/restapi.go:2226-2235"
+    },
+    {
+      "name": "MessageReactionAdd",
+      "kind": "canonical",
+      "signature": "func (c *Client) MessageReactionAdd(ctx context.Context, channelID string, messageID string, emojiID string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/MessageReactionAdd",
+      "request": "MessageReactionAddRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "channel_id",
+        "message_id",
+        "emoji_id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:2582-2589"
+    },
+    {
+      "name": "MessageReactionRemove",
+      "kind": "canonical",
+      "signature": "func (c *Client) MessageReactionRemove(ctx context.Context, channelID string, messageID string, emojiID string, userID string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/MessageReactionRemove",
+      "request": "MessageReactionRemoveRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "channel_id",
+        "message_id",
+        "emoji_id",
+        "user_id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:2596-2603"
+    },
+    {
+      "name": "MessageReactions",
+      "kind": "canonical",
+      "signature": "func (c *Client) MessageReactions(ctx context.Context, channelID string, messageID string, emojiID string, limit int, beforeID string, afterID string, options ...RequestOption) ([]*discordgo.User, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/MessageReactions",
+      "request": "MessageReactionsRequest",
+      "response": "MessageReactionsResponse",
+      "inputFields": [
+        "channel_id",
+        "message_id",
+        "emoji_id",
+        "limit",
+        "before_id",
+        "after_id",
+        "options"
+      ],
+      "output": "[]*discordgo.User",
+      "source": "discordgo/restapi.go:2635-2664"
+    },
+    {
+      "name": "MessageReactionsRemoveAll",
+      "kind": "canonical",
+      "signature": "func (c *Client) MessageReactionsRemoveAll(ctx context.Context, channelID string, messageID string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/MessageReactionsRemoveAll",
+      "request": "MessageReactionsRemoveAllRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "channel_id",
+        "message_id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:2608-2613"
+    },
+    {
+      "name": "MessageReactionsRemoveEmoji",
+      "kind": "canonical",
+      "signature": "func (c *Client) MessageReactionsRemoveEmoji(ctx context.Context, channelID string, messageID string, emojiID string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/MessageReactionsRemoveEmoji",
+      "request": "MessageReactionsRemoveEmojiRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "channel_id",
+        "message_id",
+        "emoji_id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:2619-2626"
+    },
+    {
+      "name": "MessageThreadStartComplex",
+      "kind": "canonical",
+      "signature": "func (c *Client) MessageThreadStartComplex(ctx context.Context, channelID string, messageID string, data *discordgo.ThreadStart, options ...RequestOption) (*discordgo.Channel, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/MessageThreadStartComplex",
+      "request": "MessageThreadStartComplexRequest",
+      "response": "MessageThreadStartComplexResponse",
+      "inputFields": [
+        "channel_id",
+        "message_id",
+        "data",
+        "options"
+      ],
+      "output": "*discordgo.Channel",
+      "source": "discordgo/restapi.go:2674-2684"
+    },
+    {
+      "name": "PollAnswerVoters",
+      "kind": "canonical",
+      "signature": "func (c *Client) PollAnswerVoters(ctx context.Context, channelID string, messageID string, answerID int, options ...RequestOption) ([]*discordgo.User, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/PollAnswerVoters",
+      "request": "PollAnswerVotersRequest",
+      "response": "PollAnswerVotersResponse",
+      "inputFields": [
+        "channel_id",
+        "message_id",
+        "answer_id",
+        "options"
+      ],
+      "output": "[]*discordgo.User",
+      "source": "discordgo/restapi.go:3592-3612"
+    },
+    {
+      "name": "PollExpire",
+      "kind": "canonical",
+      "signature": "func (c *Client) PollExpire(ctx context.Context, channelID string, messageID string, options ...RequestOption) (*discordgo.Message, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/PollExpire",
+      "request": "PollExpireRequest",
+      "response": "PollExpireResponse",
+      "inputFields": [
+        "channel_id",
+        "message_id",
+        "options"
+      ],
+      "output": "*discordgo.Message",
+      "source": "discordgo/restapi.go:3617-3628"
+    },
+    {
+      "name": "RequestGuildMembers",
+      "kind": "canonical",
+      "signature": "func (c *Client) RequestGuildMembers(ctx context.Context, guildID string, query string, limit int, nonce string, presences bool, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/RequestGuildMembers",
+      "request": "RequestGuildMembersRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "guild_id",
+        "query",
+        "limit",
+        "nonce",
+        "presences",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/wsapi.go:491-493"
+    },
+    {
+      "name": "RequestGuildMembersList",
+      "kind": "canonical",
+      "signature": "func (c *Client) RequestGuildMembersList(ctx context.Context, guildID string, userIDs []string, limit int, nonce string, presences bool, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/RequestGuildMembersList",
+      "request": "RequestGuildMembersListRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "guild_id",
+        "user_ids",
+        "limit",
+        "nonce",
+        "presences",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/wsapi.go:502-504"
+    },
+    {
+      "name": "SKUs",
+      "kind": "canonical",
+      "signature": "func (c *Client) SKUs(ctx context.Context, appID string, options ...RequestOption) ([]*discordgo.SKU, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/SKUs",
+      "request": "SKUsRequest",
+      "response": "SKUsResponse",
+      "inputFields": [
+        "app_id",
+        "options"
+      ],
+      "output": "[]*discordgo.SKU",
+      "source": "discordgo/restapi.go:3636-3646"
+    },
+    {
+      "name": "StageInstance",
+      "kind": "canonical",
+      "signature": "func (c *Client) StageInstance(ctx context.Context, channelID string, options ...RequestOption) (*discordgo.StageInstance, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/StageInstance",
+      "request": "StageInstanceRequest",
+      "response": "StageInstanceResponse",
+      "inputFields": [
+        "channel_id",
+        "options"
+      ],
+      "output": "*discordgo.StageInstance",
+      "source": "discordgo/restapi.go:3274-3282"
+    },
+    {
+      "name": "StageInstanceCreate",
+      "kind": "canonical",
+      "signature": "func (c *Client) StageInstanceCreate(ctx context.Context, data *discordgo.StageInstanceParams, options ...RequestOption) (*discordgo.StageInstance, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/StageInstanceCreate",
+      "request": "StageInstanceCreateRequest",
+      "response": "StageInstanceCreateResponse",
+      "inputFields": [
+        "data",
+        "options"
+      ],
+      "output": "*discordgo.StageInstance",
+      "source": "discordgo/restapi.go:3262-3270"
+    },
+    {
+      "name": "StageInstanceDelete",
+      "kind": "canonical",
+      "signature": "func (c *Client) StageInstanceDelete(ctx context.Context, channelID string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/StageInstanceDelete",
+      "request": "StageInstanceDeleteRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "channel_id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:3300-3303"
+    },
+    {
+      "name": "StageInstanceEdit",
+      "kind": "canonical",
+      "signature": "func (c *Client) StageInstanceEdit(ctx context.Context, channelID string, data *discordgo.StageInstanceParams, options ...RequestOption) (*discordgo.StageInstance, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/StageInstanceEdit",
+      "request": "StageInstanceEditRequest",
+      "response": "StageInstanceEditResponse",
+      "inputFields": [
+        "channel_id",
+        "data",
+        "options"
+      ],
+      "output": "*discordgo.StageInstance",
+      "source": "discordgo/restapi.go:3287-3296"
+    },
+    {
+      "name": "Subscription",
+      "kind": "canonical",
+      "signature": "func (c *Client) Subscription(ctx context.Context, skuID string, subscriptionID string, userID string, options ...RequestOption) (*discordgo.Subscription, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/Subscription",
+      "request": "SubscriptionRequest",
+      "response": "SubscriptionResponse",
+      "inputFields": [
+        "sku_id",
+        "subscription_id",
+        "user_id",
+        "options"
+      ],
+      "output": "*discordgo.Subscription",
+      "source": "discordgo/restapi.go:3746-3762"
+    },
+    {
+      "name": "Subscriptions",
+      "kind": "canonical",
+      "signature": "func (c *Client) Subscriptions(ctx context.Context, skuID string, userID string, before *time.Time, after *time.Time, limit int, options ...RequestOption) ([]*discordgo.Subscription, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/Subscriptions",
+      "request": "SubscriptionsRequest",
+      "response": "SubscriptionsResponse",
+      "inputFields": [
+        "sku_id",
+        "user_id",
+        "before",
+        "after",
+        "limit",
+        "options"
+      ],
+      "output": "[]*discordgo.Subscription",
+      "source": "discordgo/restapi.go:3716-3740"
+    },
+    {
+      "name": "ThreadJoin",
+      "kind": "canonical",
+      "signature": "func (c *Client) ThreadJoin(ctx context.Context, id string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ThreadJoin",
+      "request": "ThreadJoinRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:2820-2824"
+    },
+    {
+      "name": "ThreadLeave",
+      "kind": "canonical",
+      "signature": "func (c *Client) ThreadLeave(ctx context.Context, id string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ThreadLeave",
+      "request": "ThreadLeaveRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:2827-2831"
+    },
+    {
+      "name": "ThreadMember",
+      "kind": "canonical",
+      "signature": "func (c *Client) ThreadMember(ctx context.Context, threadID string, memberID string, withMember bool, options ...RequestOption) (*discordgo.ThreadMember, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ThreadMember",
+      "request": "ThreadMemberRequest",
+      "response": "ThreadMemberResponse",
+      "inputFields": [
+        "thread_id",
+        "member_id",
+        "with_member",
+        "options"
+      ],
+      "output": "*discordgo.ThreadMember",
+      "source": "discordgo/restapi.go:2849-2870"
+    },
+    {
+      "name": "ThreadMemberAdd",
+      "kind": "canonical",
+      "signature": "func (c *Client) ThreadMemberAdd(ctx context.Context, threadID string, memberID string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ThreadMemberAdd",
+      "request": "ThreadMemberAddRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "thread_id",
+        "member_id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:2834-2838"
+    },
+    {
+      "name": "ThreadMemberRemove",
+      "kind": "canonical",
+      "signature": "func (c *Client) ThreadMemberRemove(ctx context.Context, threadID string, memberID string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ThreadMemberRemove",
+      "request": "ThreadMemberRemoveRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "thread_id",
+        "member_id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:2841-2845"
+    },
+    {
+      "name": "ThreadMembers",
+      "kind": "canonical",
+      "signature": "func (c *Client) ThreadMembers(ctx context.Context, threadID string, limit int, withMember bool, afterID string, options ...RequestOption) ([]*discordgo.ThreadMember, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ThreadMembers",
+      "request": "ThreadMembersRequest",
+      "response": "ThreadMembersResponse",
+      "inputFields": [
+        "thread_id",
+        "limit",
+        "with_member",
+        "after_id",
+        "options"
+      ],
+      "output": "[]*discordgo.ThreadMember",
+      "source": "discordgo/restapi.go:2876-2903"
+    },
+    {
+      "name": "ThreadStartComplex",
+      "kind": "canonical",
+      "signature": "func (c *Client) ThreadStartComplex(ctx context.Context, channelID string, data *discordgo.ThreadStart, options ...RequestOption) (*discordgo.Channel, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ThreadStartComplex",
+      "request": "ThreadStartComplexRequest",
+      "response": "ThreadStartComplexResponse",
+      "inputFields": [
+        "channel_id",
+        "data",
+        "options"
+      ],
+      "output": "*discordgo.Channel",
+      "source": "discordgo/restapi.go:2701-2711"
+    },
+    {
+      "name": "ThreadsArchived",
+      "kind": "canonical",
+      "signature": "func (c *Client) ThreadsArchived(ctx context.Context, channelID string, before *time.Time, limit int, options ...RequestOption) (*discordgo.ThreadsList, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ThreadsArchived",
+      "request": "ThreadsArchivedRequest",
+      "response": "ThreadsArchivedResponse",
+      "inputFields": [
+        "channel_id",
+        "before",
+        "limit",
+        "options"
+      ],
+      "output": "*discordgo.ThreadsList",
+      "source": "discordgo/restapi.go:2932-2955"
+    },
+    {
+      "name": "ThreadsPrivateArchived",
+      "kind": "canonical",
+      "signature": "func (c *Client) ThreadsPrivateArchived(ctx context.Context, channelID string, before *time.Time, limit int, options ...RequestOption) (*discordgo.ThreadsList, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ThreadsPrivateArchived",
+      "request": "ThreadsPrivateArchivedRequest",
+      "response": "ThreadsPrivateArchivedResponse",
+      "inputFields": [
+        "channel_id",
+        "before",
+        "limit",
+        "options"
+      ],
+      "output": "*discordgo.ThreadsList",
+      "source": "discordgo/restapi.go:2960-2982"
+    },
+    {
+      "name": "ThreadsPrivateJoinedArchived",
+      "kind": "canonical",
+      "signature": "func (c *Client) ThreadsPrivateJoinedArchived(ctx context.Context, channelID string, before *time.Time, limit int, options ...RequestOption) (*discordgo.ThreadsList, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/ThreadsPrivateJoinedArchived",
+      "request": "ThreadsPrivateJoinedArchivedRequest",
+      "response": "ThreadsPrivateJoinedArchivedResponse",
+      "inputFields": [
+        "channel_id",
+        "before",
+        "limit",
+        "options"
+      ],
+      "output": "*discordgo.ThreadsList",
+      "source": "discordgo/restapi.go:2987-3009"
+    },
+    {
+      "name": "UpdateStatusComplex",
+      "kind": "canonical",
+      "signature": "func (c *Client) UpdateStatusComplex(ctx context.Context, usd discordgo.UpdateStatusData, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/UpdateStatusComplex",
+      "request": "UpdateStatusComplexRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "usd",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/wsapi.go:466-468"
+    },
+    {
+      "name": "User",
+      "kind": "canonical",
+      "signature": "func (c *Client) User(ctx context.Context, userID string, options ...RequestOption) (*discordgo.User, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/User",
+      "request": "UserRequest",
+      "response": "UserResponse",
+      "inputFields": [
+        "user_id",
+        "options"
+      ],
+      "output": "*discordgo.User",
+      "source": "discordgo/restapi.go:333-342"
+    },
+    {
+      "name": "UserChannelCreate",
+      "kind": "canonical",
+      "signature": "func (c *Client) UserChannelCreate(ctx context.Context, recipientID string, options ...RequestOption) (*discordgo.Channel, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/UserChannelCreate",
+      "request": "UserChannelCreateRequest",
+      "response": "UserChannelCreateResponse",
+      "inputFields": [
+        "recipient_id",
+        "options"
+      ],
+      "output": "*discordgo.Channel",
+      "source": "discordgo/restapi.go:407-420"
+    },
+    {
+      "name": "UserChannelPermissions",
+      "kind": "canonical",
+      "signature": "func (c *Client) UserChannelPermissions(ctx context.Context, userID string, channelID string, options ...RequestOption) (int64, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/UserChannelPermissions",
+      "request": "UserChannelPermissionsRequest",
+      "response": "UserChannelPermissionsResponse",
+      "inputFields": [
+        "user_id",
+        "channel_id",
+        "options"
+      ],
+      "output": "int64",
+      "source": "discordgo/restapi.go:478-516"
+    },
+    {
+      "name": "UserGuilds",
+      "kind": "canonical",
+      "signature": "func (c *Client) UserGuilds(ctx context.Context, limit int, beforeID string, afterID string, withCounts bool, options ...RequestOption) ([]*discordgo.UserGuild, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/UserGuilds",
+      "request": "UserGuildsRequest",
+      "response": "UserGuildsResponse",
+      "inputFields": [
+        "limit",
+        "before_id",
+        "after_id",
+        "with_counts",
+        "options"
+      ],
+      "output": "[]*discordgo.UserGuild",
+      "source": "discordgo/restapi.go:439-469"
+    },
+    {
+      "name": "UserUpdate",
+      "kind": "canonical",
+      "signature": "func (c *Client) UserUpdate(ctx context.Context, username string, avatar string, banner string, options ...RequestOption) (*discordgo.User, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/UserUpdate",
+      "request": "UserUpdateRequest",
+      "response": "UserUpdateResponse",
+      "inputFields": [
+        "username",
+        "avatar",
+        "banner",
+        "options"
+      ],
+      "output": "*discordgo.User",
+      "source": "discordgo/restapi.go:368-388"
+    },
+    {
+      "name": "UserVoiceState",
+      "kind": "canonical",
+      "signature": "func (c *Client) UserVoiceState(ctx context.Context, guildID string, userID string, options ...RequestOption) (*discordgo.VoiceState, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/UserVoiceState",
+      "request": "UserVoiceStateRequest",
+      "response": "UserVoiceStateResponse",
+      "inputFields": [
+        "guild_id",
+        "user_id",
+        "options"
+      ],
+      "output": "*discordgo.VoiceState",
+      "source": "discordgo/restapi.go:3768-3778"
+    },
+    {
+      "name": "VoiceRegions",
+      "kind": "canonical",
+      "signature": "func (c *Client) VoiceRegions(ctx context.Context, options ...RequestOption) ([]*discordgo.VoiceRegion, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/VoiceRegions",
+      "request": "VoiceRegionsRequest",
+      "response": "VoiceRegionsResponse",
+      "inputFields": [
+        "options"
+      ],
+      "output": "[]*discordgo.VoiceRegion",
+      "source": "discordgo/restapi.go:2255-2264"
+    },
+    {
+      "name": "Webhook",
+      "kind": "canonical",
+      "signature": "func (c *Client) Webhook(ctx context.Context, webhookID string, options ...RequestOption) (*WebhookHandle, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/Webhook",
+      "request": "WebhookRequest",
+      "response": "WebhookResponse",
+      "inputFields": [
+        "webhook_id",
+        "options"
+      ],
+      "output": "*WebhookHandle",
+      "source": "discordgo/restapi.go:2373-2383"
+    },
+    {
+      "name": "WebhookCreate",
+      "kind": "canonical",
+      "signature": "func (c *Client) WebhookCreate(ctx context.Context, channelID string, name string, avatar string, options ...RequestOption) (*WebhookHandle, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/WebhookCreate",
+      "request": "WebhookCreateRequest",
+      "response": "WebhookCreateResponse",
+      "inputFields": [
+        "channel_id",
+        "name",
+        "avatar",
+        "options"
+      ],
+      "output": "*WebhookHandle",
+      "source": "discordgo/restapi.go:2326-2341"
+    },
+    {
+      "name": "WebhookDelete",
+      "kind": "canonical",
+      "signature": "func (c *Client) WebhookDelete(ctx context.Context, webhookID string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/WebhookDelete",
+      "request": "WebhookDeleteRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "webhook_id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:2447-2452"
+    },
+    {
+      "name": "WebhookDeleteWithToken",
+      "kind": "canonical",
+      "signature": "func (c *Client) WebhookDeleteWithToken(ctx context.Context, webhookID string, credential *corewire.CredentialRef, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/WebhookDeleteWithToken",
+      "request": "WebhookDeleteWithTokenRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "webhook_id",
+        "credential",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:2457-2467"
+    },
+    {
+      "name": "WebhookEdit",
+      "kind": "canonical",
+      "signature": "func (c *Client) WebhookEdit(ctx context.Context, webhookID string, name string, avatar string, channelID string, options ...RequestOption) (*WebhookHandle, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/WebhookEdit",
+      "request": "WebhookEditRequest",
+      "response": "WebhookEditResponse",
+      "inputFields": [
+        "webhook_id",
+        "name",
+        "avatar",
+        "channel_id",
+        "options"
+      ],
+      "output": "*WebhookHandle",
+      "source": "discordgo/restapi.go:2404-2420"
+    },
+    {
+      "name": "WebhookEditWithToken",
+      "kind": "canonical",
+      "signature": "func (c *Client) WebhookEditWithToken(ctx context.Context, webhookID string, credential *corewire.CredentialRef, name string, avatar string, options ...RequestOption) (*WebhookHandle, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/WebhookEditWithToken",
+      "request": "WebhookEditWithTokenRequest",
+      "response": "WebhookEditWithTokenResponse",
+      "inputFields": [
+        "webhook_id",
+        "credential",
+        "name",
+        "avatar",
+        "options"
+      ],
+      "output": "*WebhookHandle",
+      "source": "discordgo/restapi.go:2427-2443"
+    },
+    {
+      "name": "WebhookMessage",
+      "kind": "canonical",
+      "signature": "func (c *Client) WebhookMessage(ctx context.Context, webhookID string, credential *corewire.CredentialRef, messageID string, options ...RequestOption) (*discordgo.Message, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/WebhookMessage",
+      "request": "WebhookMessageRequest",
+      "response": "WebhookMessageResponse",
+      "inputFields": [
+        "webhook_id",
+        "credential",
+        "message_id",
+        "options"
+      ],
+      "output": "*discordgo.Message",
+      "source": "discordgo/restapi.go:2524-2535"
+    },
+    {
+      "name": "WebhookMessageDelete",
+      "kind": "canonical",
+      "signature": "func (c *Client) WebhookMessageDelete(ctx context.Context, webhookID string, credential *corewire.CredentialRef, messageID string, options ...RequestOption) error",
+      "fullMethod": "/flexmodule.discord.v2.Helper/WebhookMessageDelete",
+      "request": "WebhookMessageDeleteRequest",
+      "response": "google.protobuf.Empty",
+      "inputFields": [
+        "webhook_id",
+        "credential",
+        "message_id",
+        "options"
+      ],
+      "output": "error",
+      "source": "discordgo/restapi.go:2571-2576"
+    },
+    {
+      "name": "WebhookMessageEdit",
+      "kind": "canonical",
+      "signature": "func (c *Client) WebhookMessageEdit(ctx context.Context, webhookID string, credential *corewire.CredentialRef, messageID string, data *WebhookEditPatch, options ...RequestOption) (*discordgo.Message, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/WebhookMessageEdit",
+      "request": "WebhookMessageEditRequest",
+      "response": "WebhookMessageEditResponse",
+      "inputFields": [
+        "webhook_id",
+        "credential",
+        "message_id",
+        "data",
+        "options"
+      ],
+      "output": "*discordgo.Message",
+      "source": "discordgo/restapi.go:2541-2565"
+    },
+    {
+      "name": "WebhookThreadExecute",
+      "kind": "canonical",
+      "signature": "func (c *Client) WebhookThreadExecute(ctx context.Context, webhookID string, credential *corewire.CredentialRef, wait bool, threadID string, data *WebhookParamsView, options ...RequestOption) (*discordgo.Message, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/WebhookThreadExecute",
+      "request": "WebhookThreadExecuteRequest",
+      "response": "WebhookThreadExecuteResponse",
+      "inputFields": [
+        "webhook_id",
+        "credential",
+        "wait",
+        "thread_id",
+        "data",
+        "options"
+      ],
+      "output": "*discordgo.Message",
+      "source": "discordgo/restapi.go:2516-2518"
+    },
+    {
+      "name": "WebhookWithToken",
+      "kind": "canonical",
+      "signature": "func (c *Client) WebhookWithToken(ctx context.Context, webhookID string, credential *corewire.CredentialRef, options ...RequestOption) (*WebhookHandle, error)",
+      "fullMethod": "/flexmodule.discord.v2.Helper/WebhookWithToken",
+      "request": "WebhookWithTokenRequest",
+      "response": "WebhookWithTokenResponse",
+      "inputFields": [
+        "webhook_id",
+        "credential",
+        "options"
+      ],
+      "output": "*WebhookHandle",
+      "source": "discordgo/restapi.go:2388-2398"
+    },
+    {
+      "name": "ChannelEditComplex",
+      "kind": "alias",
+      "signature": "func (c *Client) ChannelEditComplex(ctx context.Context, channelID string, data *ChannelEditView, options ...RequestOption) (*discordgo.Channel, error)",
+      "canonical": "ChannelEdit",
+      "mapping": {
+        "canonicalRequest": "ChannelEditRequest",
+        "projection": {
+          "channel_id": "argument:channelID",
+          "data": "argument:data",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context"
+        },
+        "defaults": {
+          "data": "원래 ChannelEdit를 그대로 전달합니다."
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "ChannelFileSend",
+      "kind": "alias",
+      "signature": "func (c *Client) ChannelFileSend(ctx context.Context, channelID string, name string, r *corewire.UploadedFileRef, options ...RequestOption) (*discordgo.Message, error)",
+      "canonical": "ChannelMessageSendComplex",
+      "mapping": {
+        "canonicalRequest": "ChannelMessageSendComplexRequest",
+        "projection": {
+          "channel_id": "argument:channelID",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "data": {
+            "other_fields": "source_zero_or_omitted",
+            "tts": false,
+            "files": [
+              {
+                "filename": "argument:name",
+                "uploaded_file_ref": "argument:r (preuploaded ref, never Reader)",
+                "description": "absent"
+              }
+            ]
+          }
+        },
+        "defaults": {
+          "Files": "[{Name:name, UploadedFileRef:원래 reader에 대응하는 사전 업로드 참조}]",
+          "other_fields": "원본 MessageSend의 zero/omitted defaults; TTS는 명시하지 않으면 false"
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "ChannelFileSendWithMessage",
+      "kind": "alias",
+      "signature": "func (c *Client) ChannelFileSendWithMessage(ctx context.Context, channelID string, content string, name string, r *corewire.UploadedFileRef, options ...RequestOption) (*discordgo.Message, error)",
+      "canonical": "ChannelMessageSendComplex",
+      "mapping": {
+        "canonicalRequest": "ChannelMessageSendComplexRequest",
+        "projection": {
+          "channel_id": "argument:channelID",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "data": {
+            "other_fields": "source_zero_or_omitted",
+            "tts": false,
+            "content": "argument:content",
+            "files": [
+              {
+                "filename": "argument:name",
+                "uploaded_file_ref": "argument:r (preuploaded ref, never Reader)",
+                "description": "absent"
+              }
+            ]
+          }
+        },
+        "defaults": {
+          "Content": "content",
+          "Files": "[{Name:name, UploadedFileRef:원래 reader에 대응하는 사전 업로드 참조}]",
+          "other_fields": "원본 MessageSend의 zero/omitted defaults; TTS는 명시하지 않으면 false"
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "ChannelMessageEdit",
+      "kind": "alias",
+      "signature": "func (c *Client) ChannelMessageEdit(ctx context.Context, channelID string, messageID string, content string, options ...RequestOption) (*discordgo.Message, error)",
+      "canonical": "ChannelMessageEditComplex",
+      "mapping": {
+        "canonicalRequest": "ChannelMessageEditComplexRequest",
+        "projection": {
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "m": {
+            "id": "argument:messageID",
+            "channel_id": "argument:channelID",
+            "other_fields": "unset",
+            "content": {
+              "argument": "content",
+              "presence": "present_including_empty"
+            }
+          }
+        },
+        "defaults": {
+          "Content": "present(content)",
+          "ID": "messageID",
+          "Channel": "channelID",
+          "other_fields": "unset; NewMessageEdit/SetContent/SetEmbeds와 동일한 필드 존재성"
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "ChannelMessageEditEmbed",
+      "kind": "alias",
+      "signature": "func (c *Client) ChannelMessageEditEmbed(ctx context.Context, channelID string, messageID string, embed *discordgo.MessageEmbed, options ...RequestOption) (*discordgo.Message, error)",
+      "canonical": "ChannelMessageEditComplex",
+      "mapping": {
+        "canonicalRequest": "ChannelMessageEditComplexRequest",
+        "projection": {
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "m": {
+            "id": "argument:messageID",
+            "channel_id": "argument:channelID",
+            "other_fields": "unset",
+            "embeds": {
+              "value": [
+                "argument:embed"
+              ],
+              "presence": "present_including_empty_list"
+            }
+          }
+        },
+        "defaults": {
+          "Embeds": "present([embed])",
+          "ID": "messageID",
+          "Channel": "channelID",
+          "other_fields": "unset; NewMessageEdit/SetContent/SetEmbeds와 동일한 필드 존재성"
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "ChannelMessageEditEmbeds",
+      "kind": "alias",
+      "signature": "func (c *Client) ChannelMessageEditEmbeds(ctx context.Context, channelID string, messageID string, embeds []*discordgo.MessageEmbed, options ...RequestOption) (*discordgo.Message, error)",
+      "canonical": "ChannelMessageEditComplex",
+      "mapping": {
+        "canonicalRequest": "ChannelMessageEditComplexRequest",
+        "projection": {
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "m": {
+            "id": "argument:messageID",
+            "channel_id": "argument:channelID",
+            "other_fields": "unset",
+            "embeds": {
+              "value": "argument:embeds",
+              "presence": "present_including_empty_list"
+            }
+          }
+        },
+        "defaults": {
+          "Embeds": "present(embeds); 빈 목록은 clear",
+          "ID": "messageID",
+          "Channel": "channelID",
+          "other_fields": "unset; NewMessageEdit/SetContent/SetEmbeds와 동일한 필드 존재성"
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "ChannelMessageSend",
+      "kind": "alias",
+      "signature": "func (c *Client) ChannelMessageSend(ctx context.Context, channelID string, content string, options ...RequestOption) (*discordgo.Message, error)",
+      "canonical": "ChannelMessageSendComplex",
+      "mapping": {
+        "canonicalRequest": "ChannelMessageSendComplexRequest",
+        "projection": {
+          "channel_id": "argument:channelID",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "data": {
+            "other_fields": "source_zero_or_omitted",
+            "tts": false,
+            "content": "argument:content"
+          }
+        },
+        "defaults": {
+          "Content": "content",
+          "other_fields": "원본 MessageSend의 zero/omitted defaults; TTS는 명시하지 않으면 false"
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "ChannelMessageSendEmbed",
+      "kind": "alias",
+      "signature": "func (c *Client) ChannelMessageSendEmbed(ctx context.Context, channelID string, embed *discordgo.MessageEmbed, options ...RequestOption) (*discordgo.Message, error)",
+      "canonical": "ChannelMessageSendComplex",
+      "mapping": {
+        "canonicalRequest": "ChannelMessageSendComplexRequest",
+        "projection": {
+          "channel_id": "argument:channelID",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "data": {
+            "other_fields": "source_zero_or_omitted",
+            "tts": false,
+            "embeds": [
+              "argument:embed"
+            ]
+          }
+        },
+        "defaults": {
+          "Embeds": "[embed]",
+          "other_fields": "원본 MessageSend의 zero/omitted defaults; TTS는 명시하지 않으면 false"
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "ChannelMessageSendEmbedReply",
+      "kind": "alias",
+      "signature": "func (c *Client) ChannelMessageSendEmbedReply(ctx context.Context, channelID string, embed *discordgo.MessageEmbed, reference *discordgo.MessageReference, options ...RequestOption) (*discordgo.Message, error)",
+      "canonical": "ChannelMessageSendComplex",
+      "mapping": {
+        "canonicalRequest": "ChannelMessageSendComplexRequest",
+        "projection": {
+          "channel_id": "argument:channelID",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "data": {
+            "other_fields": "source_zero_or_omitted",
+            "tts": false,
+            "embeds": [
+              "argument:embed"
+            ],
+            "reference": {
+              "argument": "reference",
+              "nil": "reject"
+            }
+          }
+        },
+        "defaults": {
+          "Embeds": "[embed]",
+          "Reference": "reference; nil 거부",
+          "other_fields": "원본 MessageSend의 zero/omitted defaults; TTS는 명시하지 않으면 false"
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "ChannelMessageSendEmbeds",
+      "kind": "alias",
+      "signature": "func (c *Client) ChannelMessageSendEmbeds(ctx context.Context, channelID string, embeds []*discordgo.MessageEmbed, options ...RequestOption) (*discordgo.Message, error)",
+      "canonical": "ChannelMessageSendComplex",
+      "mapping": {
+        "canonicalRequest": "ChannelMessageSendComplexRequest",
+        "projection": {
+          "channel_id": "argument:channelID",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "data": {
+            "other_fields": "source_zero_or_omitted",
+            "tts": false,
+            "embeds": "argument:embeds"
+          }
+        },
+        "defaults": {
+          "Embeds": "embeds",
+          "other_fields": "원본 MessageSend의 zero/omitted defaults; TTS는 명시하지 않으면 false"
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "ChannelMessageSendEmbedsReply",
+      "kind": "alias",
+      "signature": "func (c *Client) ChannelMessageSendEmbedsReply(ctx context.Context, channelID string, embeds []*discordgo.MessageEmbed, reference *discordgo.MessageReference, options ...RequestOption) (*discordgo.Message, error)",
+      "canonical": "ChannelMessageSendComplex",
+      "mapping": {
+        "canonicalRequest": "ChannelMessageSendComplexRequest",
+        "projection": {
+          "channel_id": "argument:channelID",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "data": {
+            "other_fields": "source_zero_or_omitted",
+            "tts": false,
+            "embeds": "argument:embeds",
+            "reference": {
+              "argument": "reference",
+              "nil": "reject"
+            }
+          }
+        },
+        "defaults": {
+          "Embeds": "embeds",
+          "Reference": "reference; nil 거부",
+          "other_fields": "원본 MessageSend의 zero/omitted defaults; TTS는 명시하지 않으면 false"
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "ChannelMessageSendReply",
+      "kind": "alias",
+      "signature": "func (c *Client) ChannelMessageSendReply(ctx context.Context, channelID string, content string, reference *discordgo.MessageReference, options ...RequestOption) (*discordgo.Message, error)",
+      "canonical": "ChannelMessageSendComplex",
+      "mapping": {
+        "canonicalRequest": "ChannelMessageSendComplexRequest",
+        "projection": {
+          "channel_id": "argument:channelID",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "data": {
+            "other_fields": "source_zero_or_omitted",
+            "tts": false,
+            "content": "argument:content",
+            "reference": {
+              "argument": "reference",
+              "nil": "reject"
+            }
+          }
+        },
+        "defaults": {
+          "Content": "content",
+          "Reference": "reference; nil 거부",
+          "other_fields": "원본 MessageSend의 zero/omitted defaults; TTS는 명시하지 않으면 false"
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "ChannelMessageSendTTS",
+      "kind": "alias",
+      "signature": "func (c *Client) ChannelMessageSendTTS(ctx context.Context, channelID string, content string, options ...RequestOption) (*discordgo.Message, error)",
+      "canonical": "ChannelMessageSendComplex",
+      "mapping": {
+        "canonicalRequest": "ChannelMessageSendComplexRequest",
+        "projection": {
+          "channel_id": "argument:channelID",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "data": {
+            "other_fields": "source_zero_or_omitted",
+            "tts": true,
+            "content": "argument:content"
+          }
+        },
+        "defaults": {
+          "Content": "content",
+          "TTS": true,
+          "other_fields": "원본 MessageSend의 zero/omitted defaults; TTS는 명시하지 않으면 false"
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "FollowupMessageCreate",
+      "kind": "alias",
+      "signature": "func (c *Client) FollowupMessageCreate(ctx context.Context, interaction *InteractionHandle, wait bool, data *WebhookParamsView, options ...RequestOption) (*discordgo.Message, error)",
+      "canonical": "WebhookThreadExecute",
+      "mapping": {
+        "canonicalRequest": "WebhookThreadExecuteRequest",
+        "projection": {
+          "wait": "argument:wait",
+          "data": "argument:data",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "webhook_id": "interaction.app_id",
+          "credential": "interaction.credential (interaction-purpose; preserve app/channel/message binding)",
+          "thread_id": ""
+        },
+        "defaults": {
+          "webhookID": "interaction.AppID",
+          "credentialRef": "interaction-purpose CredentialRef; raw interaction.Token 전송 금지",
+          "threadID": "",
+          "wait": "원본 wait 그대로",
+          "data": "원본 WebhookParams 그대로"
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "FollowupMessageDelete",
+      "kind": "alias",
+      "signature": "func (c *Client) FollowupMessageDelete(ctx context.Context, interaction *InteractionHandle, messageID string, options ...RequestOption) error",
+      "canonical": "WebhookMessageDelete",
+      "mapping": {
+        "canonicalRequest": "WebhookMessageDeleteRequest",
+        "projection": {
+          "message_id": "argument:messageID",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "webhook_id": "interaction.app_id",
+          "credential": "interaction.credential (interaction-purpose; preserve app/channel/message binding)"
+        },
+        "defaults": {
+          "webhookID": "interaction.AppID",
+          "credentialRef": "interaction-purpose CredentialRef; raw interaction.Token 전송 금지",
+          "messageID": "messageID"
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "FollowupMessageEdit",
+      "kind": "alias",
+      "signature": "func (c *Client) FollowupMessageEdit(ctx context.Context, interaction *InteractionHandle, messageID string, data *WebhookEditPatch, options ...RequestOption) (*discordgo.Message, error)",
+      "canonical": "WebhookMessageEdit",
+      "mapping": {
+        "canonicalRequest": "WebhookMessageEditRequest",
+        "projection": {
+          "message_id": "argument:messageID",
+          "data": "argument:data",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "webhook_id": "interaction.app_id",
+          "credential": "interaction.credential (interaction-purpose; preserve app/channel/message binding)"
+        },
+        "defaults": {
+          "webhookID": "interaction.AppID",
+          "credentialRef": "interaction-purpose CredentialRef; raw interaction.Token 전송 금지",
+          "messageID": "messageID",
+          "data": "원본 WebhookEdit 그대로"
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "ForumThreadStart",
+      "kind": "alias",
+      "signature": "func (c *Client) ForumThreadStart(ctx context.Context, channelID string, name string, archiveDuration int, content string, options ...RequestOption) (*discordgo.Channel, error)",
+      "canonical": "ForumThreadStartComplex",
+      "mapping": {
+        "canonicalRequest": "ForumThreadStartComplexRequest",
+        "projection": {
+          "channel_id": "argument:channelID",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "thread_data": {
+            "name": "argument:name",
+            "auto_archive_duration": "argument:archiveDuration",
+            "other_fields": "source_zero_or_omitted"
+          },
+          "message_data": {
+            "other_fields": "source_zero_or_omitted",
+            "content": "argument:content"
+          }
+        },
+        "defaults": {
+          "threadData": {
+            "Name": "name",
+            "AutoArchiveDuration": "archiveDuration",
+            "other_fields": "원본 ThreadStart zero/omitted defaults"
+          },
+          "messageData": {
+            "Content": "content",
+            "other_fields": "원본 MessageSend zero/omitted defaults"
+          }
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "ForumThreadStartEmbed",
+      "kind": "alias",
+      "signature": "func (c *Client) ForumThreadStartEmbed(ctx context.Context, channelID string, name string, archiveDuration int, embed *discordgo.MessageEmbed, options ...RequestOption) (*discordgo.Channel, error)",
+      "canonical": "ForumThreadStartComplex",
+      "mapping": {
+        "canonicalRequest": "ForumThreadStartComplexRequest",
+        "projection": {
+          "channel_id": "argument:channelID",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "thread_data": {
+            "name": "argument:name",
+            "auto_archive_duration": "argument:archiveDuration",
+            "other_fields": "source_zero_or_omitted"
+          },
+          "message_data": {
+            "other_fields": "source_zero_or_omitted",
+            "embeds": [
+              "argument:embed"
+            ]
+          }
+        },
+        "defaults": {
+          "threadData": {
+            "Name": "name",
+            "AutoArchiveDuration": "archiveDuration",
+            "other_fields": "원본 ThreadStart zero/omitted defaults"
+          },
+          "messageData": {
+            "Embeds": "[embed]",
+            "other_fields": "원본 MessageSend zero/omitted defaults"
+          }
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "ForumThreadStartEmbeds",
+      "kind": "alias",
+      "signature": "func (c *Client) ForumThreadStartEmbeds(ctx context.Context, channelID string, name string, archiveDuration int, embeds []*discordgo.MessageEmbed, options ...RequestOption) (*discordgo.Channel, error)",
+      "canonical": "ForumThreadStartComplex",
+      "mapping": {
+        "canonicalRequest": "ForumThreadStartComplexRequest",
+        "projection": {
+          "channel_id": "argument:channelID",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "thread_data": {
+            "name": "argument:name",
+            "auto_archive_duration": "argument:archiveDuration",
+            "other_fields": "source_zero_or_omitted"
+          },
+          "message_data": {
+            "other_fields": "source_zero_or_omitted",
+            "embeds": "argument:embeds"
+          }
+        },
+        "defaults": {
+          "threadData": {
+            "Name": "name",
+            "AutoArchiveDuration": "archiveDuration",
+            "other_fields": "원본 ThreadStart zero/omitted defaults"
+          },
+          "messageData": {
+            "Embeds": "embeds",
+            "other_fields": "원본 MessageSend zero/omitted defaults"
+          }
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "GuildBanCreate",
+      "kind": "alias",
+      "signature": "func (c *Client) GuildBanCreate(ctx context.Context, guildID string, userID string, days int, options ...RequestOption) error",
+      "canonical": "GuildBanCreateWithReason",
+      "mapping": {
+        "canonicalRequest": "GuildBanCreateWithReasonRequest",
+        "projection": {
+          "guild_id": "argument:guildID",
+          "user_id": "argument:userID",
+          "days": "argument:days",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "reason": {
+            "presence": "absent"
+          }
+        },
+        "defaults": {
+          "reason": {
+            "presence": "absent",
+            "effectiveWhenBothAbsent": ""
+          }
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "GuildChannelCreate",
+      "kind": "alias",
+      "signature": "func (c *Client) GuildChannelCreate(ctx context.Context, guildID string, name string, ctype discordgo.ChannelType, options ...RequestOption) (*discordgo.Channel, error)",
+      "canonical": "GuildChannelCreateComplex",
+      "mapping": {
+        "canonicalRequest": "GuildChannelCreateComplexRequest",
+        "projection": {
+          "guild_id": "argument:guildID",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "data": {
+            "name": "argument:name",
+            "type": "argument:ctype",
+            "other_fields": "source_zero_or_omitted"
+          }
+        },
+        "defaults": {
+          "Name": "name",
+          "Type": "ctype",
+          "other_fields": "원본 GuildChannelCreateData zero/omitted defaults"
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "GuildMemberDeafen",
+      "kind": "alias",
+      "signature": "func (c *Client) GuildMemberDeafen(ctx context.Context, guildID string, userID string, deaf bool, options ...RequestOption) error",
+      "canonical": "GuildMemberEdit",
+      "mapping": {
+        "canonicalRequest": "GuildMemberEditRequest",
+        "projection": {
+          "guild_id": "argument:guildID",
+          "user_id": "argument:userID",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "data": {
+            "deaf": {
+              "argument": "deaf",
+              "presence": "present_including_false"
+            },
+            "other_fields": "unset"
+          }
+        },
+        "defaults": {
+          "deaf": "deaf 값; false도 present",
+          "other_fields": "unset"
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "GuildMemberDelete",
+      "kind": "alias",
+      "signature": "func (c *Client) GuildMemberDelete(ctx context.Context, guildID string, userID string, options ...RequestOption) error",
+      "canonical": "GuildMemberDeleteWithReason",
+      "mapping": {
+        "canonicalRequest": "GuildMemberDeleteWithReasonRequest",
+        "projection": {
+          "guild_id": "argument:guildID",
+          "user_id": "argument:userID",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "reason": {
+            "presence": "absent"
+          }
+        },
+        "defaults": {
+          "reason": {
+            "presence": "absent",
+            "effectiveWhenBothAbsent": ""
+          }
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "GuildMemberEditComplex",
+      "kind": "alias",
+      "signature": "func (c *Client) GuildMemberEditComplex(ctx context.Context, guildID string, userID string, data *GuildMemberParamsView, options ...RequestOption) (*discordgo.Member, error)",
+      "canonical": "GuildMemberEdit",
+      "mapping": {
+        "canonicalRequest": "GuildMemberEditRequest",
+        "projection": {
+          "guild_id": "argument:guildID",
+          "user_id": "argument:userID",
+          "data": "argument:data",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context"
+        },
+        "defaults": {
+          "data": "원래 GuildMemberParams를 그대로 전달합니다."
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "GuildMemberMove",
+      "kind": "alias",
+      "signature": "func (c *Client) GuildMemberMove(ctx context.Context, guildID string, userID string, channelID *string, options ...RequestOption) error",
+      "canonical": "GuildMemberEdit",
+      "mapping": {
+        "canonicalRequest": "GuildMemberEditRequest",
+        "projection": {
+          "guild_id": "argument:guildID",
+          "user_id": "argument:userID",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "data": {
+            "channel_id": {
+              "argument": "channelID",
+              "presence": "present",
+              "nil": "explicit_null"
+            },
+            "other_fields": "unset"
+          }
+        },
+        "defaults": {
+          "channel_id": "channelID: nil은 명시적 null로 연결 해제",
+          "other_fields": "unset"
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "GuildMemberMute",
+      "kind": "alias",
+      "signature": "func (c *Client) GuildMemberMute(ctx context.Context, guildID string, userID string, mute bool, options ...RequestOption) error",
+      "canonical": "GuildMemberEdit",
+      "mapping": {
+        "canonicalRequest": "GuildMemberEditRequest",
+        "projection": {
+          "guild_id": "argument:guildID",
+          "user_id": "argument:userID",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "data": {
+            "mute": {
+              "argument": "mute",
+              "presence": "present_including_false"
+            },
+            "other_fields": "unset"
+          }
+        },
+        "defaults": {
+          "mute": "mute 값; false도 present",
+          "other_fields": "unset"
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "GuildMemberTimeout",
+      "kind": "alias",
+      "signature": "func (c *Client) GuildMemberTimeout(ctx context.Context, guildID string, userID string, until *time.Time, options ...RequestOption) error",
+      "canonical": "GuildMemberEdit",
+      "mapping": {
+        "canonicalRequest": "GuildMemberEditRequest",
+        "projection": {
+          "guild_id": "argument:guildID",
+          "user_id": "argument:userID",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "data": {
+            "communication_disabled_until": {
+              "argument": "until",
+              "presence": "present",
+              "nil": "explicit_null"
+            },
+            "other_fields": "unset"
+          }
+        },
+        "defaults": {
+          "communication_disabled_until": "until: nil은 명시적 null로 timeout 해제",
+          "other_fields": "unset"
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "GuildWithCounts",
+      "kind": "alias",
+      "signature": "func (c *Client) GuildWithCounts(ctx context.Context, guildID string, options ...RequestOption) (*discordgo.Guild, error)",
+      "canonical": "Guild",
+      "mapping": {
+        "canonicalRequest": "GuildRequest",
+        "projection": {
+          "guild_id": "argument:guildID",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "with_counts": true
+        },
+        "defaults": {
+          "with_counts": true
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "InteractionResponse",
+      "kind": "alias",
+      "signature": "func (c *Client) InteractionResponse(ctx context.Context, interaction *InteractionHandle, options ...RequestOption) (*discordgo.Message, error)",
+      "canonical": "WebhookMessage",
+      "mapping": {
+        "canonicalRequest": "WebhookMessageRequest",
+        "projection": {
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "webhook_id": "interaction.app_id",
+          "credential": "interaction.credential (interaction-purpose; preserve app/channel/message binding)",
+          "message_id": "@original"
+        },
+        "defaults": {
+          "webhookID": "interaction.AppID",
+          "credentialRef": "interaction-purpose CredentialRef; raw interaction.Token 전송 금지",
+          "messageID": "@original"
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "InteractionResponseDelete",
+      "kind": "alias",
+      "signature": "func (c *Client) InteractionResponseDelete(ctx context.Context, interaction *InteractionHandle, options ...RequestOption) error",
+      "canonical": "WebhookMessageDelete",
+      "mapping": {
+        "canonicalRequest": "WebhookMessageDeleteRequest",
+        "projection": {
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "webhook_id": "interaction.app_id",
+          "credential": "interaction.credential (interaction-purpose; preserve app/channel/message binding)",
+          "message_id": "@original"
+        },
+        "defaults": {
+          "webhookID": "interaction.AppID",
+          "credentialRef": "interaction-purpose CredentialRef; raw interaction.Token 전송 금지",
+          "messageID": "@original"
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "InteractionResponseEdit",
+      "kind": "alias",
+      "signature": "func (c *Client) InteractionResponseEdit(ctx context.Context, interaction *InteractionHandle, newresp *WebhookEditPatch, options ...RequestOption) (*discordgo.Message, error)",
+      "canonical": "WebhookMessageEdit",
+      "mapping": {
+        "canonicalRequest": "WebhookMessageEditRequest",
+        "projection": {
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "webhook_id": "interaction.app_id",
+          "credential": "interaction.credential (interaction-purpose; preserve app/channel/message binding)",
+          "message_id": "@original",
+          "data": "argument:newresp"
+        },
+        "defaults": {
+          "webhookID": "interaction.AppID",
+          "credentialRef": "interaction-purpose CredentialRef; raw interaction.Token 전송 금지",
+          "messageID": "@original",
+          "data": "원본 WebhookEdit 그대로"
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "Invite",
+      "kind": "alias",
+      "signature": "func (c *Client) Invite(ctx context.Context, inviteID string, options ...RequestOption) (*discordgo.Invite, error)",
+      "canonical": "InviteComplex",
+      "mapping": {
+        "canonicalRequest": "InviteComplexRequest",
+        "projection": {
+          "invite_id": "argument:inviteID",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "guild_scheduled_event_id": "",
+          "with_counts": false,
+          "with_expiration": false
+        },
+        "defaults": {
+          "guildScheduledEventID": "",
+          "withCounts": false,
+          "withExpiration": false
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "InviteWithCounts",
+      "kind": "alias",
+      "signature": "func (c *Client) InviteWithCounts(ctx context.Context, inviteID string, options ...RequestOption) (*discordgo.Invite, error)",
+      "canonical": "InviteComplex",
+      "mapping": {
+        "canonicalRequest": "InviteComplexRequest",
+        "projection": {
+          "invite_id": "argument:inviteID",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "guild_scheduled_event_id": "",
+          "with_counts": true,
+          "with_expiration": false
+        },
+        "defaults": {
+          "guildScheduledEventID": "",
+          "withCounts": true,
+          "withExpiration": false
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "MessageThreadStart",
+      "kind": "alias",
+      "signature": "func (c *Client) MessageThreadStart(ctx context.Context, channelID string, messageID string, name string, archiveDuration int, options ...RequestOption) (*discordgo.Channel, error)",
+      "canonical": "MessageThreadStartComplex",
+      "mapping": {
+        "canonicalRequest": "MessageThreadStartComplexRequest",
+        "projection": {
+          "channel_id": "argument:channelID",
+          "message_id": "argument:messageID",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "data": {
+            "name": "argument:name",
+            "auto_archive_duration": "argument:archiveDuration",
+            "other_fields": "source_zero_or_omitted"
+          }
+        },
+        "defaults": {
+          "Name": "name",
+          "AutoArchiveDuration": "archiveDuration",
+          "other_fields": "원본 ThreadStart zero/omitted defaults"
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "RequestGuildMembersBatch",
+      "kind": "alias",
+      "signature": "func (c *Client) RequestGuildMembersBatch(ctx context.Context, guildIDs []string, query string, limit int, nonce string, presences bool, options ...RequestOption) error",
+      "canonical": "RequestGuildMembers",
+      "mapping": {
+        "canonicalRequest": "RequestGuildMembersRequest",
+        "projection": {
+          "query": "argument:query",
+          "limit": "argument:limit",
+          "nonce": "argument:nonce",
+          "presences": "argument:presences",
+          "guild_id": "each argument:guildIDs element in input order",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context"
+        },
+        "defaults": {
+          "guildIDs": "입력 순서대로 개별 canonical 호출로 분해",
+          "query_or_userIDs": "각 호출에 원본 selector를 그대로 전달",
+          "limit": "각 guild에 원본 limit",
+          "presences": "원본 presences",
+          "nonce": "각 guild에 원본 nonce; backend는 instance/guild/correlation에 안전하게 바인딩"
+        },
+        "execution": "sequential, empty input makes zero calls, stop on first error/cancellation, no rollback or automatic retry"
+      }
+    },
+    {
+      "name": "RequestGuildMembersBatchList",
+      "kind": "alias",
+      "signature": "func (c *Client) RequestGuildMembersBatchList(ctx context.Context, guildIDs []string, userIDs []string, limit int, nonce string, presences bool, options ...RequestOption) error",
+      "canonical": "RequestGuildMembersList",
+      "mapping": {
+        "canonicalRequest": "RequestGuildMembersListRequest",
+        "projection": {
+          "user_ids": "argument:userIDs",
+          "limit": "argument:limit",
+          "nonce": "argument:nonce",
+          "presences": "argument:presences",
+          "guild_id": "each argument:guildIDs element in input order",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context"
+        },
+        "defaults": {
+          "guildIDs": "입력 순서대로 개별 canonical 호출로 분해",
+          "query_or_userIDs": "각 호출에 원본 selector를 그대로 전달",
+          "limit": "각 guild에 원본 limit",
+          "presences": "원본 presences",
+          "nonce": "각 guild에 원본 nonce; backend는 instance/guild/correlation에 안전하게 바인딩"
+        },
+        "execution": "sequential, empty input makes zero calls, stop on first error/cancellation, no rollback or automatic retry"
+      }
+    },
+    {
+      "name": "ThreadStart",
+      "kind": "alias",
+      "signature": "func (c *Client) ThreadStart(ctx context.Context, channelID string, name string, typ discordgo.ChannelType, archiveDuration int, options ...RequestOption) (*discordgo.Channel, error)",
+      "canonical": "ThreadStartComplex",
+      "mapping": {
+        "canonicalRequest": "ThreadStartComplexRequest",
+        "projection": {
+          "channel_id": "argument:channelID",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "data": {
+            "name": "argument:name",
+            "auto_archive_duration": "argument:archiveDuration",
+            "other_fields": "source_zero_or_omitted",
+            "type": "argument:typ"
+          }
+        },
+        "defaults": {
+          "Name": "name",
+          "Type": "typ",
+          "AutoArchiveDuration": "archiveDuration",
+          "other_fields": "원본 ThreadStart zero/omitted defaults"
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "UpdateCustomStatus",
+      "kind": "alias",
+      "signature": "func (c *Client) UpdateCustomStatus(ctx context.Context, state string, options ...RequestOption) error",
+      "canonical": "UpdateStatusComplex",
+      "mapping": {
+        "canonicalRequest": "UpdateStatusComplexRequest",
+        "projection": {
+          "usd": {
+            "status": "online",
+            "afk": false,
+            "idle_since": "unset",
+            "activities": {
+              "emptyWhen": "state == empty",
+              "otherwise": [
+                {
+                  "type": 4,
+                  "name": "Custom Status",
+                  "state": "argument:state",
+                  "url": ""
+                }
+              ]
+            }
+          },
+          "options": "forward typed audit_log_reason/locale; context remains RPC context"
+        },
+        "defaults": {
+          "Status": "online",
+          "IdleSince": "unset",
+          "AFK": false,
+          "Activities": "state!=\"\"이면 [{Name:\"Custom Status\",Type:Custom,State:state}], 빈 문자열이면 []"
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "UpdateGameStatus",
+      "kind": "alias",
+      "signature": "func (c *Client) UpdateGameStatus(ctx context.Context, idle int, name string, options ...RequestOption) error",
+      "canonical": "UpdateStatusComplex",
+      "mapping": {
+        "canonicalRequest": "UpdateStatusComplexRequest",
+        "projection": {
+          "usd": {
+            "status": "online",
+            "afk": false,
+            "idle_since": "present(idle) if idle > 0 else unset",
+            "activities": {
+              "emptyWhen": "name == empty",
+              "otherwise": [
+                {
+                  "type": 0,
+                  "name": "argument:name",
+                  "state": "",
+                  "url": ""
+                }
+              ]
+            }
+          },
+          "options": "forward typed audit_log_reason/locale; context remains RPC context"
+        },
+        "defaults": {
+          "Status": "online (idle>0여도 원본 구현은 idle 문자열을 설정하지 않음)",
+          "IdleSince": "idle>0이면 present(idle), 그 외 unset; Listening은 항상 unset",
+          "Activities": "name!=\"\"이면 [Activity{Name:name,Type:Game,URL:url(Streaming 이외는 빈 문자열)}], 그 외 []",
+          "AFK": false
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "UpdateListeningStatus",
+      "kind": "alias",
+      "signature": "func (c *Client) UpdateListeningStatus(ctx context.Context, name string, options ...RequestOption) error",
+      "canonical": "UpdateStatusComplex",
+      "mapping": {
+        "canonicalRequest": "UpdateStatusComplexRequest",
+        "projection": {
+          "usd": {
+            "status": "online",
+            "afk": false,
+            "idle_since": "unset",
+            "activities": {
+              "emptyWhen": "name == empty",
+              "otherwise": [
+                {
+                  "type": 2,
+                  "name": "argument:name",
+                  "state": "",
+                  "url": ""
+                }
+              ]
+            }
+          },
+          "options": "forward typed audit_log_reason/locale; context remains RPC context"
+        },
+        "defaults": {
+          "Status": "online (idle>0여도 원본 구현은 idle 문자열을 설정하지 않음)",
+          "IdleSince": "idle>0이면 present(idle), 그 외 unset; Listening은 항상 unset",
+          "Activities": "name!=\"\"이면 [Activity{Name:name,Type:Listening,URL:url(Streaming 이외는 빈 문자열)}], 그 외 []",
+          "AFK": false
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "UpdateStreamingStatus",
+      "kind": "alias",
+      "signature": "func (c *Client) UpdateStreamingStatus(ctx context.Context, idle int, name string, url string, options ...RequestOption) error",
+      "canonical": "UpdateStatusComplex",
+      "mapping": {
+        "canonicalRequest": "UpdateStatusComplexRequest",
+        "projection": {
+          "usd": {
+            "status": "online",
+            "afk": false,
+            "idle_since": "present(idle) if idle > 0 else unset",
+            "activities": {
+              "emptyWhen": "name == empty",
+              "otherwise": [
+                {
+                  "type": "1 if url nonempty else 0",
+                  "name": "argument:name",
+                  "state": "",
+                  "url": "argument:url if streaming else empty"
+                }
+              ]
+            }
+          },
+          "options": "forward typed audit_log_reason/locale; context remains RPC context"
+        },
+        "defaults": {
+          "Status": "online (idle>0여도 원본 구현은 idle 문자열을 설정하지 않음)",
+          "IdleSince": "idle>0이면 present(idle), 그 외 unset; Listening은 항상 unset",
+          "Activities": "name!=\"\"이면 [Activity{Name:name,Type:Streaming if url!=\"\" else Game,URL:url(Streaming 이외는 빈 문자열)}], 그 외 []",
+          "AFK": false
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "UpdateWatchStatus",
+      "kind": "alias",
+      "signature": "func (c *Client) UpdateWatchStatus(ctx context.Context, idle int, name string, options ...RequestOption) error",
+      "canonical": "UpdateStatusComplex",
+      "mapping": {
+        "canonicalRequest": "UpdateStatusComplexRequest",
+        "projection": {
+          "usd": {
+            "status": "online",
+            "afk": false,
+            "idle_since": "present(idle) if idle > 0 else unset",
+            "activities": {
+              "emptyWhen": "name == empty",
+              "otherwise": [
+                {
+                  "type": 3,
+                  "name": "argument:name",
+                  "state": "",
+                  "url": ""
+                }
+              ]
+            }
+          },
+          "options": "forward typed audit_log_reason/locale; context remains RPC context"
+        },
+        "defaults": {
+          "Status": "online (idle>0여도 원본 구현은 idle 문자열을 설정하지 않음)",
+          "IdleSince": "idle>0이면 present(idle), 그 외 unset; Listening은 항상 unset",
+          "Activities": "name!=\"\"이면 [Activity{Name:name,Type:Watching,URL:url(Streaming 이외는 빈 문자열)}], 그 외 []",
+          "AFK": false
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "WebhookExecute",
+      "kind": "alias",
+      "signature": "func (c *Client) WebhookExecute(ctx context.Context, webhookID string, credential *corewire.CredentialRef, wait bool, data *WebhookParamsView, options ...RequestOption) (*discordgo.Message, error)",
+      "canonical": "WebhookThreadExecute",
+      "mapping": {
+        "canonicalRequest": "WebhookThreadExecuteRequest",
+        "projection": {
+          "webhook_id": "argument:webhookID",
+          "credential": "argument:token (CredentialRef, never raw token)",
+          "wait": "argument:wait",
+          "data": "argument:data",
+          "options": "forward typed audit_log_reason/locale; context remains RPC context",
+          "thread_id": ""
+        },
+        "defaults": {
+          "threadID": ""
+        },
+        "execution": "one canonical call"
+      }
+    },
+    {
+      "name": "RegisterInteractionRoutes",
+      "kind": "ownership",
+      "fullMethod": "/flexmodule.discord.v2.BackendOwnership/RegisterInteractionRoutes",
+      "signature": "func (c *Client) RegisterInteractionRoutes(ctx context.Context, claims []*wire.InteractionRouteClaim) error"
+    },
+    {
+      "name": "UnregisterInteractionRoutes",
+      "kind": "ownership",
+      "fullMethod": "/flexmodule.discord.v2.BackendOwnership/UnregisterInteractionRoutes",
+      "signature": "func (c *Client) UnregisterInteractionRoutes(ctx context.Context, claims []*wire.InteractionRouteClaim) error"
+    },
+    {
+      "name": "GetProvisionedCredentialRef",
+      "kind": "ownership",
+      "fullMethod": "/flexmodule.discord.v2.BackendOwnership/GetProvisionedCredentialRef",
+      "signature": "func (c *Client) GetProvisionedCredentialRef(ctx context.Context, bindingName string) (*corewire.CredentialRef, error)"
+    }
+  ]
+}

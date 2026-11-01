@@ -1,0 +1,195 @@
+Subject: [PATCH] Preserve Discord wire names and partial-state fixes
+
+Reason: Keep API v10 and the voice endpoint, Stage Instance wire names and generator mapping, omitted-versus-empty message components, partial thread-member safety, and format-safe REST logging/tests.
+Origin: Extracted from published Chatanium DiscordGo SDK v0.30.0,
+commit f2d1806d4599ff674163be703c0d62a23d4bb524, relative to upstream
+f43dd94faaacd5b163e9e783f14b5bd8be639fc9.
+Upstream-Status: Downstream; no upstream submission or acceptance is recorded
+by this patch's source. No additional authorship or review is asserted.
+Module: github.com/bwmarrin/discordgo (upstream identity retained)
+
+diff --git a/endpoints.go b/endpoints.go
+--- a/endpoints.go
++++ b/endpoints.go
+@@ -14,7 +14,7 @@
+ import "strconv"
+ 
+ // APIVersion is the Discord API version used for the REST and Websocket API.
+-var APIVersion = "9"
++var APIVersion = "10"
+ 
+ // Known Discord API Endpoints.
+ var (
+@@ -45,7 +45,7 @@
+ 	EndpointCDNGuilds       = EndpointCDN + "guilds/"
+ 	EndpointCDNRoleIcons    = EndpointCDN + "role-icons/"
+ 
+-	EndpointVoice        = EndpointAPI + "/voice/"
++	EndpointVoice        = EndpointAPI + "voice/"
+ 	EndpointVoiceRegions = EndpointVoice + "regions"
+ 
+ 	EndpointUser               = func(uID string) string { return EndpointUsers + uID }
+diff --git a/eventhandlers.go b/eventhandlers.go
+--- a/eventhandlers.go
++++ b/eventhandlers.go
+@@ -64,9 +64,9 @@
+ 	rateLimitEventType                           = "__RATE_LIMIT__"
+ 	readyEventType                               = "READY"
+ 	resumedEventType                             = "RESUMED"
+-	stageInstanceEventCreateEventType            = "STAGE_INSTANCE_EVENT_CREATE"
+-	stageInstanceEventDeleteEventType            = "STAGE_INSTANCE_EVENT_DELETE"
+-	stageInstanceEventUpdateEventType            = "STAGE_INSTANCE_EVENT_UPDATE"
++	stageInstanceEventCreateEventType            = "STAGE_INSTANCE_CREATE"
++	stageInstanceEventDeleteEventType            = "STAGE_INSTANCE_DELETE"
++	stageInstanceEventUpdateEventType            = "STAGE_INSTANCE_UPDATE"
+ 	subscriptionCreateEventType                  = "SUBSCRIPTION_CREATE"
+ 	subscriptionDeleteEventType                  = "SUBSCRIPTION_DELETE"
+ 	subscriptionUpdateEventType                  = "SUBSCRIPTION_UPDATE"
+diff --git a/message.go b/message.go
+--- a/message.go
++++ b/message.go
+@@ -175,9 +175,14 @@
+ 		return err
+ 	}
+ 	*m = Message(v.message)
+-	m.Components = make([]MessageComponent, len(v.RawComponents))
+-	for i, v := range v.RawComponents {
+-		m.Components[i] = v.MessageComponent
++	// An omitted components field must remain nil so a partial MESSAGE_UPDATE
++	// does not erase the cached components. A present [] remains non-nil and
++	// therefore still explicitly clears them in State.MessageAdd.
++	if v.RawComponents != nil {
++		m.Components = make([]MessageComponent, len(v.RawComponents))
++		for i, v := range v.RawComponents {
++			m.Components[i] = v.MessageComponent
++		}
+ 	}
+ 	return err
+ }
+diff --git a/message_partial_test.go b/message_partial_test.go
+new file mode 100644
+--- /dev/null
++++ b/message_partial_test.go
+@@ -0,0 +1,56 @@
++package discordgo
++
++import (
++	"encoding/json"
++	"testing"
++)
++
++func TestMessagePartialComponentsPreserveOrReplaceCache(t *testing.T) {
++	for _, test := range []struct {
++		name, payload, label string
++		present              bool
++		count                int
++	}{
++		{"omitted", `{"id":"m","channel_id":"c","attachments":[]}`, "old button", false, 1},
++		{"explicit-empty", `{"id":"m","channel_id":"c","components":[]}`, "", true, 0},
++		{"replacement", `{"id":"m","channel_id":"c","components":[{"type":2,"style":1,"label":"new button","custom_id":"button"}]}`, "new button", true, 1},
++	} {
++		t.Run(test.name, func(t *testing.T) {
++			state := NewState()
++			state.MaxMessageCount = 5
++			if err := state.GuildAdd(&Guild{ID: "g"}); err != nil {
++				t.Fatal(err)
++			}
++			if err := state.ChannelAdd(&Channel{ID: "c", GuildID: "g"}); err != nil {
++				t.Fatal(err)
++			}
++			old := &Message{ID: "m", ChannelID: "c", Components: []MessageComponent{&Button{Label: "old button"}}}
++			if err := state.MessageAdd(old); err != nil {
++				t.Fatal(err)
++			}
++			var update MessageUpdate
++			if err := json.Unmarshal([]byte(test.payload), &update); err != nil {
++				t.Fatal(err)
++			}
++			if (update.Components != nil) != test.present {
++				t.Fatal("message decoder erased component presence")
++			}
++			if err := state.MessageAdd(update.Message); err != nil {
++				t.Fatal(err)
++			}
++			cached, err := state.Message("c", "m")
++			if err != nil {
++				t.Fatal(err)
++			}
++			if len(cached.Components) != test.count {
++				t.Fatalf("cached component count = %d, want %d", len(cached.Components), test.count)
++			}
++			if test.count != 0 && cached.Components[0].(*Button).Label != test.label {
++				t.Fatal("partial component update changed the wrong cache value")
++			}
++			if test.present && test.count == 0 && cached.Components == nil {
++				t.Fatal("explicit empty component set became omitted")
++			}
++		})
++	}
++}
+diff --git a/restapi.go b/restapi.go
+--- a/restapi.go
++++ b/restapi.go
+@@ -304,7 +304,7 @@
+ 		}
+ 	case http.StatusUnauthorized:
+ 		if strings.Index(s.Token, "Bot ") != 0 {
+-			s.log(LogInformational, ErrUnauthorized.Error())
++			s.log(LogInformational, "%s", ErrUnauthorized.Error())
+ 			err = ErrUnauthorized
+ 		}
+ 		fallthrough
+diff --git a/restapi_test.go b/restapi_test.go
+--- a/restapi_test.go
++++ b/restapi_test.go
+@@ -95,7 +95,7 @@
+ 
+ 	_, err := dg.UserChannelCreate(envAdmin)
+ 	if err != nil {
+-		t.Errorf(err.Error())
++		t.Error(err)
+ 	}
+ 
+ 	// TODO make sure the channel was added
+@@ -108,7 +108,7 @@
+ 
+ 	_, err := dg.UserGuilds(10, "", "", false)
+ 	if err != nil {
+-		t.Errorf(err.Error())
++		t.Error(err)
+ 	}
+ }
+ 
+diff --git a/state.go b/state.go
+--- a/state.go
++++ b/state.go
+@@ -643,7 +643,9 @@
+ 
+ 	for _, addedMember := range tmu.AddedMembers {
+ 		thread.Members = append(thread.Members, addedMember.ThreadMember)
+-		if addedMember.Member != nil {
++		// Embedded partial members may omit User. Preserve the event, but do
++		// not manufacture an identity to insert an unkeyable cache entry.
++		if addedMember.Member != nil && addedMember.Member.User != nil {
+ 			err = s.memberAdd(addedMember.Member)
+ 			if err != nil {
+ 				return err
+diff --git a/tools/cmd/eventhandlers/main.go b/tools/cmd/eventhandlers/main.go
+--- a/tools/cmd/eventhandlers/main.go
++++ b/tools/cmd/eventhandlers/main.go
+@@ -115,6 +115,15 @@
+ 	if !isDiscordEvent(name) {
+ 		return "__" + constCase(name) + "__"
+ 	}
++	// The SDK wrapper names include Event; Discord's wire names do not.
++	switch name {
++	case "StageInstanceEventCreate":
++		return "STAGE_INSTANCE_CREATE"
++	case "StageInstanceEventDelete":
++		return "STAGE_INSTANCE_DELETE"
++	case "StageInstanceEventUpdate":
++		return "STAGE_INSTANCE_UPDATE"
++	}
+ 
+ 	return constCase(name)
+ }

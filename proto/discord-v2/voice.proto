@@ -1,0 +1,245 @@
+syntax = "proto3";
+
+package flexmodule.discord.v2;
+option go_package = "github.com/thirdscam/chatanium/proto/discord-v2;discordv2";
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+// Optional backend service. Ownership is exclusively the authenticated instance;
+// requests never select an owner. This schema does not enable a voice backend.
+service VoiceService {
+  // Admission and channel reservation, not transport readiness or delivery.
+  rpc CreatePlaybackJob(CreatePlaybackJobRequest) returns (PlaybackSnapshot);
+  rpc StreamPlayback(stream PlaybackInput) returns (stream PlaybackSnapshot);
+  // Completes after the single in-flight sender frame reaches its boundary.
+  rpc PausePlaybackJob(JobRequest) returns (PlaybackSnapshot);
+  rpc ResumePlaybackJob(JobRequest) returns (PlaybackSnapshot);
+  rpc CancelPlaybackJob(JobRequest) returns (PlaybackSnapshot);
+  // Only authenticated instance-owned jobs, bounded and scheduling-ordered.
+  rpc GetPlaybackQueue(PlaybackQueueRequest) returns (PlaybackQueue);
+  // Receive-only: does not create a playback job or require playback permission.
+  rpc SubscribeVoice(SubscribeVoiceRequest) returns (stream VoiceReceiveEvent);
+  rpc UnsubscribeVoice(UnsubscribeVoiceRequest) returns (VoiceSubscriptionSnapshot);
+}
+
+message VoicePlaybackConstraints {
+  // Required typed grant constraint; missing is not unlimited.
+  sint32 max_priority = 1;
+}
+
+enum OpusFormat {
+  OPUS_FORMAT_UNSPECIFIED = 0;
+  // Exactly 960 samples at 48 kHz, verified from the packet, not caller metadata.
+  OPUS_FORMAT_OPUS_48KHZ_20MS = 1;
+}
+
+enum PlaybackState {
+  PLAYBACK_STATE_UNSPECIFIED = 0;
+  PLAYBACK_STATE_QUEUED = 1;
+  PLAYBACK_STATE_RUNNING = 2;
+  PLAYBACK_STATE_PAUSED = 3;
+  PLAYBACK_STATE_COMPLETED = 4;
+  PLAYBACK_STATE_CANCELLED = 5;
+  PLAYBACK_STATE_FAILED = 6;
+}
+
+enum PlaybackReason {
+  PLAYBACK_REASON_UNSPECIFIED = 0;
+  PLAYBACK_REASON_WAITING_CONNECTION = 1;
+  PLAYBACK_REASON_WAITING_INPUT = 2;
+  PLAYBACK_REASON_WAITING_PRIORITY = 3;
+  PLAYBACK_REASON_PREEMPTED = 4;
+  PLAYBACK_REASON_PLAYING = 5;
+  PLAYBACK_REASON_OWNER_PAUSED = 6;
+  PLAYBACK_REASON_INPUT_DRAINED = 7;
+  PLAYBACK_REASON_OWNER_CANCELLED = 8;
+  PLAYBACK_REASON_STREAM_CANCELLED = 9;
+  PLAYBACK_REASON_INSTANCE_STOPPED = 10;
+  PLAYBACK_REASON_ERROR = 11;
+  PLAYBACK_REASON_WAITING_DAVE = 12;
+}
+
+// Voice-prefixed to avoid collision with Discord monetization subscription types.
+enum VoiceSubscriptionState {
+  VOICE_SUBSCRIPTION_STATE_UNSPECIFIED = 0;
+  VOICE_SUBSCRIPTION_STATE_JOINING = 1;
+  VOICE_SUBSCRIPTION_STATE_ACTIVE = 2;
+  VOICE_SUBSCRIPTION_STATE_CLOSED = 3;
+  VOICE_SUBSCRIPTION_STATE_FAILED = 4;
+}
+
+enum VoiceErrorReason {
+  VOICE_ERROR_REASON_UNSPECIFIED = 0;
+  VOICE_ERROR_REASON_CHANNEL_CONFLICT = 1;
+  VOICE_ERROR_REASON_INPUT_TRUNCATED = 2;
+  VOICE_ERROR_REASON_INVALID_OPUS = 3;
+  VOICE_ERROR_REASON_UNSUPPORTED_FORMAT = 4;
+  VOICE_ERROR_REASON_INVALID_SEQUENCE = 5;
+  VOICE_ERROR_REASON_INVALID_FINAL_SEQUENCE = 6;
+  VOICE_ERROR_REASON_CREDIT_EXCEEDED = 7;
+  VOICE_ERROR_REASON_INVALID_LIFETIME = 8;
+  VOICE_ERROR_REASON_INVALID_FILTER = 9;
+  VOICE_ERROR_REASON_INVALID_STATE = 10;
+  VOICE_ERROR_REASON_PRODUCER_ALREADY_BOUND = 11;
+  VOICE_ERROR_REASON_INPUT_AFTER_END = 12;
+  VOICE_ERROR_REASON_DRAINING = 13;
+  VOICE_ERROR_REASON_QUOTA_EXCEEDED = 14;
+  VOICE_ERROR_REASON_RECEIVE_OVERFLOW = 15;
+  VOICE_ERROR_REASON_LIFETIME_EXCEEDED = 16;
+  VOICE_ERROR_REASON_BIND_TIMEOUT = 17;
+  VOICE_ERROR_REASON_INPUT_TIMEOUT = 18;
+  VOICE_ERROR_REASON_CONNECTION_TIMEOUT = 19;
+  VOICE_ERROR_REASON_RECEIVE_TIMEOUT = 20;
+  VOICE_ERROR_REASON_SUBMISSION_TIMEOUT = 21;
+  VOICE_ERROR_REASON_RECEIPT_TIMEOUT = 22;
+  VOICE_ERROR_REASON_CLEANUP_TIMEOUT = 23;
+  VOICE_ERROR_REASON_OWNER_CANCELLED = 24;
+  VOICE_ERROR_REASON_STREAM_CANCELLED = 25;
+  VOICE_ERROR_REASON_INSTANCE_STOPPED = 26;
+  VOICE_ERROR_REASON_CONNECTION_LOST = 27;
+  VOICE_ERROR_REASON_CHANNEL_CHANGED = 28;
+  VOICE_ERROR_REASON_TRANSPORT_FAILURE = 29;
+  VOICE_ERROR_REASON_VOICE_TRANSPORT_UNSUPPORTED = 30;
+  VOICE_ERROR_REASON_DAVE_NOT_READY = 31;
+  VOICE_ERROR_REASON_INTERNAL = 32;
+  VOICE_ERROR_REASON_UNAUTHENTICATED = 33;
+  VOICE_ERROR_REASON_PERMISSION_DENIED = 34;
+  VOICE_ERROR_REASON_NOT_FOUND = 35;
+  VOICE_ERROR_REASON_SEQUENCE_EXHAUSTED = 36;
+  VOICE_ERROR_REASON_STALE_CONTINUATION = 37;
+  // Separate Discord's actual permission rejection from the host grant/scope check.
+  VOICE_ERROR_REASON_DISCORD_PERMISSION_DENIED = 38;
+}
+
+enum VoiceFailureStage {
+  VOICE_FAILURE_STAGE_UNSPECIFIED = 0;
+  VOICE_FAILURE_STAGE_ADMISSION = 1;
+  VOICE_FAILURE_STAGE_CONNECTION = 2;
+  VOICE_FAILURE_STAGE_DAVE = 3;
+  VOICE_FAILURE_STAGE_BIND = 4;
+  VOICE_FAILURE_STAGE_INPUT = 5;
+  VOICE_FAILURE_STAGE_SUBMISSION = 6;
+  VOICE_FAILURE_STAGE_UDP_WRITE = 7;
+  VOICE_FAILURE_STAGE_RECEIVE = 8;
+  VOICE_FAILURE_STAGE_CONTROL = 9;
+  VOICE_FAILURE_STAGE_CLEANUP = 10;
+}
+
+message VoiceError {
+  // Numeric google.rpc.Code / gRPC status code, never an HTTP status.
+  int32 grpc_code = 1;
+  VoiceErrorReason reason = 2;
+  VoiceFailureStage stage = 3;
+  // Sanitized diagnostic: no credentials, headers, socket paths, or key state.
+  string message = 4;
+  string guild_id = 5;
+  string channel_id = 6;
+  string job_id = 7;
+  string subscription_id = 8;
+  // A failed submission may have reached the sender; never automatically replay.
+  bool may_have_submitted = 9;
+}
+
+message CreatePlaybackJobRequest {
+  string guild_id = 1;
+  string channel_id = 2;
+  sint32 priority = 3;
+  // Finite positive lifetime, additionally bounded by required operator settings.
+  google.protobuf.Duration lifetime = 4;
+  OpusFormat format = 5;
+}
+
+message JobRequest { string job_id = 1; }
+
+message PlaybackSnapshot {
+  string job_id = 1;
+  string guild_id = 2;
+  string channel_id = 3;
+  sint32 priority = 4;
+  PlaybackState state = 5;
+  PlaybackReason reason = 6;
+  // Runtime validated-buffer acceptance. Not Send() success or UDP delivery.
+  uint64 last_accepted_sequence = 7;
+  // Ownership handed to the sole paced local sender, not yet written to UDP.
+  uint64 last_submitted_sequence = 8;
+  // Successful local UDP.Write receipt, not Discord acknowledgement or listening.
+  // Always written <= submitted <= accepted. Zero means no frame at that stage.
+  uint64 last_udp_written_sequence = 9;
+  bool input_ended = 10;
+  // Meaningful only when input_ended; explicit zero denotes an empty job.
+  uint64 final_sequence = 11;
+  // Cumulative monotonic limits in sequence and total Opus bytes, not deltas.
+  // Credits reserve finite memory; pause/preemption stops issuance, not revocation.
+  uint64 credit_through_sequence = 12;
+  uint64 credit_through_bytes = 13;
+  google.protobuf.Timestamp expires_at = 14;
+  VoiceError terminal_error = 15;
+}
+
+message PlaybackInput {
+  // Exactly one. The first message must be bind; only one producer per job.
+  // EndInput must precede half-close. No rebind/replay or input after EndInput.
+  oneof part {
+    JobRequest bind = 1;
+    OpusFrame frame = 2;
+    PlaybackEnd end_input = 3;
+  }
+}
+
+message OpusFrame {
+  // Starts at one, exactly previous accepted + 1, never wraps; both credit limits apply.
+  uint64 sequence = 1;
+  bytes opus = 2;
+}
+message PlaybackEnd {
+  // Must equal last accepted; completion additionally waits for the final UDP receipt.
+  uint64 final_sequence = 1;
+}
+message PlaybackQueueRequest {
+  string guild_id = 1;
+  uint32 limit = 2;
+  // Bound to authenticated instance, guild and query generation; bounded response.
+  string continuation = 3;
+}
+message PlaybackQueue {
+  repeated PlaybackSnapshot jobs = 1;
+  string next_continuation = 2;
+}
+message SubscribeVoiceRequest {
+  string guild_id = 1;
+  string channel_id = 2;
+  google.protobuf.Duration lifetime = 3;
+  // Empty means all authorized channel packets; finite filter count is required.
+  repeated uint32 ssrcs = 4;
+}
+message VoicePacket {
+  string subscription_id = 1;
+  // Do not invent a user identity for an uncertain SSRC.
+  uint32 ssrc = 2;
+  // Original RTP sequence (16-bit range), separate from job/receive sequences.
+  uint32 rtp_sequence = 3;
+  uint32 rtp_timestamp = 4;
+  uint64 receive_sequence = 5;
+  google.protobuf.Timestamp received_at = 6;
+  bytes opus = 7;
+}
+message VoiceReceiveEvent {
+  // First ready carries JOINING and the reservation ID; ACTIVE follows readiness.
+  // No packet until transport and per-sender DAVE authentication have succeeded.
+  // Overflow/slow readers terminate explicitly, never masquerade as normal loss.
+  oneof event {
+    VoiceSubscriptionSnapshot ready = 1;
+    VoicePacket packet = 2;
+    VoiceSubscriptionSnapshot terminal = 3;
+  }
+}
+message VoiceSubscriptionSnapshot {
+  string subscription_id = 1;
+  string guild_id = 2;
+  string channel_id = 3;
+  VoiceSubscriptionState state = 4;
+  google.protobuf.Timestamp expires_at = 5;
+  VoiceError terminal_error = 6;
+}
+message UnsubscribeVoiceRequest { string subscription_id = 1; }

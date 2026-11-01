@@ -1,0 +1,2604 @@
+Subject: [PATCH] Preserve context-aware bounded Gateway dispatch
+
+Reason: Keep cancellable Gateway lifecycle/writes, bounded frame and decoded ingress, dispatch observer/context contracts, state synchronization and main-Gateway voice handoff. This patch is coupled to the following native voice transport patch; apply the complete ordered stack.
+Origin: Extracted from published Chatanium DiscordGo SDK v0.30.0,
+commit f2d1806d4599ff674163be703c0d62a23d4bb524, relative to upstream
+f43dd94faaacd5b163e9e783f14b5bd8be639fc9.
+Upstream-Status: Downstream; no upstream submission or acceptance is recorded
+by this patch's source. No additional authorship or review is asserted.
+Module: github.com/bwmarrin/discordgo (upstream identity retained)
+
+diff --git a/discord.go b/discord.go
+--- a/discord.go
++++ b/discord.go
+@@ -33,21 +33,24 @@
+ 
+ 	// Create an empty Session interface.
+ 	s = &Session{
+-		State:                              NewState(),
+-		Ratelimiter:                        NewRatelimiter(),
+-		StateEnabled:                       true,
+-		Compress:                           true,
+-		ShouldReconnectOnError:             true,
+-		ShouldReconnectVoiceOnSessionError: true,
+-		ShouldRetryOnRateLimit:             true,
+-		ShardID:                            0,
+-		ShardCount:                         1,
+-		MaxRestRetries:                     3,
+-		Client:                             &http.Client{Timeout: (20 * time.Second)},
+-		Dialer:                             websocket.DefaultDialer,
+-		UserAgent:                          "DiscordBot (https://github.com/bwmarrin/discordgo, v" + VERSION + ")",
+-		sequence:                           new(int64),
+-		LastHeartbeatAck:                   time.Now().UTC(),
++		State:                  NewState(),
++		Ratelimiter:            NewRatelimiter(),
++		StateEnabled:           true,
++		Compress:               true,
++		ShouldReconnectOnError: true,
++		ShouldRetryOnRateLimit: true,
++		ShardID:                0,
++		ShardCount:             1,
++		MaxRestRetries:         3,
++		Client:                 &http.Client{Timeout: (20 * time.Second)},
++		Dialer:                 websocket.DefaultDialer,
++		UserAgent:              "DiscordBot (https://github.com/bwmarrin/discordgo, v" + VERSION + ")",
++		sequence:               new(int64),
++		LastHeartbeatAck:       time.Now().UTC(),
++		// Ordinary standalone defaults; hosts explicitly configure their own
++		// ingress bounds with ConfigureGatewayIngress before opening.
++		gatewayFrameMaxBytes:   defaultGatewayFrameMaxBytes,
++		gatewayDecodedMaxBytes: defaultGatewayDecodedMaxBytes,
+ 	}
+ 
+ 	// Initialize the Identify Package with defaults
+diff --git a/event.go b/event.go
+--- a/event.go
++++ b/event.go
+@@ -187,11 +187,13 @@
+ // Handles an event type by calling internal methods, firing handlers and firing the
+ // interface{} event.
+ func (s *Session) handleEvent(t string, i interface{}) {
+-	s.handlersMu.RLock()
+-	defer s.handlersMu.RUnlock()
+-
+-	// All events are dispatched internally first.
+ 	s.onInterface(i)
++	s.handleEventHandlers(t, i)
++}
++
++func (s *Session) handleEventHandlers(t string, i interface{}) {
++	s.handlersMu.Lock()
++	defer s.handlersMu.Unlock()
+ 
+ 	// Then they are dispatched to anyone handling interface{} events.
+ 	s.handle(interfaceEventType, i)
+@@ -229,9 +231,9 @@
+ 	case *GuildUpdate:
+ 		setGuildIds(t.Guild)
+ 	case *VoiceServerUpdate:
+-		go s.onVoiceServerUpdate(t)
++		_ = s.acceptVoiceServer(t)
+ 	case *VoiceStateUpdate:
+-		go s.onVoiceStateUpdate(t)
++		_ = s.acceptVoiceState(t)
+ 	}
+ 	err := s.State.OnInterface(s, i)
+ 	if err != nil {
+@@ -241,6 +243,8 @@
+ 
+ // onReady handles the ready event.
+ func (s *Session) onReady(r *Ready) {
++	s.Lock()
++	defer s.Unlock()
+ 
+ 	// Store the SessionID within the Session struct.
+ 	s.sessionID = r.SessionID
+diff --git a/gateway_context.go b/gateway_context.go
+new file mode 100644
+--- /dev/null
++++ b/gateway_context.go
+@@ -0,0 +1,216 @@
++package discordgo
++
++import (
++	"context"
++	"encoding/json"
++	"errors"
++	"io"
++	"net/http"
++	"net/url"
++	"strings"
++	"sync"
++	"time"
++
++	"github.com/gorilla/websocket"
++)
++
++// gatewayMutex is zero-value usable. Unlike sync.Mutex, waiting for the main
++// Gateway's writer or connection lifecycle can be canceled before dispatch.
++type gatewayMutex struct {
++	once sync.Once
++	gate chan struct{}
++}
++
++func (m *gatewayMutex) lockContext(ctx context.Context) error {
++	m.once.Do(func() { m.gate = make(chan struct{}, 1) })
++	if err := ctx.Err(); err != nil {
++		return err
++	}
++	select {
++	case m.gate <- struct{}{}:
++		if err := ctx.Err(); err != nil {
++			m.Unlock()
++			return err
++		}
++		return nil
++	case <-ctx.Done():
++		return ctx.Err()
++	}
++}
++
++func (m *gatewayMutex) tryLock() bool {
++	m.once.Do(func() { m.gate = make(chan struct{}, 1) })
++	select {
++	case m.gate <- struct{}{}:
++		return true
++	default:
++		return false
++	}
++}
++func (m *gatewayMutex) Lock()   { _ = m.lockContext(context.Background()) }
++func (m *gatewayMutex) Unlock() { <-m.gate }
++
++// cancelGatewayIO interrupts real socket I/O, rather than leaving a worker
++// running after its caller has returned. Its cleanup joins an already-running
++// cancellation callback before the connection/deadlines can be reused.
++func cancelGatewayIO(ctx context.Context, conn *websocket.Conn) func() {
++	if ctx.Done() == nil {
++		return func() {}
++	}
++	done := make(chan struct{})
++	stop := context.AfterFunc(ctx, func() { _ = conn.Close(); close(done) })
++	var once sync.Once
++	return func() {
++		once.Do(func() {
++			if !stop() {
++				<-done
++			}
++		})
++	}
++}
++
++func gatewayContextError(ctx context.Context, err error) error {
++	if ctx.Err() != nil {
++		return ctx.Err()
++	}
++	if deadline, ok := ctx.Deadline(); err != nil && ok && !time.Now().Before(deadline) {
++		return context.DeadlineExceeded
++	}
++	return err
++}
++
++func (s *Session) gatewayWrite(ctx context.Context, conn *websocket.Conn, data interface{}) error {
++	return s.gatewayWriteFrame(ctx, conn, 0, nil, data)
++}
++
++func (s *Session) gatewayWriteFrame(ctx context.Context, conn *websocket.Conn, kind int, payload []byte, data interface{}) error {
++	if err := s.wsMutex.lockContext(ctx); err != nil {
++		return err
++	}
++	defer s.wsMutex.Unlock()
++	if err := ctx.Err(); err != nil {
++		return err
++	}
++	if conn == nil {
++		s.RLock()
++		conn = s.wsConn
++		s.RUnlock()
++	}
++	if conn == nil {
++		return ErrWSNotFound
++	}
++	deadline, _ := ctx.Deadline()
++	if err := conn.SetWriteDeadline(deadline); err != nil {
++		return err
++	}
++	finish := cancelGatewayIO(ctx, conn)
++	var err error
++	if kind == 0 {
++		err = conn.WriteJSON(data)
++	} else {
++		err = conn.WriteMessage(kind, payload)
++	}
++	finish()
++	if contextErr := gatewayContextError(ctx, err); contextErr != nil {
++		return contextErr
++	}
++	if err == nil {
++		err = conn.SetWriteDeadline(time.Time{})
++	}
++	return err
++}
++
++// gatewayContext performs only the connection bootstrap GET. It deliberately
++// does not enter the legacy REST rate limiter's non-cancellable lock/sleep or
++// retry path. The ordinary REST API methods retain their existing behavior.
++func (s *Session) gatewayContext(ctx context.Context) (string, error) {
++	req, err := http.NewRequestWithContext(ctx, http.MethodGet, EndpointGateway, nil)
++	if err != nil {
++		return "", errors.New("invalid gateway discovery endpoint")
++	}
++	if req.URL.Scheme != "https" {
++		return "", errors.New("gateway discovery requires HTTPS")
++	}
++	req.Header.Set("User-Agent", s.UserAgent)
++	if s.Client == nil {
++		return "", errors.New("gateway HTTP client is nil")
++	}
++	client := *s.Client
++	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
++	resp, err := client.Do(req)
++	if err != nil {
++		return "", err
++	}
++	defer resp.Body.Close()
++	if resp.StatusCode != http.StatusOK {
++		return "", errors.New("gateway discovery failed")
++	}
++	// Discovery contains only one URL; bound this bootstrap response separately
++	// from the host's independently configured REST response transport.
++	const maxDiscoveryBytes = 1 << 20
++	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxDiscoveryBytes+1))
++	if err != nil {
++		return "", err
++	}
++	if len(raw) > maxDiscoveryBytes {
++		return "", errors.New("gateway discovery response too large")
++	}
++	var result struct {
++		URL string `json:"url"`
++	}
++	if err := json.Unmarshal(raw, &result); err != nil {
++		return "", errors.New("invalid gateway discovery response")
++	}
++	if _, err := gatewayURL(result.URL); err != nil {
++		return "", err
++	}
++	return strings.TrimRight(result.URL, "/") + "/", nil
++}
++
++func gatewayURL(base string) (string, error) {
++	u, err := url.Parse(base)
++	if err != nil || u.Scheme != "wss" || u.Host == "" || u.User != nil || u.Fragment != "" {
++		return "", errors.New("gateway requires a valid secure websocket URL")
++	}
++	q := u.Query()
++	q.Set("v", APIVersion)
++	q.Set("encoding", "json")
++	u.RawQuery = q.Encode()
++	return u.String(), nil
++}
++
++// UpdateStatusComplexContext sends one status update. Success means the socket
++// write completed, not that Discord acknowledged the new status. A canceled
++// in-flight write closes its connection because its remote outcome is unknown.
++func (s *Session) UpdateStatusComplexContext(ctx context.Context, usd UpdateStatusData) error {
++	if usd.Activities == nil {
++		usd.Activities = []*Activity{}
++	}
++	return s.gatewayWrite(ctx, nil, updateStatusOp{3, usd})
++}
++
++// RequestGuildMembersContext requests members of exactly one guild, with the
++// original query/limit/nonce semantics. It never retries the mutation.
++func (s *Session) RequestGuildMembersContext(ctx context.Context, guildID, query string, limit int, nonce string, presences bool) error {
++	return s.gatewayWrite(ctx, nil, requestGuildMembersOp{8, requestGuildMembersData{GuildID: guildID, Query: &query, Limit: limit, Nonce: nonce, Presences: presences}})
++}
++
++// RequestGuildMembersListContext is the user-ID selector variant of the same
++// single-guild operation; an empty list remains a present list, not a query.
++func (s *Session) RequestGuildMembersListContext(ctx context.Context, guildID string, userIDs []string, limit int, nonce string, presences bool) error {
++	if userIDs == nil {
++		userIDs = []string{}
++	}
++	return s.gatewayWrite(ctx, nil, requestGuildMembersOp{8, requestGuildMembersData{GuildID: guildID, UserIDs: &userIDs, Limit: limit, Nonce: nonce, Presences: presences}})
++}
++
++// ChannelVoiceJoinManualContext sends the typed voice-state update on the
++// shared main Gateway, for a host-owned voice transport. Empty cID disconnects
++// with JSON null. It neither opens a voice socket nor retries the update.
++func (s *Session) ChannelVoiceJoinManualContext(ctx context.Context, gID, cID string, mute, deaf bool) error {
++	var channelID *string
++	if cID != "" {
++		channelID = &cID
++	}
++	return s.gatewayWrite(ctx, nil, voiceChannelJoinOp{4, voiceChannelJoinData{&gID, channelID, mute, deaf}})
++}
+diff --git a/gateway_context_test.go b/gateway_context_test.go
+new file mode 100644
+--- /dev/null
++++ b/gateway_context_test.go
+@@ -0,0 +1,296 @@
++package discordgo
++
++import (
++	"context"
++	"crypto/tls"
++	"crypto/x509"
++	"encoding/json"
++	"errors"
++	"net/http"
++	"net/http/httptest"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/gorilla/websocket"
++)
++
++func TestGatewayContextAdmissionCancellation(t *testing.T) {
++	s, err := New("Bot host-only")
++	if err != nil {
++		t.Fatal(err)
++	}
++	s.wsMutex.Lock()
++	ctx, cancel := context.WithCancel(context.Background())
++	cancel()
++	if err := s.UpdateStatusComplexContext(ctx, UpdateStatusData{}); !errors.Is(err, context.Canceled) {
++		t.Fatalf("writer admission: %v", err)
++	}
++	s.wsMutex.Unlock()
++	s.wsLifecycle.Lock()
++	if err := s.OpenContext(ctx); !errors.Is(err, context.Canceled) {
++		t.Fatalf("open admission: %v", err)
++	}
++	s.wsLifecycle.Unlock()
++	if err := s.UpdateStatusComplexContext(context.Background(), UpdateStatusData{}); !errors.Is(err, ErrWSNotFound) {
++		t.Fatalf("missing socket: %v", err)
++	}
++}
++
++func TestGatewayOpenContextAbortsHandshake(t *testing.T) {
++	exited := make(chan struct{})
++	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
++		if err != nil {
++			return
++		}
++		defer close(exited)
++		defer conn.Close()
++		// Deliberately withhold Hello. Cancellation must close actual I/O.
++		_, _, _ = conn.ReadMessage()
++	}))
++	defer server.Close()
++	roots := x509.NewCertPool()
++	roots.AddCert(server.Certificate())
++	s, err := New("Bot host-only")
++	if err != nil {
++		t.Fatal(err)
++	}
++	s.Dialer = &websocket.Dialer{TLSClientConfig: &tls.Config{RootCAs: roots}}
++	s.gateway = "wss" + strings.TrimPrefix(server.URL, "https") + "/"
++	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
++	defer cancel()
++	if err := s.OpenContext(ctx); !errors.Is(err, context.DeadlineExceeded) {
++		t.Fatalf("handshake cancellation: %v", err)
++	}
++	select {
++	case <-exited:
++	case <-time.After(time.Second):
++		t.Fatal("canceled handshake left server socket alive")
++	}
++	if s.wsConn != nil {
++		t.Fatal("failed handshake published a connection")
++	}
++}
++
++func TestGatewayURLNormalizationAndSecurity(t *testing.T) {
++	target, err := gatewayURL("wss://gateway.discord.gg/?v=9&encoding=etf")
++	if err != nil || target != "wss://gateway.discord.gg/?encoding=json&v=10" {
++		t.Fatalf("Gateway version: %q %v", target, err)
++	}
++	for _, insecure := range []string{"ws://gateway.discord.gg/", "https://gateway.discord.gg/", "wss://user:secret@gateway.discord.gg/"} {
++		if _, err := gatewayURL(insecure); err == nil {
++			t.Fatal("accepted insecure Gateway URL")
++		}
++	}
++}
++
++func TestGatewayObserverRawOrderingAndDetachedBefore(t *testing.T) {
++	s, err := New("Bot host-only")
++	if err != nil {
++		t.Fatal(err)
++	}
++	s.SyncEvents = true
++	s.State.MaxMessageCount = 5
++	if err := s.State.GuildAdd(&Guild{ID: "g"}); err != nil {
++		t.Fatal(err)
++	}
++	if err := s.State.ChannelAdd(&Channel{ID: "c", GuildID: "g", Members: []*ThreadMember{{ID: "thread-member"}}}); err != nil {
++		t.Fatal(err)
++	}
++	old := &Message{ID: "m", ChannelID: "c", Content: "old", Author: &User{ID: "u", Username: "original"}, Components: []MessageComponent{&Button{Label: "old button"}}}
++	if err := s.State.MessageAdd(old); err != nil {
++		t.Fatal(err)
++	}
++	raw := `{"content":"","id":"m","channel_id":"c","attachments":[],"flags":0}`
++	observed := 0
++	var before *Message
++	s.SetDispatchObserver(func(session *Session, event *Event, decodeErr error) {
++		if decodeErr != nil {
++			t.Fatal(decodeErr)
++		}
++		if event.Type != "MESSAGE_UPDATE" || string(event.RawData) != raw {
++			t.Fatalf("raw payload changed: %s %s", event.Type, event.RawData)
++		}
++		// These locks must be available during host projection/admission.
++		session.State.RLock()
++		session.State.RUnlock()
++		session.RLock()
++		session.RUnlock()
++		before = event.Struct.(*MessageUpdate).BeforeUpdate
++		observed++
++	})
++	s.AddHandler(func(_ *Session, _ *MessageUpdate) {
++		if observed != 1 {
++			t.Fatal("ordinary handler preceded host observer")
++		}
++	})
++	if _, err := s.onEvent(websocket.TextMessage, []byte(`{"op":0,"s":1,"t":"MESSAGE_UPDATE","d":`+raw+`}`)); err != nil {
++		t.Fatal(err)
++	}
++	if observed != 1 || before == nil || before.Content != "old" {
++		t.Fatalf("before snapshot: %#v", before)
++	}
++	old.Author.Username = "changed"
++	old.Components[0].(*Button).Label = "changed"
++	if before.Author.Username != "original" || before.Components[0].(*Button).Label != "old button" {
++		t.Fatal("before snapshot aliases mutable cache")
++	}
++	// A channel snapshot includes SDK-only cached collections, not JSON loss.
++	channelBefore := s.cachedBefore(&ChannelUpdate{Channel: &Channel{ID: "c"}}).(*Channel)
++	if len(channelBefore.Messages) != 1 || len(channelBefore.Members) != 1 {
++		t.Fatal("SDK-only snapshot fields were discarded")
++	}
++	old.Content = "changed again"
++	if channelBefore.Messages[0].Content == "changed again" {
++		t.Fatal("nested channel snapshot aliases message cache")
++	}
++	s.SetDispatchObserver(nil)
++}
++
++func TestGatewayObserverMissingCacheAndDecodeFailure(t *testing.T) {
++	s, err := New("Bot host-only")
++	if err != nil {
++		t.Fatal(err)
++	}
++	count := 0
++	s.SetDispatchObserver(func(_ *Session, event *Event, decodeErr error) {
++		count++
++		switch count {
++		case 1:
++			if decodeErr != nil || event.Struct.(*MessageUpdate).BeforeUpdate != nil {
++				t.Fatal("manufactured missing before snapshot")
++			}
++		case 2:
++			if decodeErr == nil {
++				t.Fatal("decode error hidden from host")
++			}
++		case 3:
++			if event.Type != "UNKNOWN_HOST_ONLY" || event.Struct != nil {
++				t.Fatal("unknown event manufactured a typed payload")
++			}
++		}
++	})
++	if _, err := s.onEvent(websocket.TextMessage, []byte(`{"op":0,"s":1,"t":"MESSAGE_UPDATE","d":{"id":"missing","channel_id":"missing"}}`)); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := s.onEvent(websocket.TextMessage, []byte(`{"op":0,"s":2,"t":"MESSAGE_UPDATE","d":{"flags":"invalid"}}`)); err == nil {
++		t.Fatal("expected decode failure")
++	}
++	if _, err := s.onEvent(websocket.TextMessage, []byte(`{"op":0,"s":3,"t":"UNKNOWN_HOST_ONLY","d":{"n":9007199254740993}}`)); err != nil {
++		t.Fatal(err)
++	}
++	if count != 3 {
++		t.Fatalf("observer count: %d", count)
++	}
++}
++
++func TestGatewayContextHandshakeAndTypedWrites(t *testing.T) {
++	type packet struct {
++		Op   int                        `json:"op"`
++		Data map[string]json.RawMessage `json:"d"`
++	}
++	writes := make(chan packet, 4)
++	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		if r.URL.Query().Get("v") != "10" || r.URL.Query().Get("encoding") != "json" {
++			t.Error("wrong Gateway wire version")
++			return
++		}
++		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
++		if err != nil {
++			return
++		}
++		defer conn.Close()
++		if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"op":10,"d":{"heartbeat_interval":60000}}`)); err != nil {
++			return
++		}
++		var identify packet
++		if err := conn.ReadJSON(&identify); err != nil {
++			return
++		}
++		if identify.Op != 2 {
++			t.Error("missing Identify")
++			return
++		}
++		if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"op":0,"s":1,"t":"READY","d":{"v":10,"session_id":"private","user":{"id":"bot"},"guilds":[]}}`)); err != nil {
++			return
++		}
++		for {
++			var incoming struct {
++				Op   int             `json:"op"`
++				Data json.RawMessage `json:"d"`
++			}
++			if err := conn.ReadJSON(&incoming); err != nil {
++				return
++			}
++			if incoming.Op == 1 {
++				if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"op":11,"d":null}`)); err != nil {
++					return
++				}
++				continue
++			}
++			p := packet{Op: incoming.Op}
++			if err := json.Unmarshal(incoming.Data, &p.Data); err != nil {
++				return
++			}
++			writes <- p
++		}
++	}))
++	defer server.Close()
++	roots := x509.NewCertPool()
++	roots.AddCert(server.Certificate())
++	s, err := New("Bot host-only")
++	if err != nil {
++		t.Fatal(err)
++	}
++	s.ShouldReconnectOnError = false
++	s.Dialer = &websocket.Dialer{TLSClientConfig: &tls.Config{RootCAs: roots}}
++	s.gateway = "wss" + strings.TrimPrefix(server.URL, "https") + "/"
++	openCtx, cancelOpen := context.WithTimeout(context.Background(), 3*time.Second)
++	defer cancelOpen()
++	if err := s.OpenContext(openCtx); err != nil {
++		t.Fatal(err)
++	}
++	defer s.Close()
++	cancelOpen() // The successful open context is not the connection lifetime.
++	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
++	defer cancel()
++	if err := s.UpdateStatusComplexContext(ctx, UpdateStatusData{Status: "online"}); err != nil {
++		t.Fatal(err)
++	}
++	if err := s.RequestGuildMembersContext(ctx, "g", "", 0, "private-nonce", true); err != nil {
++		t.Fatal(err)
++	}
++	if err := s.RequestGuildMembersListContext(ctx, "g", nil, 0, "private-nonce-2", false); err != nil {
++		t.Fatal(err)
++	}
++	if err := s.ChannelVoiceJoinManualContext(ctx, "g", "", false, true); err != nil {
++		t.Fatal(err)
++	}
++	for index := range 4 {
++		var p packet
++		select {
++		case p = <-writes:
++		case <-ctx.Done():
++			t.Fatal("missing typed Gateway write")
++		}
++		switch index {
++		case 0:
++			if p.Op != 3 || string(p.Data["activities"]) != "[]" || string(p.Data["status"]) != `"online"` {
++				t.Fatal("status wire fields changed")
++			}
++		case 1:
++			if p.Op != 8 || string(p.Data["guild_id"]) != `"g"` || string(p.Data["query"]) != `""` || string(p.Data["limit"]) != "0" || string(p.Data["nonce"]) != `"private-nonce"` || string(p.Data["presences"]) != "true" || p.Data["user_ids"] != nil {
++				t.Fatal("query member selector changed")
++			}
++		case 2:
++			if p.Op != 8 || string(p.Data["guild_id"]) != `"g"` || string(p.Data["user_ids"]) != "[]" || p.Data["query"] != nil {
++				t.Fatal("user-ID member selector changed")
++			}
++		case 3:
++			if p.Op != 4 || string(p.Data["guild_id"]) != `"g"` || string(p.Data["channel_id"]) != "null" || string(p.Data["self_mute"]) != "false" || string(p.Data["self_deaf"]) != "true" {
++				t.Fatal("typed voice disconnect changed")
++			}
++		}
++	}
++}
+diff --git a/gateway_dispatch.go b/gateway_dispatch.go
+new file mode 100644
+--- /dev/null
++++ b/gateway_dispatch.go
+@@ -0,0 +1,234 @@
++package discordgo
++
++import "reflect"
++
++// SetDispatchObserver installs the single host ingress observer. Passing nil
++// detaches ingress/fatal callbacks and joins all callbacks already in flight.
++// For each Discord opcode-0 dispatch it runs synchronously, in receive order,
++// after internal state application and before ordinary SDK handlers. No Session,
++// State or handler lock is held while calling it. It includes host-private voice
++// events, not synthetic/raw duplicate events. RawData retains the exact d JSON;
++// Struct has detached BeforeUpdate/BeforeDelete only when actually cached.
++//
++// The host must bound its callback and project/enqueue synchronously; it must not
++// invoke module code, mutate the event/cache, reconfigure/detach callbacks, or
++// open/close this session from a callback. Decode errors are reported rather than silently projected as zero
++// values. Raw events and credentials must never cross the module boundary.
++func (s *Session) SetDispatchObserver(observer func(*Session, *Event, error)) {
++	s.dispatchMu.Lock()
++	s.dispatchObserver = observer
++	s.gatewayCallbacksDetached = observer == nil
++	s.dispatchMu.Unlock()
++}
++
++// snapshotVisit preserves shared references and cycles without sharing mutable
++// storage with the live cache. JSON cloning is incorrect here: SDK-only channel
++// messages/members and Message.Components deliberately have json:"-" tags.
++type snapshotVisit struct {
++	typ    reflect.Type
++	ptr    uintptr
++	length int
++}
++
++func cloneDispatchValue(v reflect.Value, seen map[snapshotVisit]reflect.Value) reflect.Value {
++	switch v.Kind() {
++	case reflect.Pointer:
++		if v.IsNil() {
++			return reflect.Zero(v.Type())
++		}
++		key := snapshotVisit{typ: v.Type(), ptr: v.Pointer()}
++		if old, ok := seen[key]; ok {
++			return old
++		}
++		out := reflect.New(v.Type().Elem())
++		seen[key] = out
++		out.Elem().Set(cloneDispatchValue(v.Elem(), seen))
++		return out
++	case reflect.Interface:
++		if v.IsNil() {
++			return reflect.Zero(v.Type())
++		}
++		out := reflect.New(v.Type()).Elem()
++		out.Set(cloneDispatchValue(v.Elem(), seen))
++		return out
++	case reflect.Slice:
++		if v.IsNil() {
++			return reflect.Zero(v.Type())
++		}
++		key := snapshotVisit{typ: v.Type(), ptr: v.Pointer(), length: v.Len()}
++		if old, ok := seen[key]; ok {
++			return old
++		}
++		out := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
++		seen[key] = out
++		for i := range v.Len() {
++			out.Index(i).Set(cloneDispatchValue(v.Index(i), seen))
++		}
++		return out
++	case reflect.Map:
++		if v.IsNil() {
++			return reflect.Zero(v.Type())
++		}
++		key := snapshotVisit{typ: v.Type(), ptr: uintptr(v.UnsafePointer())}
++		if old, ok := seen[key]; ok {
++			return old
++		}
++		out := reflect.MakeMapWithSize(v.Type(), v.Len())
++		seen[key] = out
++		iter := v.MapRange()
++		for iter.Next() {
++			out.SetMapIndex(iter.Key(), cloneDispatchValue(iter.Value(), seen))
++		}
++		return out
++	case reflect.Struct:
++		out := reflect.New(v.Type()).Elem()
++		// Unexported fields belong to immutable value types such as time.Time;
++		// copy those values without unsafe access to their implementation.
++		out.Set(v)
++		for i := range v.NumField() {
++			if v.Type().Field(i).IsExported() {
++				out.Field(i).Set(cloneDispatchValue(v.Field(i), seen))
++			}
++		}
++		return out
++	case reflect.Array:
++		out := reflect.New(v.Type()).Elem()
++		for i := range v.Len() {
++			out.Index(i).Set(cloneDispatchValue(v.Index(i), seen))
++		}
++		return out
++	default:
++		return v
++	}
++}
++
++// cachedBefore selects only source wrappers that actually define before fields,
++// and only when their corresponding cache tracking policy is enabled. It never
++// fetches a missing object or manufactures a before value from the new event.
++func (s *Session) cachedBefore(event interface{}) interface{} {
++	state := s.State
++	if state == nil || !s.StateEnabled {
++		return nil
++	}
++	state.RLock()
++	defer state.RUnlock()
++	var old interface{}
++	channel := func(id string, track bool) {
++		if track && state.channelMap[id] != nil {
++			old = state.channelMap[id]
++		}
++	}
++	member := func(guildID, userID string) {
++		if state.TrackMembers && state.memberMap[guildID][userID] != nil {
++			old = state.memberMap[guildID][userID]
++		}
++	}
++	role := func(guildID, roleID string) {
++		if guild := state.guildMap[guildID]; state.TrackRoles && guild != nil {
++			for _, value := range guild.Roles {
++				if value != nil && value.ID == roleID {
++					old = value
++					break
++				}
++			}
++		}
++	}
++	message := func(channelID, messageID string) {
++		if ch := state.channelMap[channelID]; state.MaxMessageCount != 0 && ch != nil {
++			for _, value := range ch.Messages {
++				if value != nil && value.ID == messageID {
++					old = value
++					break
++				}
++			}
++		}
++	}
++	switch e := event.(type) {
++	case *GuildDelete:
++		if e.Guild != nil && state.guildMap[e.ID] != nil {
++			old = state.guildMap[e.ID]
++		}
++	case *ChannelUpdate:
++		if e.Channel != nil {
++			channel(e.ID, state.TrackChannels)
++		}
++	case *ChannelDelete:
++		if e.Channel != nil {
++			channel(e.ID, state.TrackChannels)
++		}
++	case *ThreadUpdate:
++		if e.Channel != nil {
++			channel(e.ID, state.TrackThreads)
++		}
++	case *ThreadDelete:
++		if e.Channel != nil {
++			channel(e.ID, state.TrackThreads)
++		}
++	case *GuildMemberUpdate:
++		if e.Member != nil && e.User != nil {
++			member(e.GuildID, e.User.ID)
++		}
++	case *GuildMemberRemove:
++		if e.Member != nil && e.User != nil {
++			member(e.GuildID, e.User.ID)
++		}
++	case *GuildRoleUpdate:
++		if e.GuildRole != nil && e.Role != nil {
++			role(e.GuildID, e.Role.ID)
++		}
++	case *GuildRoleDelete:
++		role(e.GuildID, e.RoleID)
++	case *MessageUpdate:
++		if e.Message != nil {
++			message(e.ChannelID, e.ID)
++		}
++	case *MessageDelete:
++		if e.Message != nil {
++			message(e.ChannelID, e.ID)
++		}
++	case *VoiceStateUpdate:
++		if e.VoiceState != nil && state.TrackVoice {
++			if guild := state.guildMap[e.GuildID]; guild != nil {
++				for _, value := range guild.VoiceStates {
++					if value != nil && value.UserID == e.UserID {
++						old = value
++						break
++					}
++				}
++			}
++		}
++	}
++	if old == nil {
++		return nil
++	}
++	return cloneDispatchValue(reflect.ValueOf(old), make(map[snapshotVisit]reflect.Value)).Interface()
++}
++
++func setDispatchBefore(event, before interface{}) {
++	switch e := event.(type) {
++	case *GuildDelete:
++		e.BeforeDelete, _ = before.(*Guild)
++	case *ChannelUpdate:
++		e.BeforeUpdate, _ = before.(*Channel)
++	case *ChannelDelete:
++		e.BeforeDelete, _ = before.(*Channel)
++	case *ThreadUpdate:
++		e.BeforeUpdate, _ = before.(*Channel)
++	case *ThreadDelete:
++		e.BeforeDelete, _ = before.(*Channel)
++	case *GuildMemberUpdate:
++		e.BeforeUpdate, _ = before.(*Member)
++	case *GuildMemberRemove:
++		e.BeforeDelete, _ = before.(*Member)
++	case *GuildRoleUpdate:
++		e.BeforeUpdate, _ = before.(*Role)
++	case *GuildRoleDelete:
++		e.BeforeDelete, _ = before.(*Role)
++	case *MessageUpdate:
++		e.BeforeUpdate, _ = before.(*Message)
++	case *MessageDelete:
++		e.BeforeDelete, _ = before.(*Message)
++	case *VoiceStateUpdate:
++		e.BeforeUpdate, _ = before.(*VoiceState)
++	}
++}
+diff --git a/gateway_ingress.go b/gateway_ingress.go
+new file mode 100644
+--- /dev/null
++++ b/gateway_ingress.go
+@@ -0,0 +1,153 @@
++package discordgo
++
++import (
++	"bytes"
++	"compress/zlib"
++	"encoding/json"
++	"errors"
++	"io"
++	"unicode/utf8"
++
++	"github.com/gorilla/websocket"
++)
++
++// Ordinary standalone sessions created by New accept at most 8 MiB per wire
++// message and 32 MiB after decompression. Hosts must explicitly configure their
++// operator-selected bounds; these defaults are not backend configuration.
++const defaultGatewayFrameMaxBytes int64 = 8 << 20
++const defaultGatewayDecodedMaxBytes int64 = 32 << 20
++
++// ErrGatewayIngress is a fatal frame/decompression/envelope failure. It carries
++// no payload, token, URL, parser diagnostic or attacker-controlled text.
++var ErrGatewayIngress = errors.New("invalid or oversized Gateway ingress")
++
++// ConfigureGatewayIngress installs finite wire/decompressed byte bounds and a
++// host-only fatal callback before opening. It rejects an open or opening session
++// rather than waiting for its handshake. onFatal receives only ErrGatewayIngress
++// after the actual socket has been closed; invalid ingress never auto-reconnects.
++// Callbacks must be bounded and must not reconfigure, detach or open/close the
++// session recursively. SetDispatchObserver(nil) disables and joins both callback
++// kinds, so a host should cancel its lifetime before detaching during shutdown.
++func (s *Session) ConfigureGatewayIngress(frameMaxBytes, decodedMaxBytes int64, onFatal func(error)) error {
++	maxInt := int64(^uint(0) >> 1)
++	if frameMaxBytes <= 0 || decodedMaxBytes <= 0 || frameMaxBytes >= maxInt || decodedMaxBytes >= maxInt {
++		return errors.New("Gateway ingress limits must be positive finite byte counts")
++	}
++	if !s.wsLifecycle.tryLock() {
++		return ErrWSAlreadyOpen
++	}
++	defer s.wsLifecycle.Unlock()
++	s.Lock()
++	if s.wsConn != nil {
++		s.Unlock()
++		return ErrWSAlreadyOpen
++	}
++	s.gatewayFrameMaxBytes = frameMaxBytes
++	s.gatewayDecodedMaxBytes = decodedMaxBytes
++	s.gatewayFaulted = false
++	s.Unlock()
++	s.dispatchMu.Lock()
++	s.gatewayFatal = onFatal
++	s.gatewayCallbacksDetached = false
++	s.dispatchMu.Unlock()
++	return nil
++}
++
++func (s *Session) decodeGatewayEvent(messageType int, message []byte) (*Event, error) {
++	s.RLock()
++	frameMax, decodedMax := s.gatewayFrameMaxBytes, s.gatewayDecodedMaxBytes
++	s.RUnlock()
++	if frameMax <= 0 || decodedMax <= 0 || int64(len(message)) > frameMax {
++		return nil, ErrGatewayIngress
++	}
++	var raw []byte
++	switch messageType {
++	case websocket.TextMessage:
++		if int64(len(message)) > decodedMax {
++			return nil, ErrGatewayIngress
++		}
++		raw = message
++	case websocket.BinaryMessage:
++		compressed := bytes.NewReader(message)
++		z, err := zlib.NewReader(compressed)
++		if err != nil {
++			return nil, ErrGatewayIngress
++		}
++		// Enforce the decompressed bound before constructing JSON strings,
++		// RawMessage values, event structs or any typed domain allocations.
++		raw, err = io.ReadAll(io.LimitReader(z, decodedMax+1))
++		closeErr := z.Close()
++		if err != nil || closeErr != nil || int64(len(raw)) > decodedMax || compressed.Len() != 0 {
++			return nil, ErrGatewayIngress
++		}
++	default:
++		return nil, ErrGatewayIngress
++	}
++	if !utf8.Valid(raw) {
++		return nil, ErrGatewayIngress
++	}
++	var envelope struct {
++		Operation *int            `json:"op"`
++		Sequence  *int64          `json:"s"`
++		Type      *string         `json:"t"`
++		Data      json.RawMessage `json:"d"`
++	}
++	// Unmarshal requires one complete JSON value and rejects trailing values or
++	// non-whitespace bytes, unlike a single Decoder.Decode call.
++	if json.Unmarshal(raw, &envelope) != nil || envelope.Operation == nil || len(envelope.Data) == 0 {
++		return nil, ErrGatewayIngress
++	}
++	e := &Event{Operation: *envelope.Operation, RawData: envelope.Data}
++	if envelope.Sequence != nil {
++		e.Sequence = *envelope.Sequence
++	}
++	if envelope.Type != nil {
++		e.Type = *envelope.Type
++	}
++	if e.Operation == 0 && (envelope.Sequence == nil || e.Type == "") {
++		return nil, ErrGatewayIngress
++	}
++	return e, nil
++}
++
++func gatewayReadError(err error) error {
++	if errors.Is(err, websocket.ErrReadLimit) {
++		return ErrGatewayIngress
++	}
++	return err
++}
++
++// failGatewayIngress revokes this connection before closing it, so a heartbeat
++// woken by the close cannot mistake this failure for permission to reconnect.
++func (s *Session) failGatewayIngress(conn *websocket.Conn) {
++	s.Lock()
++	alreadyFailed := s.gatewayFaulted
++	s.gatewayFaulted = true
++	if s.wsConn == conn {
++		s.wsConn = nil
++		s.DataReady = false
++		if s.listening != nil {
++			close(s.listening)
++			s.listening = nil
++		}
++	}
++	voices := make([]*VoiceConnection, 0, len(s.VoiceConnections))
++	for _, voice := range s.VoiceConnections {
++		voices = append(voices, voice)
++	}
++	s.Unlock()
++	_ = conn.Close()
++	for _, voice := range voices {
++		voice.engine.stop(ErrGatewayIngress)
++	}
++	if alreadyFailed {
++		return
++	}
++	s.dispatchSerial.Lock()
++	defer s.dispatchSerial.Unlock()
++	s.dispatchMu.RLock()
++	defer s.dispatchMu.RUnlock()
++	if !s.gatewayCallbacksDetached && s.gatewayFatal != nil {
++		s.gatewayFatal(ErrGatewayIngress)
++	}
++}
+diff --git a/gateway_ingress_test.go b/gateway_ingress_test.go
+new file mode 100644
+--- /dev/null
++++ b/gateway_ingress_test.go
+@@ -0,0 +1,358 @@
++package discordgo
++
++import (
++	"bytes"
++	"compress/zlib"
++	"context"
++	"crypto/tls"
++	"crypto/x509"
++	"errors"
++	"net/http"
++	"net/http/httptest"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/gorilla/websocket"
++)
++
++func compressedGatewayFixture(t *testing.T, raw []byte) []byte {
++	t.Helper()
++	var out bytes.Buffer
++	z := zlib.NewWriter(&out)
++	if _, err := z.Write(raw); err != nil {
++		t.Fatal(err)
++	}
++	if err := z.Close(); err != nil {
++		t.Fatal(err)
++	}
++	return out.Bytes()
++}
++
++func configuredGatewayFixture(t *testing.T, server *httptest.Server, frame, decoded int64, fatal func(error)) *Session {
++	t.Helper()
++	s, err := New("Bot host-only")
++	if err != nil {
++		t.Fatal(err)
++	}
++	roots := x509.NewCertPool()
++	roots.AddCert(server.Certificate())
++	s.Dialer = &websocket.Dialer{TLSClientConfig: &tls.Config{RootCAs: roots}}
++	s.gateway = "wss" + strings.TrimPrefix(server.URL, "https") + "/"
++	if err := s.ConfigureGatewayIngress(frame, decoded, fatal); err != nil {
++		t.Fatal(err)
++	}
++	return s
++}
++
++func gatewayFixtureHandshake(conn *websocket.Conn) error {
++	if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"op":10,"d":{"heartbeat_interval":60000}}`)); err != nil {
++		return err
++	}
++	if _, _, err := conn.ReadMessage(); err != nil {
++		return err
++	}
++	return conn.WriteMessage(websocket.TextMessage, []byte(`{"op":0,"s":1,"t":"READY","d":{"v":10,"session_id":"private","user":{"id":"bot"},"guilds":[]}}`))
++}
++
++func TestGatewayIngressBoundedDecompressionAndStrictEnvelope(t *testing.T) {
++	s, err := New("Bot host-only")
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := s.ConfigureGatewayIngress(4096, 160, nil); err != nil {
++		t.Fatal(err)
++	}
++	for _, name := range []string{"MESSAGE_CREATE", "UNKNOWN_HOST_ONLY"} {
++		raw := []byte(`{"op":0,"s":1,"t":"` + name + `","d":{"content":"` + strings.Repeat("private-secret", 100) + `"}}`)
++		compressed := compressedGatewayFixture(t, raw)
++		if len(compressed) >= 160 {
++			t.Fatal("fixture did not exercise decompression expansion")
++		}
++		for _, frame := range []struct {
++			kind int
++			data []byte
++		}{{websocket.TextMessage, raw}, {websocket.BinaryMessage, compressed}} {
++			if _, err := s.decodeGatewayEvent(frame.kind, frame.data); !errors.Is(err, ErrGatewayIngress) {
++				t.Fatalf("unbounded %s input: %v", name, err)
++			}
++		}
++	}
++	valid := []byte(`{"op":0,"s":2,"t":"UNKNOWN_HOST_ONLY","d":{"n":9007199254740993,"zero":0}}`)
++	if err := s.ConfigureGatewayIngress(4096, int64(len(valid)), nil); err != nil {
++		t.Fatal(err)
++	}
++	for _, frame := range []struct {
++		kind int
++		data []byte
++	}{{websocket.TextMessage, valid}, {websocket.BinaryMessage, compressedGatewayFixture(t, valid)}} {
++		e, err := s.decodeGatewayEvent(frame.kind, frame.data)
++		if err != nil || string(e.RawData) != `{"n":9007199254740993,"zero":0}` {
++			t.Fatalf("exact bounded JSON changed: %v", err)
++		}
++	}
++	if err := s.ConfigureGatewayIngress(4096, 4096, nil); err != nil {
++		t.Fatal(err)
++	}
++	for _, raw := range [][]byte{
++		append(bytes.Clone(valid), []byte(` {}`)...),
++		[]byte(`{"op":0,"s":1,"t":"MESSAGE_CREATE","d":`),
++		[]byte(`{"s":1,"t":"UNKNOWN_HOST_ONLY","d":{}}`),
++		[]byte(`{"op":0,"s":1,"d":{}}`),
++		[]byte(`null`),
++		{'{', '"', 'o', 'p', '"', ':', '0', ',', '"', 'd', '"', ':', '"', 0xff, '"', '}'},
++	} {
++		for _, frame := range []struct {
++			kind int
++			data []byte
++		}{{websocket.TextMessage, raw}, {websocket.BinaryMessage, compressedGatewayFixture(t, raw)}} {
++			if _, err := s.decodeGatewayEvent(frame.kind, frame.data); !errors.Is(err, ErrGatewayIngress) {
++				t.Fatalf("malformed outer JSON accepted: %v", err)
++			}
++		}
++	}
++	compressed := compressedGatewayFixture(t, valid)
++	for _, corrupt := range [][]byte{compressed[:len(compressed)-1], append(bytes.Clone(compressed), []byte("private-secret")...)} {
++		if _, err := s.decodeGatewayEvent(websocket.BinaryMessage, corrupt); !errors.Is(err, ErrGatewayIngress) {
++			t.Fatalf("invalid zlib frame accepted: %v", err)
++		}
++	}
++}
++
++func TestGatewayIngressWireLimitAppliesBeforeHello(t *testing.T) {
++	peerClosed := make(chan struct{})
++	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
++		if err != nil {
++			return
++		}
++		defer conn.Close()
++		defer close(peerClosed)
++		_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"op":10,"d":{"heartbeat_interval":60000,"extra":"`+strings.Repeat("secret", 100)+`"}}`))
++		_, _, _ = conn.ReadMessage()
++	}))
++	defer server.Close()
++	fatal := make(chan error, 1)
++	s := configuredGatewayFixture(t, server, 128, 4096, func(err error) { fatal <- err })
++	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
++	defer cancel()
++	if err := s.OpenContext(ctx); !errors.Is(err, ErrGatewayIngress) {
++		t.Fatalf("oversized Hello did not fail: %v", err)
++	}
++	select {
++	case err := <-fatal:
++		if err != ErrGatewayIngress {
++			t.Fatal("fatal diagnostic leaked source error")
++		}
++	case <-ctx.Done():
++		t.Fatal("missing fatal notification")
++	}
++	select {
++	case <-peerClosed:
++	case <-ctx.Done():
++		t.Fatal("oversized Hello did not close real socket")
++	}
++}
++
++func TestGatewayIngressFatalEstablishedFramesCloseSocket(t *testing.T) {
++	large := []byte(`{"op":0,"s":2,"t":"UNKNOWN_HOST_ONLY","d":{"secret":"` + strings.Repeat("private", 200) + `"}}`)
++	for _, test := range []struct {
++		name           string
++		kind           int
++		data           []byte
++		frame, decoded int64
++	}{
++		{"wire-size", websocket.TextMessage, large, 256, 4096},
++		{"expanded-size", websocket.BinaryMessage, compressedGatewayFixture(t, large), 4096, 256},
++		{"malformed-known-outer", websocket.TextMessage, []byte(`{"op":0,"s":2,"t":"MESSAGE_CREATE","d":`), 4096, 4096},
++		{"malformed-unknown-outer", websocket.TextMessage, []byte(`{"op":0,"s":2,"t":"UNKNOWN_HOST_ONLY","d":`), 4096, 4096},
++		{"trailing-json", websocket.TextMessage, []byte(`{"op":0,"s":2,"t":"UNKNOWN_HOST_ONLY","d":{}} {}`), 4096, 4096},
++		{"bad-zlib", websocket.BinaryMessage, []byte("private-secret-not-zlib"), 4096, 4096},
++	} {
++		t.Run(test.name, func(t *testing.T) {
++			send := make(chan struct{})
++			peerClosed := make(chan struct{})
++			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++				conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
++				if err != nil {
++					return
++				}
++				defer conn.Close()
++				defer close(peerClosed)
++				if gatewayFixtureHandshake(conn) != nil {
++					return
++				}
++				<-send
++				_ = conn.WriteMessage(test.kind, test.data)
++				for {
++					if _, _, err := conn.ReadMessage(); err != nil {
++						return
++					}
++				}
++			}))
++			defer server.Close()
++			fatal := make(chan error, 1)
++			s := configuredGatewayFixture(t, server, test.frame, test.decoded, func(err error) { fatal <- err })
++			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
++			defer cancel()
++			if err := s.OpenContext(ctx); err != nil {
++				close(send)
++				t.Fatal(err)
++			}
++			defer s.Close()
++			close(send)
++			select {
++			case err := <-fatal:
++				if err != ErrGatewayIngress {
++					t.Fatal("unsafe fatal error")
++				}
++			case <-ctx.Done():
++				t.Fatal("ingress error was ignored")
++			}
++			select {
++			case <-peerClosed:
++			case <-ctx.Done():
++				t.Fatal("failed ingress left socket alive")
++			}
++			if err := s.OpenContext(ctx); !errors.Is(err, ErrGatewayIngress) {
++				t.Fatalf("faulted session reopened/retried: %v", err)
++			}
++		})
++	}
++}
++
++func TestGatewayIngressMalformedTypedPayloadRemainsSelective(t *testing.T) {
++	send := make(chan struct{})
++	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
++		if err != nil {
++			return
++		}
++		defer conn.Close()
++		if gatewayFixtureHandshake(conn) != nil {
++			return
++		}
++		<-send
++		for _, raw := range []string{
++			`{"op":0,"s":2,"t":"MESSAGE_UPDATE","d":null}`,
++			`{"op":0,"s":3,"t":"MESSAGE_UPDATE","d":{"id":"m","channel_id":"c","flags":"private-secret"}}`,
++			`{"op":0,"s":4,"t":"MESSAGE_UPDATE","d":{"id":"m","channel_id":"c","content":"after"}}`,
++		} {
++			if conn.WriteMessage(websocket.TextMessage, []byte(raw)) != nil {
++				return
++			}
++		}
++		for {
++			if _, _, err := conn.ReadMessage(); err != nil {
++				return
++			}
++		}
++	}))
++	defer server.Close()
++	fatal := make(chan error, 1)
++	s := configuredGatewayFixture(t, server, 4096, 4096, func(err error) { fatal <- err })
++	observed := make(chan error, 3)
++	s.SetDispatchObserver(func(_ *Session, e *Event, err error) {
++		if e.Type == "MESSAGE_UPDATE" {
++			observed <- err
++		}
++	})
++	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
++	defer cancel()
++	if err := s.OpenContext(ctx); err != nil {
++		close(send)
++		t.Fatal(err)
++	}
++	defer s.Close()
++	if err := s.ConfigureGatewayIngress(1024, 1024, nil); !errors.Is(err, ErrWSAlreadyOpen) {
++		t.Fatal("live ingress policy changed")
++	}
++	close(send)
++	for index := range 3 {
++		select {
++		case err := <-observed:
++			if (index < 2) != (err != nil) {
++				t.Fatal("typed payload failure changed event selection")
++			}
++		case err := <-fatal:
++			t.Fatalf("typed payload killed shared session: %v", err)
++		case <-ctx.Done():
++			t.Fatal("listener did not continue after selective failure")
++		}
++	}
++	if err := s.UpdateStatusComplexContext(ctx, UpdateStatusData{Status: "online"}); err != nil {
++		t.Fatalf("selective failure closed shared socket: %v", err)
++	}
++}
++
++func TestGatewayObserverDetachJoinsInFlightCallback(t *testing.T) {
++	s, err := New("Bot host-only")
++	if err != nil {
++		t.Fatal(err)
++	}
++	entered, release, delivered, detached := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
++	calls := 0
++	s.SetDispatchObserver(func(_ *Session, _ *Event, _ error) { calls++; close(entered); <-release })
++	go func() {
++		_, _ = s.onEvent(websocket.TextMessage, []byte(`{"op":0,"s":1,"t":"UNKNOWN_HOST_ONLY","d":{}}`))
++		close(delivered)
++	}()
++	<-entered
++	go func() { s.SetDispatchObserver(nil); close(detached) }()
++	select {
++	case <-detached:
++		t.Fatal("detach returned while callback still running")
++	case <-time.After(20 * time.Millisecond):
++	}
++	close(release)
++	select {
++	case <-detached:
++	case <-time.After(time.Second):
++		t.Fatal("detach did not join released callback")
++	}
++	<-delivered
++	if _, err := s.onEvent(websocket.TextMessage, []byte(`{"op":0,"s":2,"t":"UNKNOWN_HOST_ONLY","d":{}}`)); err != nil {
++		t.Fatal(err)
++	}
++	if calls != 1 {
++		t.Fatal("callback ran after detach completed")
++	}
++}
++
++func TestGatewayIngressPartialThreadMemberDoesNotFabricateUser(t *testing.T) {
++	s, err := New("Bot host-only")
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := s.State.GuildAdd(&Guild{ID: "g"}); err != nil {
++		t.Fatal(err)
++	}
++	if err := s.State.ChannelAdd(&Channel{ID: "t", GuildID: "g", Type: ChannelTypeGuildPublicThread}); err != nil {
++		t.Fatal(err)
++	}
++	observed := false
++	s.SetDispatchObserver(func(_ *Session, event *Event, decodeErr error) {
++		if decodeErr != nil {
++			t.Fatal(decodeErr)
++		}
++		e := event.Struct.(*ThreadMembersUpdate)
++		if len(e.AddedMembers) != 1 || e.AddedMembers[0].Member == nil || e.AddedMembers[0].Member.User != nil || e.AddedMembers[0].UserID != "u" {
++			t.Fatal("partial member changed or acquired fabricated identity")
++		}
++		observed = true
++	})
++	raw := []byte(`{"op":0,"s":1,"t":"THREAD_MEMBERS_UPDATE","d":{"id":"t","guild_id":"g","member_count":1,"added_members":[{"id":"t","user_id":"u","member":{"roles":[]}}]}}`)
++	if _, err := s.onEvent(websocket.TextMessage, raw); err != nil {
++		t.Fatal(err)
++	}
++	if !observed {
++		t.Fatal("partial source event was discarded")
++	}
++	thread, err := s.State.Channel("t")
++	if err != nil || len(thread.Members) != 1 || thread.Members[0].UserID != "u" {
++		t.Fatal("thread membership state was discarded")
++	}
++	if _, err := s.State.Member("g", "u"); !errors.Is(err, ErrStateNotFound) {
++		t.Fatal("fabricated member cache entry")
++	}
++}
+diff --git a/gateway_payload.go b/gateway_payload.go
+new file mode 100644
+--- /dev/null
++++ b/gateway_payload.go
+@@ -0,0 +1,138 @@
++package discordgo
++
++import (
++	"bytes"
++	"errors"
++)
++
++var errGatewayPayload = errors.New("invalid Gateway event payload")
++
++// Valid JSON can still decode to a nil embedded object or a missing required
++// pointer that the SDK cache dereferences. Reject those known payloads through
++// the selective observer error path, before touching cache/voice state.
++func validGatewayStatePayload(event interface{}) bool {
++	member := func(m *Member) bool { return m != nil && m.User != nil }
++	presence := func(p *Presence) bool { return p != nil && p.User != nil }
++	guild := func(g *Guild) bool {
++		if g == nil {
++			return false
++		}
++		for _, c := range g.Channels {
++			if c == nil {
++				return false
++			}
++		}
++		for _, c := range g.Threads {
++			if c == nil {
++				return false
++			}
++		}
++		for _, m := range g.Members {
++			if !member(m) {
++				return false
++			}
++		}
++		for _, v := range g.VoiceStates {
++			if v == nil {
++				return false
++			}
++		}
++		return true
++	}
++	switch e := event.(type) {
++	case *Ready:
++		if e.User == nil {
++			return false
++		}
++		for _, g := range e.Guilds {
++			if !guild(g) {
++				return false
++			}
++		}
++		for _, c := range e.PrivateChannels {
++			if c == nil {
++				return false
++			}
++		}
++	case *GuildCreate:
++		return guild(e.Guild)
++	case *GuildUpdate:
++		return guild(e.Guild)
++	case *GuildDelete:
++		return e.Guild != nil
++	case *GuildMemberAdd:
++		return member(e.Member)
++	case *GuildMemberUpdate:
++		return member(e.Member)
++	case *GuildMemberRemove:
++		return member(e.Member)
++	case *GuildMembersChunk:
++		for _, m := range e.Members {
++			if !member(m) {
++				return false
++			}
++		}
++		for _, p := range e.Presences {
++			if !presence(p) {
++				return false
++			}
++		}
++	case *GuildRoleCreate:
++		return e.GuildRole != nil && e.Role != nil
++	case *GuildRoleUpdate:
++		return e.GuildRole != nil && e.Role != nil
++	case *ChannelCreate:
++		return e.Channel != nil
++	case *ChannelUpdate:
++		return e.Channel != nil
++	case *ChannelDelete:
++		return e.Channel != nil
++	case *ThreadCreate:
++		return e.Channel != nil
++	case *ThreadUpdate:
++		return e.Channel != nil
++	case *ThreadDelete:
++		return e.Channel != nil
++	case *ThreadMemberUpdate:
++		return e.ThreadMember != nil
++	case *ThreadMembersUpdate:
++		for _, m := range e.AddedMembers {
++			if m.ThreadMember == nil || (m.Presence != nil && !presence(m.Presence)) {
++				return false
++			}
++		}
++	case *ThreadListSync:
++		for _, c := range e.Threads {
++			if c == nil {
++				return false
++			}
++		}
++		for _, m := range e.Members {
++			if m == nil {
++				return false
++			}
++		}
++	case *MessageCreate:
++		return e.Message != nil
++	case *MessageUpdate:
++		return e.Message != nil
++	case *MessageDelete:
++		return e.Message != nil
++	case *VoiceStateUpdate:
++		return e.VoiceState != nil
++	case *PresenceUpdate:
++		return e.User != nil
++	}
++	return true
++}
++
++func validGatewayPayloadShape(eventType string, raw []byte) bool {
++	raw = bytes.TrimSpace(raw)
++	if len(raw) == 0 {
++		return false
++	}
++	if eventType == presencesReplaceEventType {
++		return raw[0] == '['
++	}
++	return raw[0] == '{'
++}
+diff --git a/structs.go b/structs.go
+--- a/structs.go
++++ b/structs.go
+@@ -42,9 +42,6 @@
+ 	// Should the session reconnect the websocket on errors.
+ 	ShouldReconnectOnError bool
+ 
+-	// Should voice connections reconnect on a session reconnect.
+-	ShouldReconnectVoiceOnSessionError bool
+-
+ 	// Should the session retry requests when rate limited.
+ 	ShouldRetryOnRateLimit bool
+ 
+@@ -135,8 +132,19 @@
+ 	// stores session ID of current Gateway connection
+ 	sessionID string
+ 
+-	// used to make sure gateway websocket writes do not happen concurrently
+-	wsMutex sync.Mutex
++	// All main Gateway writers share this cancellable gate.
++	wsMutex gatewayMutex
++	// Serializes connection establishment and teardown, separately from state.
++	wsLifecycle gatewayMutex
++	dispatchMu  sync.RWMutex
++	// Serializes host ingress across an old reader and a reconnect handshake.
++	dispatchSerial           sync.Mutex
++	dispatchObserver         func(*Session, *Event, error)
++	gatewayFrameMaxBytes     int64
++	gatewayDecodedMaxBytes   int64
++	gatewayFaulted           bool
++	gatewayFatal             func(error)
++	gatewayCallbacksDetached bool
+ }
+ 
+ // ApplicationIntegrationType dictates where application can be installed and its available interaction contexts.
+diff --git a/wsapi.go b/wsapi.go
+--- a/wsapi.go
++++ b/wsapi.go
+@@ -11,12 +11,9 @@
+ package discordgo
+ 
+ import (
+-	"bytes"
+-	"compress/zlib"
++	"context"
+ 	"encoding/json"
+ 	"errors"
+-	"fmt"
+-	"io"
+ 	"net/http"
+ 	"sync/atomic"
+ 	"time"
+@@ -48,169 +45,187 @@
+ // Open creates a websocket connection to Discord.
+ // See: https://discord.com/developers/docs/topics/gateway#connecting
+ func (s *Session) Open() error {
+-	s.log(LogInformational, "called")
+-
+-	var err error
+-
+-	// Prevent Open or other major Session functions from
+-	// being called while Open is still running.
+-	s.Lock()
+-	defer s.Unlock()
+-
+-	// If the websock is already open, bail out here.
+-	if s.wsConn != nil {
++	return s.OpenContext(context.Background())
++}
++
++// OpenContext establishes one main Gateway connection. Cancellation applies to
++// discovery, dialing and the complete Hello/Identify/Ready handshake, not to the
++// lifetime of a successfully opened session. No mutation is automatically resent.
++func (s *Session) OpenContext(ctx context.Context) (err error) {
++	if err = s.wsLifecycle.lockContext(ctx); err != nil {
++		return err
++	}
++	defer s.wsLifecycle.Unlock()
++	s.RLock()
++	alreadyOpen := s.wsConn != nil
++	frameMax, faulted := s.gatewayFrameMaxBytes, s.gatewayFaulted
++	gateway, sessionID, resumeURL := s.gateway, s.sessionID, s.resumeGatewayURL
++	s.RUnlock()
++	if alreadyOpen {
+ 		return ErrWSAlreadyOpen
+ 	}
+-
++	if faulted {
++		return ErrGatewayIngress
++	}
++	if frameMax <= 0 {
++		return errors.New("Gateway ingress limits are not configured")
++	}
+ 	sequence := atomic.LoadInt64(s.sequence)
+-
+-	var gateway string
+-	// Get the gateway to use for the Websocket connection
+-	if sequence != 0 && s.sessionID != "" && s.resumeGatewayURL != "" {
+-		s.log(LogDebug, "using resume gateway %s", s.resumeGatewayURL)
+-		gateway = s.resumeGatewayURL
+-	} else {
+-		if s.gateway == "" {
+-			s.gateway, err = s.Gateway()
+-			if err != nil {
+-				return err
+-			}
+-		}
+-
+-		gateway = s.gateway
+-	}
+-
+-	// Add the version and encoding to the URL
+-	gateway += "?v=" + APIVersion + "&encoding=json"
+-
+-	// Connect to the Gateway
+-	s.log(LogInformational, "connecting to gateway %s", gateway)
++	if sequence != 0 && sessionID != "" && resumeURL != "" {
++		gateway = resumeURL
++	} else if gateway == "" {
++		gateway, err = s.gatewayContext(ctx)
++		if err != nil {
++			return err
++		}
++		s.Lock()
++		s.gateway = gateway
++		s.Unlock()
++	}
++	target, err := gatewayURL(gateway)
++	if err != nil {
++		return err
++	}
+ 	header := http.Header{}
+ 	header.Add("accept-encoding", "zlib")
+-	s.wsConn, _, err = s.Dialer.Dial(gateway, header)
++	conn, response, err := s.Dialer.DialContext(ctx, target, header)
+ 	if err != nil {
+-		s.log(LogError, "error connecting to gateway %s, %s", s.gateway, err)
+-		s.gateway = "" // clear cached gateway
+-		s.wsConn = nil // Just to be safe.
++		if response != nil && response.Body != nil {
++			response.Body.Close()
++		}
++		s.Lock()
++		s.gateway = ""
++		s.Unlock()
+ 		return err
+ 	}
+-
+-	s.wsConn.SetCloseHandler(func(code int, text string) error {
+-		return nil
++	conn.SetReadLimit(frameMax)
++	conn.SetCloseHandler(func(int, string) error { return nil })
++	// Gorilla's default ping handler writes a pong; route that writer through
++	// the same gate as every explicit main Gateway write.
++	conn.SetPingHandler(func(data string) error {
++		pingCtx, cancel := context.WithTimeout(context.Background(), time.Second)
++		defer cancel()
++		return s.gatewayWriteFrame(pingCtx, conn, websocket.PongMessage, []byte(data), nil)
+ 	})
+-
++	finish := cancelGatewayIO(ctx, conn)
+ 	defer func() {
+-		// because of this, all code below must set err to the error
+-		// when exiting with an error :)  Maybe someone has a better
+-		// way :)
++		finish()
++		if err != nil && !errors.Is(err, ErrGatewayIngress) {
++			err = gatewayContextError(ctx, err)
++		}
+ 		if err != nil {
+-			s.wsConn.Close()
+-			s.wsConn = nil
++			if errors.Is(err, ErrGatewayIngress) {
++				s.failGatewayIngress(conn)
++			}
++			conn.Close()
++			s.Lock()
++			if s.wsConn == conn {
++				s.wsConn = nil
++			}
++			s.Unlock()
+ 		}
+ 	}()
+-
+-	// The first response from Discord should be an Op 10 (Hello) Packet.
+-	// When processed by onEvent the heartbeat goroutine will be started.
+-	mt, m, err := s.wsConn.ReadMessage()
++	deadline, _ := ctx.Deadline()
++	if err = conn.SetReadDeadline(deadline); err != nil {
++		return err
++	}
++	mt, message, err := conn.ReadMessage()
++	if err != nil {
++		return gatewayReadError(err)
++	}
++	hello, err := s.decodeGatewayEvent(mt, message)
+ 	if err != nil {
+ 		return err
+ 	}
+-	e, err := s.onEvent(mt, m)
+-	if err != nil {
+-		return err
+-	}
+-	if e.Operation != 10 {
+-		err = fmt.Errorf("expecting Op 10, got Op %d instead", e.Operation)
+-		return err
+-	}
+-	s.log(LogInformational, "Op 10 Hello Packet received from Discord")
++	if hello.Operation != 10 {
++		return ErrGatewayIngress
++	}
++	var h helloOp
++	if err = json.Unmarshal(hello.RawData, &h); err != nil {
++		return ErrGatewayIngress
++	}
++	if h.HeartbeatInterval <= 0 || h.HeartbeatInterval > time.Duration(1<<63-1)/time.Millisecond {
++		return ErrGatewayIngress
++	}
++	s.Lock()
+ 	s.LastHeartbeatAck = time.Now().UTC()
+-	var h helloOp
+-	if err = json.Unmarshal(e.RawData, &h); err != nil {
+-		err = fmt.Errorf("error unmarshalling helloOp, %s", err)
+-		return err
+-	}
+-
+-	// Now we send either an Op 2 Identity if this is a brand new
+-	// connection or Op 6 Resume if we are resuming an existing connection.
+-	if s.sessionID == "" && sequence == 0 {
+-
+-		// Send Op 2 Identity Packet
+-		err = s.identify()
+-		if err != nil {
+-			err = fmt.Errorf("error sending identify packet to gateway, %s, %s", s.gateway, err)
+-			return err
+-		}
+-
++	// A basic state/current user is also required by standalone voice users.
++	if s.State == nil {
++		s.State = NewState()
++		s.State.TrackChannels = false
++		s.State.TrackEmojis = false
++		s.State.TrackMembers = false
++		s.State.TrackRoles = false
++		s.State.TrackVoice = false
++	}
++	s.Unlock()
++	if sessionID == "" && sequence == 0 {
++		err = s.identifyContext(ctx, conn)
+ 	} else {
+-
+-		// Send Op 6 Resume Packet
+ 		p := resumePacket{}
+ 		p.Op = 6
+ 		p.Data.Token = s.Token
+-		p.Data.SessionID = s.sessionID
++		p.Data.SessionID = sessionID
+ 		p.Data.Sequence = sequence
+-
+-		s.log(LogInformational, "sending resume packet to gateway")
+-		s.wsMutex.Lock()
+-		err = s.wsConn.WriteJSON(p)
+-		s.wsMutex.Unlock()
+-		if err != nil {
+-			err = fmt.Errorf("error sending gateway resume packet, %s, %s", s.gateway, err)
+-			return err
+-		}
+-
+-	}
+-
+-	// A basic state is a hard requirement for Voice.
+-	// We create it here so the below READY/RESUMED packet can populate
+-	// the state :)
+-	// XXX: Move to New() func?
+-	if s.State == nil {
+-		state := NewState()
+-		state.TrackChannels = false
+-		state.TrackEmojis = false
+-		state.TrackMembers = false
+-		state.TrackRoles = false
+-		state.TrackVoice = false
+-		s.State = state
+-	}
+-
+-	// Now Discord should send us a READY or RESUMED packet.
+-	mt, m, err = s.wsConn.ReadMessage()
++		err = s.gatewayWrite(ctx, conn, p)
++	}
+ 	if err != nil {
+ 		return err
+ 	}
+-	e, err = s.onEvent(mt, m)
+-	if err != nil {
++	// Publish only after Identify/Resume has been sent. No session lock is
++	// held across socket I/O or the ordered host observer.
++	s.Lock()
++	s.wsConn = conn
++	s.Unlock()
++	for {
++		mt, message, err = conn.ReadMessage()
++		if err != nil {
++			return gatewayReadError(err)
++		}
++		event, decodeErr := s.decodeGatewayEvent(mt, message)
++		if decodeErr != nil {
++			return decodeErr
++		}
++		switch event.Operation {
++		case 0:
++			if _, err = s.onGatewayEvent(event); err != nil {
++				return err
++			}
++		case 1:
++			if err = s.gatewayWrite(ctx, conn, heartbeatOp{1, atomic.LoadInt64(s.sequence)}); err != nil {
++				return err
++			}
++		case 11:
++			s.Lock()
++			s.LastHeartbeatAck = time.Now().UTC()
++			s.Unlock()
++		default:
++			// Invalid sessions/reconnect requests during this attempt are
++			// failures, not permission to resend Identify behind the caller.
++			return errors.New("Gateway handshake interrupted")
++		}
++		if event.Operation == 0 && (event.Type == "READY" || event.Type == "RESUMED") {
++			break
++		}
++	}
++	// Join any racing cancellation before removing handshake deadlines.
++	finish()
++	if err = ctx.Err(); err != nil {
+ 		return err
+ 	}
+-	if e.Type != `READY` && e.Type != `RESUMED` {
+-		// This is not fatal, but it does not follow their API documentation.
+-		s.log(LogWarning, "Expected READY/RESUMED, instead got:\n%#v\n", e)
+-	}
+-	s.log(LogInformational, "First Packet:\n%#v\n", e)
+-
+-	s.log(LogInformational, "We are now connected to Discord, emitting connect event")
++	if err = conn.SetReadDeadline(time.Time{}); err != nil {
++		return err
++	}
++	s.Lock()
++	if s.VoiceConnections == nil {
++		s.VoiceConnections = make(map[string]*VoiceConnection)
++	}
++	listening := make(chan interface{})
++	s.listening = listening
++	s.Unlock()
+ 	s.handleEvent(connectEventType, &Connect{})
+-
+-	// A VoiceConnections map is a hard requirement for Voice.
+-	// XXX: can this be moved to when opening a voice connection?
+-	if s.VoiceConnections == nil {
+-		s.log(LogInformational, "creating new VoiceConnections map")
+-		s.VoiceConnections = make(map[string]*VoiceConnection)
+-	}
+-
+-	// Create listening chan outside of listen, as it needs to happen inside the
+-	// mutex lock and needs to exist before calling heartbeat and listen
+-	// go rountines.
+-	s.listening = make(chan interface{})
+-
+-	// Start sending heartbeats and reading messages from Discord.
+-	go s.heartbeat(s.wsConn, s.listening, h.HeartbeatInterval)
+-	go s.listen(s.wsConn, s.listening)
+-
+-	s.log(LogInformational, "exiting")
++	go s.heartbeat(conn, listening, h.HeartbeatInterval)
++	go s.listen(conn, listening)
+ 	return nil
+ }
+ 
+@@ -225,6 +240,10 @@
+ 		messageType, message, err := wsConn.ReadMessage()
+ 
+ 		if err != nil {
++			if errors.Is(err, websocket.ErrReadLimit) {
++				s.failGatewayIngress(wsConn)
++				return
++			}
+ 
+ 			// Detect if we have been closed manually. If a Close() has already
+ 			// happened, the websocket we are listening on will be different to
+@@ -235,12 +254,12 @@
+ 
+ 			if sameConnection {
+ 
+-				s.log(LogWarning, "error reading from gateway %s websocket, %s", s.gateway, err)
++				s.log(LogWarning, "Gateway connection read failed")
+ 				// There has been an error reading, close the websocket so that
+ 				// OnDisconnect event is emitted.
+ 				err := s.Close()
+ 				if err != nil {
+-					s.log(LogWarning, "error closing session connection, %s", err)
++					s.log(LogWarning, "Gateway connection close failed")
+ 				}
+ 
+ 				s.log(LogInformational, "calling reconnect() now")
+@@ -256,7 +275,21 @@
+ 			return
+ 
+ 		default:
+-			s.onEvent(messageType, message)
++			event, eventErr := s.onEvent(messageType, message)
++			if eventErr != nil {
++				if errors.Is(eventErr, ErrGatewayIngress) {
++					s.failGatewayIngress(wsConn)
++					return
++				}
++				// A recognized malformed typed payload was already delivered
++				// selectively to the host observer, not a healthy zero event.
++				if event != nil && event.Operation == 0 && event.Struct != nil {
++					continue
++				}
++				s.Close()
++				s.reconnect()
++				return
++			}
+ 
+ 		}
+ 	}
+@@ -276,7 +309,8 @@
+ 
+ // HeartbeatLatency returns the latency between heartbeat acknowledgement and heartbeat send.
+ func (s *Session) HeartbeatLatency() time.Duration {
+-
++	s.RLock()
++	defer s.RUnlock()
+ 	return s.LastHeartbeatAck.Sub(s.LastHeartbeatSent)
+ 
+ }
+@@ -302,13 +336,19 @@
+ 		s.RUnlock()
+ 		sequence := atomic.LoadInt64(s.sequence)
+ 		s.log(LogDebug, "sending gateway websocket heartbeat seq %d", sequence)
+-		s.wsMutex.Lock()
++		s.Lock()
+ 		s.LastHeartbeatSent = time.Now().UTC()
+-		err = wsConn.WriteJSON(heartbeatOp{1, sequence})
+-		s.wsMutex.Unlock()
++		s.Unlock()
++		err = s.gatewayWrite(context.Background(), wsConn, heartbeatOp{1, sequence})
+ 		if err != nil || time.Now().UTC().Sub(last) > (heartbeatIntervalMsec*FailedHeartbeatAcks) {
++			s.RLock()
++			sameConnection := s.wsConn == wsConn && !s.gatewayFaulted
++			s.RUnlock()
++			if !sameConnection {
++				return
++			}
+ 			if err != nil {
+-				s.log(LogError, "error sending heartbeat to gateway %s, %s", s.gateway, err)
++				s.log(LogError, "Gateway heartbeat write failed")
+ 			} else {
+ 				s.log(LogError, "haven't gotten a heartbeat ACK in %v, triggering a reconnection", time.Now().UTC().Sub(last))
+ 			}
+@@ -317,6 +357,10 @@
+ 			return
+ 		}
+ 		s.Lock()
++		if s.wsConn != wsConn || s.gatewayFaulted {
++			s.Unlock()
++			return
++		}
+ 		s.DataReady = true
+ 		s.Unlock()
+ 
+@@ -419,35 +463,12 @@
+ }
+ 
+ // UpdateStatusComplex allows for sending the raw status update data untouched by discordgo.
+-func (s *Session) UpdateStatusComplex(usd UpdateStatusData) (err error) {
+-	// The comment does say "untouched by discordgo", but we might need to lie a bit here.
+-	// The Discord documentation lists `activities` as being nullable, but in practice this
+-	// doesn't seem to be the case. I had filed an issue about this at
+-	// https://github.com/discord/discord-api-docs/issues/2559, but as of writing this
+-	// haven't had any movement on it, so at this point I'm assuming this is an error,
+-	// and am fixing this bug accordingly. Because sending `null` for `activities` instantly
+-	// disconnects us, I think that disallowing it from being sent in `UpdateStatusComplex`
+-	// isn't that big of an issue.
+-	if usd.Activities == nil {
+-		usd.Activities = make([]*Activity, 0)
+-	}
+-
+-	s.RLock()
+-	defer s.RUnlock()
+-	if s.wsConn == nil {
+-		return ErrWSNotFound
+-	}
+-
+-	s.wsMutex.Lock()
+-	err = s.wsConn.WriteJSON(updateStatusOp{3, usd})
+-	s.wsMutex.Unlock()
+-
+-	return
++func (s *Session) UpdateStatusComplex(usd UpdateStatusData) error {
++	return s.UpdateStatusComplexContext(context.Background(), usd)
+ }
+ 
+ type requestGuildMembersData struct {
+-	// TODO: Deprecated. Use string instead of []string
+-	GuildIDs  []string  `json:"guild_id"`
++	GuildID   string    `json:"guild_id"`
+ 	Query     *string   `json:"query,omitempty"`
+ 	UserIDs   *[]string `json:"user_ids,omitempty"`
+ 	Limit     int       `json:"limit"`
+@@ -468,7 +489,7 @@
+ // nonce     : Nonce to identify the Guild Members Chunk response
+ // presences : Whether to request presences of guild members
+ func (s *Session) RequestGuildMembers(guildID, query string, limit int, nonce string, presences bool) error {
+-	return s.RequestGuildMembersBatch([]string{guildID}, query, limit, nonce, presences)
++	return s.RequestGuildMembersContext(context.Background(), guildID, query, limit, nonce, presences)
+ }
+ 
+ // RequestGuildMembersList requests guild members from the gateway
+@@ -479,7 +500,7 @@
+ // nonce     : Nonce to identify the Guild Members Chunk response
+ // presences : Whether to request presences of guild members
+ func (s *Session) RequestGuildMembersList(guildID string, userIDs []string, limit int, nonce string, presences bool) error {
+-	return s.RequestGuildMembersBatchList([]string{guildID}, userIDs, limit, nonce, presences)
++	return s.RequestGuildMembersListContext(context.Background(), guildID, userIDs, limit, nonce, presences)
+ }
+ 
+ // RequestGuildMembersBatch requests guild members from the gateway
+@@ -491,16 +512,13 @@
+ // presences : Whether to request presences of guild members
+ //
+ // NOTE: this function is deprecated, please use RequestGuildMembers instead
+-func (s *Session) RequestGuildMembersBatch(guildIDs []string, query string, limit int, nonce string, presences bool) (err error) {
+-	data := requestGuildMembersData{
+-		GuildIDs:  guildIDs,
+-		Query:     &query,
+-		Limit:     limit,
+-		Nonce:     nonce,
+-		Presences: presences,
+-	}
+-	err = s.requestGuildMembers(data)
+-	return
++func (s *Session) RequestGuildMembersBatch(guildIDs []string, query string, limit int, nonce string, presences bool) error {
++	for _, guildID := range guildIDs {
++		if err := s.RequestGuildMembers(guildID, query, limit, nonce, presences); err != nil {
++			return err
++		}
++	}
++	return nil
+ }
+ 
+ // RequestGuildMembersBatchList requests guild members from the gateway
+@@ -512,47 +530,18 @@
+ // presences : Whether to request presences of guild members
+ //
+ // NOTE: this function is deprecated, please use RequestGuildMembersList instead
+-func (s *Session) RequestGuildMembersBatchList(guildIDs []string, userIDs []string, limit int, nonce string, presences bool) (err error) {
+-	data := requestGuildMembersData{
+-		GuildIDs:  guildIDs,
+-		UserIDs:   &userIDs,
+-		Limit:     limit,
+-		Nonce:     nonce,
+-		Presences: presences,
+-	}
+-	err = s.requestGuildMembers(data)
+-	return
++func (s *Session) RequestGuildMembersBatchList(guildIDs []string, userIDs []string, limit int, nonce string, presences bool) error {
++	for _, guildID := range guildIDs {
++		if err := s.RequestGuildMembersList(guildID, userIDs, limit, nonce, presences); err != nil {
++			return err
++		}
++	}
++	return nil
+ }
+ 
+ // GatewayWriteStruct allows for sending raw gateway structs over the gateway.
+-func (s *Session) GatewayWriteStruct(data interface{}) (err error) {
+-	s.RLock()
+-	defer s.RUnlock()
+-	if s.wsConn == nil {
+-		return ErrWSNotFound
+-	}
+-
+-	s.wsMutex.Lock()
+-	err = s.wsConn.WriteJSON(data)
+-	s.wsMutex.Unlock()
+-
+-	return err
+-}
+-
+-func (s *Session) requestGuildMembers(data requestGuildMembersData) (err error) {
+-	s.log(LogInformational, "called")
+-
+-	s.RLock()
+-	defer s.RUnlock()
+-	if s.wsConn == nil {
+-		return ErrWSNotFound
+-	}
+-
+-	s.wsMutex.Lock()
+-	err = s.wsConn.WriteJSON(requestGuildMembersOp{8, data})
+-	s.wsMutex.Unlock()
+-
+-	return
++func (s *Session) GatewayWriteStruct(data interface{}) error {
++	return s.gatewayWrite(context.Background(), nil, data)
+ }
+ 
+ // onEvent is the "event handler" for all messages received on the
+@@ -564,47 +553,21 @@
+ // If you use the AddHandler() function to register a handler for the
+ // "OnEvent" event then all events will be passed to that handler.
+ func (s *Session) onEvent(messageType int, message []byte) (*Event, error) {
+-
++	e, err := s.decodeGatewayEvent(messageType, message)
++	if err != nil {
++		return e, err
++	}
++	return s.onGatewayEvent(e)
++}
++
++func (s *Session) onGatewayEvent(e *Event) (*Event, error) {
+ 	var err error
+-	var reader io.Reader
+-	reader = bytes.NewBuffer(message)
+-
+-	// If this is a compressed message, uncompress it.
+-	if messageType == websocket.BinaryMessage {
+-
+-		z, err2 := zlib.NewReader(reader)
+-		if err2 != nil {
+-			s.log(LogError, "error uncompressing websocket message, %s", err)
+-			return nil, err2
+-		}
+-
+-		defer func() {
+-			err3 := z.Close()
+-			if err3 != nil {
+-				s.log(LogWarning, "error closing zlib, %s", err)
+-			}
+-		}()
+-
+-		reader = z
+-	}
+-
+-	// Decode the event into an Event struct.
+-	var e *Event
+-	decoder := json.NewDecoder(reader)
+-	if err = decoder.Decode(&e); err != nil {
+-		s.log(LogError, "error decoding websocket message, %s", err)
+-		return e, err
+-	}
+-
+-	s.log(LogDebug, "Op: %d, Seq: %d, Type: %s, Data: %s\n\n", e.Operation, e.Sequence, e.Type, string(e.RawData))
+ 
+ 	// Ping request.
+ 	// Must respond with a heartbeat packet within 5 seconds
+ 	if e.Operation == 1 {
+ 		s.log(LogInformational, "sending heartbeat in response to Op1")
+-		s.wsMutex.Lock()
+-		err = s.wsConn.WriteJSON(heartbeatOp{1, atomic.LoadInt64(s.sequence)})
+-		s.wsMutex.Unlock()
++		err = s.gatewayWrite(context.Background(), nil, heartbeatOp{1, atomic.LoadInt64(s.sequence)})
+ 		if err != nil {
+ 			s.log(LogError, "error sending heartbeat in response to Op1")
+ 			return e, err
+@@ -625,19 +588,19 @@
+ 	// Invalid Session
+ 	// Must respond with a Identify packet.
+ 	if e.Operation == 9 {
++		var resumable *bool
++		if json.Unmarshal(e.RawData, &resumable) != nil || resumable == nil {
++			return e, ErrGatewayIngress
++		}
+ 		s.log(LogInformational, "Closing and reconnecting in response to Op9")
+ 		s.CloseWithCode(websocket.CloseServiceRestart)
+ 
+-		var resumable bool
+-		if err := json.Unmarshal(e.RawData, &resumable); err != nil {
+-			s.log(LogError, "error unmarshalling invalid session event, %s", err)
+-			return e, err
+-		}
+-
+-		if !resumable {
++		if !*resumable {
+ 			s.log(LogInformational, "Gateway session is not resumable, discarding its information")
++			s.Lock()
+ 			s.resumeGatewayURL = ""
+ 			s.sessionID = ""
++			s.Unlock()
+ 			atomic.StoreInt64(s.sequence, 0)
+ 		}
+ 
+@@ -662,38 +625,64 @@
+ 	if e.Operation != 0 {
+ 		// But we probably should be doing something with them.
+ 		// TEMP
+-		s.log(LogWarning, "unknown Op: %d, Seq: %d, Type: %s, Data: %s, message: %s", e.Operation, e.Sequence, e.Type, string(e.RawData), string(message))
++		s.log(LogWarning, "unknown Gateway opcode %d", e.Operation)
+ 		return e, nil
+ 	}
+ 
++	// Reconnection can overlap the old reader's final dispatch. The host
++	// admission lane must remain serial across that boundary as well.
++	s.dispatchSerial.Lock()
++	// This read lock is only the callback lifetime barrier, not a State or
++	// Session lock. Detach takes its write side and joins the active callback.
++	s.dispatchMu.RLock()
++	s.RLock()
++	faulted := s.gatewayFaulted
++	s.RUnlock()
++	if faulted {
++		s.dispatchMu.RUnlock()
++		s.dispatchSerial.Unlock()
++		return e, ErrGatewayIngress
++	}
+ 	// Store the message sequence
+ 	atomic.StoreInt64(s.sequence, e.Sequence)
+ 
+-	// Map event to registered event handlers and pass it along to any registered handlers.
++	observer := s.dispatchObserver
+ 	if eh, ok := registeredInterfaceProviders[e.Type]; ok {
+ 		e.Struct = eh.New()
+-
+-		// Attempt to unmarshal our event.
+-		if err = json.Unmarshal(e.RawData, e.Struct); err != nil {
+-			s.log(LogError, "error unmarshalling %s event, %s", e.Type, err)
+-		}
+-
+-		// Send event to any registered event handlers for it's type.
+-		// Because the above doesn't cancel this, in case of an error
+-		// the struct could be partially populated or at default values.
+-		// However, most errors are due to a single field and I feel
+-		// it's better to pass along what we received than nothing at all.
+-		// TODO: Think about that decision :)
+-		// Either way, READY events must fire, even with errors.
+-		s.handleEvent(e.Type, e.Struct)
+-	} else {
+-		s.log(LogWarning, "unknown event: Op: %d, Seq: %d, Type: %s, Data: %s", e.Operation, e.Sequence, e.Type, string(e.RawData))
+-	}
+-
+-	// For legacy reasons, we send the raw event also, this could be useful for handling unknown events.
++		if !validGatewayPayloadShape(e.Type, e.RawData) {
++			err = errGatewayPayload
++		} else {
++			err = json.Unmarshal(e.RawData, e.Struct)
++			if err == nil && !validGatewayStatePayload(e.Struct) {
++				err = errGatewayPayload
++			}
++		}
++		if err == nil {
++			var before interface{}
++			if observer != nil {
++				before = s.cachedBefore(e.Struct)
++			}
++			s.onInterface(e.Struct)
++			if observer != nil {
++				setDispatchBefore(e.Struct, before)
++				observer(s, e, nil)
++			}
++		} else if observer != nil {
++			observer(s, e, err)
++		}
++	} else if observer != nil {
++		// Unknown events are visible only to the trusted observer; the host
++		// allowlist decides whether they are supported, never raw fallback.
++		observer(s, e, nil)
++	}
++	s.dispatchMu.RUnlock()
++	s.dispatchSerial.Unlock()
++	if e.Struct != nil && err == nil {
++		s.handleEventHandlers(e.Type, e.Struct)
++	}
++	// Preserve the standalone SDK's legacy raw-event callback, separately.
+ 	s.handleEvent(eventEventType, e)
+-
+-	return e, nil
++	return e, err
+ }
+ 
+ // ------------------------------------------------------------------------------------------------
+@@ -712,141 +701,16 @@
+ 	Data voiceChannelJoinData `json:"d"`
+ }
+ 
+-// ChannelVoiceJoin joins the session user to a voice channel.
+-//
+-//    gID     : Guild ID of the channel to join.
+-//    cID     : Channel ID of the channel to join.
+-//    mute    : If true, you will be set to muted upon joining.
+-//    deaf    : If true, you will be set to deafened upon joining.
+-func (s *Session) ChannelVoiceJoin(gID, cID string, mute, deaf bool) (voice *VoiceConnection, err error) {
+-
+-	s.log(LogInformational, "called")
+-
+-	s.RLock()
+-	voice, _ = s.VoiceConnections[gID]
+-	s.RUnlock()
+-
+-	if voice == nil {
+-		voice = &VoiceConnection{}
+-		s.Lock()
+-		s.VoiceConnections[gID] = voice
+-		s.Unlock()
+-	}
+-
+-	voice.Lock()
+-	voice.GuildID = gID
+-	voice.ChannelID = cID
+-	voice.deaf = deaf
+-	voice.mute = mute
+-	voice.session = s
+-	voice.Unlock()
+-
+-	err = s.ChannelVoiceJoinManual(gID, cID, mute, deaf)
+-	if err != nil {
+-		return
+-	}
+-
+-	// doesn't exactly work perfect yet.. TODO
+-	err = voice.waitUntilConnected()
+-	if err != nil {
+-		s.log(LogWarning, "error waiting for voice to connect, %s", err)
+-		voice.Close()
+-		return
+-	}
+-
+-	return
+-}
+-
+ // ChannelVoiceJoinManual initiates a voice session to a voice channel, but does not complete it.
+ //
+ // This should only be used when the VoiceServerUpdate will be intercepted and used elsewhere.
+ //
+-//    gID     : Guild ID of the channel to join.
+-//    cID     : Channel ID of the channel to join, leave empty to disconnect.
+-//    mute    : If true, you will be set to muted upon joining.
+-//    deaf    : If true, you will be set to deafened upon joining.
+-func (s *Session) ChannelVoiceJoinManual(gID, cID string, mute, deaf bool) (err error) {
+-
+-	s.log(LogInformational, "called")
+-
+-	var channelID *string
+-	if cID == "" {
+-		channelID = nil
+-	} else {
+-		channelID = &cID
+-	}
+-
+-	// Send the request to Discord that we want to join the voice channel
+-	data := voiceChannelJoinOp{4, voiceChannelJoinData{&gID, channelID, mute, deaf}}
+-	s.wsMutex.Lock()
+-	err = s.wsConn.WriteJSON(data)
+-	s.wsMutex.Unlock()
+-	return
+-}
+-
+-// onVoiceStateUpdate handles Voice State Update events on the data websocket.
+-func (s *Session) onVoiceStateUpdate(st *VoiceStateUpdate) {
+-
+-	// If we don't have a connection for the channel, don't bother
+-	if st.ChannelID == "" {
+-		return
+-	}
+-
+-	// Check if we have a voice connection to update
+-	s.RLock()
+-	voice, exists := s.VoiceConnections[st.GuildID]
+-	s.RUnlock()
+-	if !exists {
+-		return
+-	}
+-
+-	// We only care about events that are about us.
+-	if s.State.User.ID != st.UserID {
+-		return
+-	}
+-
+-	// Store the SessionID for later use.
+-	voice.Lock()
+-	voice.UserID = st.UserID
+-	voice.sessionID = st.SessionID
+-	voice.ChannelID = st.ChannelID
+-	voice.Unlock()
+-}
+-
+-// onVoiceServerUpdate handles the Voice Server Update data websocket event.
+-//
+-// This is also fired if the Guild's voice region changes while connected
+-// to a voice channel.  In that case, need to re-establish connection to
+-// the new region endpoint.
+-func (s *Session) onVoiceServerUpdate(st *VoiceServerUpdate) {
+-
+-	s.log(LogInformational, "called")
+-
+-	s.RLock()
+-	voice, exists := s.VoiceConnections[st.GuildID]
+-	s.RUnlock()
+-
+-	// If no VoiceConnection exists, just skip this
+-	if !exists {
+-		return
+-	}
+-
+-	// If currently connected to voice ws/udp, then disconnect.
+-	// Has no effect if not connected.
+-	voice.Close()
+-
+-	// Store values for later use
+-	voice.Lock()
+-	voice.token = st.Token
+-	voice.endpoint = st.Endpoint
+-	voice.GuildID = st.GuildID
+-	voice.Unlock()
+-
+-	// Open a connection to the voice server
+-	err := voice.open()
+-	if err != nil {
+-		s.log(LogError, "onVoiceServerUpdate voice.open, %s", err)
+-	}
++//	gID     : Guild ID of the channel to join.
++//	cID     : Channel ID of the channel to join, leave empty to disconnect.
++//	mute    : If true, you will be set to muted upon joining.
++//	deaf    : If true, you will be set to deafened upon joining.
++func (s *Session) ChannelVoiceJoinManual(gID, cID string, mute, deaf bool) error {
++	return s.ChannelVoiceJoinManualContext(context.Background(), gID, cID, mute, deaf)
+ }
+ 
+ type identifyOp struct {
+@@ -855,7 +719,7 @@
+ }
+ 
+ // identify sends the identify packet to the gateway
+-func (s *Session) identify() error {
++func (s *Session) identifyContext(ctx context.Context, conn *websocket.Conn) error {
+ 	s.log(LogDebug, "called")
+ 
+ 	// TODO: This is a temporary block of code to help
+@@ -884,17 +748,19 @@
+ 
+ 	// Send Identify packet to Discord
+ 	op := identifyOp{2, s.Identify}
+-	s.log(LogDebug, "Identify Packet: \n%#v", op)
+-	s.wsMutex.Lock()
+-	err := s.wsConn.WriteJSON(op)
+-	s.wsMutex.Unlock()
+-
+-	return err
++	return s.gatewayWrite(ctx, conn, op)
+ }
+ 
+ func (s *Session) reconnect() {
+ 
+ 	s.log(LogInformational, "called")
++	// Voice generations fail on main Gateway loss. Never resume/rejoin or replay
++	// their media when the general Gateway reconnects.
++	s.RLock()
++	for _, voice := range s.VoiceConnections {
++		voice.engine.stop(errors.New("main Gateway connection lost"))
++	}
++	s.RUnlock()
+ 
+ 	var err error
+ 
+@@ -909,31 +775,15 @@
+ 			if err == nil {
+ 				s.log(LogInformational, "successfully reconnected to gateway")
+ 
+-				// I'm not sure if this is actually needed.
+-				// if the gw reconnect works properly, voice should stay alive
+-				// However, there seems to be cases where something "weird"
+-				// happens.  So we're doing this for now just to improve
+-				// stability in those edge cases.
+-				if s.ShouldReconnectVoiceOnSessionError {
+-					s.RLock()
+-					defer s.RUnlock()
+-					for _, v := range s.VoiceConnections {
+-
+-						s.log(LogInformational, "reconnecting voice connection to guild %s", v.GuildID)
+-						go v.reconnect()
+-
+-						// This is here just to prevent violently spamming the
+-						// voice reconnects
+-						time.Sleep(1 * time.Second)
+-					}
+-				}
+ 				return
+ 			}
+ 
+ 			// Certain race conditions can call reconnect() twice. If this happens, we
+ 			// just break out of the reconnect loop
+ 			if err == ErrWSAlreadyOpen {
+-				s.log(LogInformational, "Websocket already exists, no need to reconnect")
++				return
++			}
++			if errors.Is(err, ErrGatewayIngress) {
+ 				return
+ 			}
+ 
+@@ -948,59 +798,46 @@
+ 	}
+ }
+ 
+-// Close closes a websocket and stops all listening/heartbeat goroutines.
+-// TODO: Add support for Voice WS/UDP
++// Close closes the main websocket and stops all voice generations.
+ func (s *Session) Close() error {
+ 	return s.CloseWithCode(websocket.CloseNormalClosure)
+ }
+ 
+ // CloseWithCode closes a websocket using the provided closeCode and stops all
+ // listening/heartbeat goroutines.
+-// TODO: Add support for Voice WS/UDP connections
+-func (s *Session) CloseWithCode(closeCode int) (err error) {
+-
+-	s.log(LogInformational, "called")
++func (s *Session) CloseWithCode(closeCode int) error {
++	s.wsLifecycle.Lock()
+ 	s.Lock()
+ 
+ 	s.DataReady = false
+ 
+ 	if s.listening != nil {
+-		s.log(LogInformational, "closing listening channel")
+ 		close(s.listening)
+ 		s.listening = nil
+ 	}
+-
+-	// TODO: Close all active Voice Connections too
+-	// this should force stop any reconnecting voice channels too
+-
+-	if s.wsConn != nil {
+-
+-		s.log(LogInformational, "sending close frame")
+-		// To cleanly close a connection, a client should send a close
+-		// frame and wait for the server to close the connection.
+-		s.wsMutex.Lock()
+-		err := s.wsConn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(closeCode, ""))
+-		s.wsMutex.Unlock()
+-		if err != nil {
+-			s.log(LogInformational, "error closing websocket, %s", err)
+-		}
+-
+-		// TODO: Wait for Discord to actually close the connection.
+-		time.Sleep(1 * time.Second)
+-
+-		s.log(LogInformational, "closing gateway websocket")
+-		err = s.wsConn.Close()
+-		if err != nil {
+-			s.log(LogInformational, "error closing websocket, %s", err)
+-		}
+-
+-		s.wsConn = nil
+-	}
+-
++	conn := s.wsConn
++	s.wsConn = nil
++	voices := make([]*VoiceConnection, 0, len(s.VoiceConnections))
++	for _, voice := range s.VoiceConnections {
++		voices = append(voices, voice)
++	}
+ 	s.Unlock()
+-
+-	s.log(LogInformational, "emit disconnect event")
++	for _, voice := range voices {
++		voice.engine.stop(ErrVoiceClosed)
++	}
++	var err error
++	if conn != nil {
++		// Bound both gate acquisition and the close frame. A stuck writer is
++		// interrupted by Close even if it used a background context.
++		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
++		err = s.gatewayWriteFrame(ctx, conn, websocket.CloseMessage, websocket.FormatCloseMessage(closeCode, ""), nil)
++		cancel()
++		closeErr := conn.Close()
++		if err == nil {
++			err = closeErr
++		}
++	}
++	s.wsLifecycle.Unlock()
+ 	s.handleEvent(disconnectEventType, &Disconnect{})
+-
+-	return
+-}
++	return err
++}
