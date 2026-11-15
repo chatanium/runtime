@@ -15,7 +15,12 @@ if [[ "$mode" == voice ]]; then native_only=0; fi
 safe_path .tools/native
 safe_path bin/voice-runtime
 [[ ! -e bin/voice-runtime || -d bin/voice-runtime ]] || fail 'Native bundle output must be a directory'
-safe_file bin/chatanium-voice
+safe_file bin/chatanium
+if [[ "$mode" == voice ]]; then
+    safe_file .tools/build.lock
+    exec 7>.tools/build.lock
+    flock -x 7
+fi
 safe_file .tools/native-build.lock
 exec 9>.tools/native-build.lock
 flock -x 9
@@ -78,13 +83,13 @@ if [[ "$mode" == native ]]; then
     exit 0
 fi
 # Validate on the actual EL9 target loader too, before publishing any output.
-LD_LIBRARY_PATH="$ROOT/.tools/native/bundle/lib" /lib64/ld-linux-x86-64.so.2 --list .tools/native/bundle/chatanium-voice
+LD_LIBRARY_PATH="$ROOT/.tools/native/bundle/lib" /lib64/ld-linux-x86-64.so.2 --list .tools/native/bundle/chatanium
 LD_LIBRARY_PATH="$ROOT/.tools/native/bundle/lib" /lib64/ld-linux-x86-64.so.2 --list .tools/native/bundle/lib/libdave.so
 staging=$(mktemp -d "$ROOT/bin/.voice-runtime.XXXXXXXX")
 cp -a -- .tools/native/bundle/lib .tools/native/bundle/licenses .tools/native/bundle/provenance "$staging/"
 printf '%s\n' "$builder" > "$staging/provenance/builder-image-id.txt"
-binary=$(mktemp "$ROOT/bin/.chatanium-voice.XXXXXXXX")
-cp -p -- .tools/native/bundle/chatanium-voice "$binary"
+binary=$(mktemp "$ROOT/bin/.chatanium.XXXXXXXX")
+cp -p -- .tools/native/bundle/chatanium "$binary"
 if [[ -e bin/voice-runtime ]]; then
     backup=$(mktemp -d "$ROOT/bin/.voice-runtime-backup.XXXXXXXX")
     rmdir -- "$backup"
@@ -92,8 +97,8 @@ if [[ -e bin/voice-runtime ]]; then
 fi
 mv -T -- "$staging" bin/voice-runtime
 staging=
-safe_file bin/chatanium-voice
-mv -fT -- "$binary" bin/chatanium-voice
+safe_file bin/chatanium
+mv -fT -- "$binary" bin/chatanium
 binary=
 if [[ -n "$backup" ]]; then rm -rf -- "$backup"; backup=; fi
-printf 'Published bin/chatanium-voice and bin/voice-runtime/{lib,licenses,provenance}/\n'
+printf 'Published voice-enabled bin/chatanium and bin/voice-runtime/{lib,licenses,provenance}/\n'

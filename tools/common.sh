@@ -10,7 +10,7 @@ fail() { printf '%s\n' "$*" >&2; exit 1; }
 # Check every existing component before creating or replacing an owned file.
 safe_path() {
     local path=$1 part current=$ROOT
-    case "$path" in ''|/*|*/|*//*|.|..|../*|*/../*|*/..|./*|*/./*) fail "Unsafe owned path: $path" ;; esac
+    case "$path" in ''|/*|*/|*//*|.|..|../*|*/../*|*/..|*/.|./*|*/./*) fail "Unsafe owned path: $path" ;; esac
     local -a parts
     IFS=/ read -r -a parts <<< "$path"
     for part in "${parts[@]}"; do
@@ -22,6 +22,56 @@ safe_path() {
 safe_file() {
     safe_path "$1"
     [[ ! -e "$1" || -f "$1" ]] || fail "Owned output is not a regular file: $1"
+}
+
+# A bare module name belongs to modules/; explicit paths stay repo-relative.
+# The canonical manifest is also the discovery marker for v2 modules.
+resolve_module_directory() {
+    local directory=${1:?Expected module directory}
+    [[ "$directory" != *[[:space:]:]* ]] || fail "Invalid module directory: $directory"
+    [[ "$directory" == */* ]] || directory=modules/$directory
+    safe_path "$directory"
+    [[ -d "$directory" ]] || fail "Module directory missing: $directory"
+    safe_file "$directory/manifest.json"
+    [[ -f "$directory/manifest.json" ]] || fail "Module manifest missing: $directory/manifest.json"
+    printf '%s\n' "$directory"
+}
+
+module_build_output() {
+    local directory
+    directory=$(resolve_module_directory "$1") || return
+    printf 'bin/%s/module\n' "$directory"
+}
+
+module_go_directory() {
+    local directory
+    directory=$(resolve_module_directory "$1") || return
+    while [[ "$directory" != . ]]; do
+        safe_file "$directory/go.mod"
+        if [[ -f "$directory/go.mod" ]]; then
+            printf '%s\n' "$directory"
+            return
+        fi
+        if [[ "$directory" == */* ]]; then directory=${directory%/*}; else directory=.; fi
+    done
+    safe_file go.mod
+    [[ -f go.mod ]] || fail 'Repository go.mod missing'
+    printf '.\n'
+}
+
+list_module_directories() {
+    local directory resolved
+    local -a directories=()
+    safe_path modules
+    [[ -d modules ]] || return 0
+    for directory in modules/*; do
+        [[ -d "$directory" && ! -L "$directory" && -f "$directory/manifest.json" ]] || continue
+        resolved=$(resolve_module_directory "$directory") || return
+        directories+=("$resolved")
+    done
+    if (( ${#directories[@]} )); then
+        printf '%s\n' "${directories[@]}" | LC_ALL=C sort
+    fi
 }
 
 safe_path .tools

@@ -13,10 +13,11 @@ and follow the root [shared-lease and revalidation instructions](../../README.md
 The prepared source comes from the maintained upstream patch stack, not a
 published fork dependency. Original upstream checksums belong to
 `third_party/discordgo/upstream.sum`, not this module's `go.sum`.
-The preserved executable name is `bin/voice-player-module`; the source move does
-not change the manifest, ModuleID or image/grant contract.
+`make build-module audio-player` builds `bin/modules/audio-player/module`. Plain
+`make build` includes this module automatically; its directory does not change
+the manifest, ModuleID or image/grant contract.
 
-From the repository root, `make build-media` builds the nested media modules; `make image-media` packages the pinned tools. Use the image through the v2 runtime's operator configuration and approved immutable image digest, not a host subprocess or a token-bearing module environment. Host Discord credentials remain exclusively in the host backend. Native DAVE is a dependency of the separately built voice-enabled host, never of this module.
+From the repository root, `make image-media` packages the media modules and pinned tools. Use the image through the v2 runtime's operator configuration and approved immutable image digest, not a host subprocess or a token-bearing module environment. Host Discord credentials remain exclusively in the host backend. Native DAVE belongs to the default voice-enabled host runtime, never to this module.
 
 `manifest.json` is the sole canonical embedded protobuf-JSON manifest. Image tooling copies its exact bytes into `org.chatanium.flexmodule.manifest.v2`; the manifest is an untrusted request, never an approval. Strict parsing rejects unknown manifest fields. The descriptive executable name does not authenticate a ModuleID.
 

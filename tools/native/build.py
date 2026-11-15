@@ -180,10 +180,10 @@ env.update(CGO_ENABLED='1', GOOS='linux', GOARCH='amd64', GOTOOLCHAIN='local', G
            GOPATH='/work/go', GOCACHE='/work/go-cache', GOMODCACHE='/work/go-modcache',
            CGO_CFLAGS='-I' + str(prefix / 'include'),
            CGO_LDFLAGS='-L' + str(lib.parent) + ' -Wl,-rpath,$ORIGIN/voice-runtime/lib')
-run('/go/bin/go', '-C', source, 'build', '-mod=readonly', '-trimpath', '-tags=voice', '-o', bundle / 'chatanium-voice', '.', env=env)
+run('/go/bin/go', '-C', source, 'build', '-mod=readonly', '-trimpath', '-tags=voice', '-o', bundle / 'chatanium', '.', env=env)
 env['LD_LIBRARY_PATH'] = str(bundle / 'lib')
-run('/lib64/ld-linux-x86-64.so.2', '--list', bundle / 'chatanium-voice', env=env)
-(provenance / 'go-build-info.txt').write_text(capture('/go/bin/go', 'version', '-m', bundle / 'chatanium-voice'))
+run('/lib64/ld-linux-x86-64.so.2', '--list', bundle / 'chatanium', env=env)
+(provenance / 'go-build-info.txt').write_text(capture('/go/bin/go', 'version', '-m', bundle / 'chatanium'))
 go_sources = {}
 for directory, children, files in os.walk(source):
     children[:] = [name for name in children if not name.startswith('.') and name not in ('bin', 'temp_audio')]
@@ -194,6 +194,6 @@ for directory, children, files in os.walk(source):
 write_json(provenance / 'go-source-sha256.json', go_sources)
 # Voice receipt paths are relative to the published bin/ layout, not /work/bundle.
 write_json(provenance / 'bundle-sha256.json', {
-    path if path == 'chatanium-voice' else 'voice-runtime/' + path: checksum
+    path if path == 'chatanium' else 'voice-runtime/' + path: checksum
     for path, checksum in inventory(bundle).items()
 })
