@@ -599,8 +599,10 @@ type ModuleManifest struct {
 	RequiredCapabilities []*CapabilityRequest   `protobuf:"bytes,6,rep,name=required_capabilities,json=requiredCapabilities,proto3" json:"required_capabilities,omitempty"`
 	OptionalCapabilities []*CapabilityRequest   `protobuf:"bytes,7,rep,name=optional_capabilities,json=optionalCapabilities,proto3" json:"optional_capabilities,omitempty"`
 	BackendRequirements  []*BackendRequirement  `protobuf:"bytes,8,rep,name=backend_requirements,json=backendRequirements,proto3" json:"backend_requirements,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// Descriptive only; does not grant capabilities or confer authority.
+	Description   string `protobuf:"bytes,9,opt,name=description,proto3" json:"description,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ModuleManifest) Reset() {
@@ -687,6 +689,13 @@ func (x *ModuleManifest) GetBackendRequirements() []*BackendRequirement {
 		return x.BackendRequirements
 	}
 	return nil
+}
+
+func (x *ModuleManifest) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
 }
 
 type CapabilityGrant struct {
@@ -2089,7 +2098,7 @@ const file_core_v2_core_proto_rawDesc = "" +
 	"\x0eprotocol_major\x18\x02 \x01(\rR\rprotocolMajor\x12\x1a\n" +
 	"\brequired\x18\x03 \x01(\bR\brequired\x12Z\n" +
 	"\x15required_capabilities\x18\x04 \x03(\v2%.flexmodule.core.v2.CapabilityRequestR\x14requiredCapabilities\x12Z\n" +
-	"\x15optional_capabilities\x18\x05 \x03(\v2%.flexmodule.core.v2.CapabilityRequestR\x14optionalCapabilities\"\xb0\x03\n" +
+	"\x15optional_capabilities\x18\x05 \x03(\v2%.flexmodule.core.v2.CapabilityRequestR\x14optionalCapabilities\"\xd2\x03\n" +
 	"\x0eModuleManifest\x12%\n" +
 	"\x0eprotocol_major\x18\x01 \x01(\rR\rprotocolMajor\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
@@ -2100,7 +2109,8 @@ const file_core_v2_core_proto_rawDesc = "" +
 	"repository\x12Z\n" +
 	"\x15required_capabilities\x18\x06 \x03(\v2%.flexmodule.core.v2.CapabilityRequestR\x14requiredCapabilities\x12Z\n" +
 	"\x15optional_capabilities\x18\a \x03(\v2%.flexmodule.core.v2.CapabilityRequestR\x14optionalCapabilities\x12Y\n" +
-	"\x14backend_requirements\x18\b \x03(\v2&.flexmodule.core.v2.BackendRequirementR\x13backendRequirements\"\xa9\x01\n" +
+	"\x14backend_requirements\x18\b \x03(\v2&.flexmodule.core.v2.BackendRequirementR\x13backendRequirements\x12 \n" +
+	"\vdescription\x18\t \x01(\tR\vdescription\"\xa9\x01\n" +
 	"\x0fCapabilityGrant\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12J\n" +
 	"\x0fresource_scopes\x18\x02 \x03(\v2!.flexmodule.core.v2.ResourceScopeR\x0eresourceScopes\x126\n" +

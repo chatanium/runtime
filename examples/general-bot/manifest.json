@@ -2,6 +2,7 @@
   "protocolMajor": 2,
   "name": "general-example",
   "version": "2.0.0",
+  "description": "Discord 명령, 입력 폼, 메시지, 설정 저장, 파일 업로드 및 서버 관리 기능을 보여 주는 일반 봇 예제입니다.",
   "author": "Chatanium contributors",
   "repository": "https://github.com/thirdscam/chatanium",
   "requiredCapabilities": [

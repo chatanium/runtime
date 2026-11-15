@@ -29,7 +29,7 @@ GENERATED_FILES := $(GENERATED_EXPECTED_FILES)
 export GENERATED_FILES GENERATED_EXPECTED_FILES BUILD_OUTPUTS
 
 MAKE_COMMAND_TARGETS := tools prepare-sdk build build-runtime build-module build-native build-integration buf buf-check clean run \
-	sqlc start new_module image-module image-media check-offline check-sandbox check-sandbox-policy smoke-discord smoke-voice
+	sqlc start new_module list-module image-module image-media check-offline check-sandbox check-sandbox-policy smoke-discord smoke-voice
 .PHONY: $(MAKE_COMMAND_TARGETS)
 
 # Make has no positional arguments: consume exactly one otherwise-unrecognized
@@ -73,6 +73,13 @@ build: build-runtime
 
 build-module:
 	@bash tools/build.sh module "$$MODULE_BUILD_DIRECTORY"
+
+# Inspect canonical manifests only; no compiler, native runtime or SDK is needed.
+list-module:
+	@bash -euo pipefail -c 'source tools/common.sh; \
+		directories=(); discovered=$$(list_module_directories); \
+		if [[ -n "$$discovered" ]]; then mapfile -t directories <<< "$$discovered"; fi; \
+		exec python3 tools/list-modules.py "$${directories[@]}"'
 
 # Permanent ordinary/no-voice harness and same-package runtime return holder.
 build-integration:

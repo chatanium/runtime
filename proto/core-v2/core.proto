@@ -37,6 +37,8 @@ message ModuleManifest {
   repeated CapabilityRequest required_capabilities = 6;
   repeated CapabilityRequest optional_capabilities = 7;
   repeated BackendRequirement backend_requirements = 8;
+  // Descriptive only; does not grant capabilities or confer authority.
+  string description = 9;
 }
 message CapabilityGrant {
   string name = 1;
