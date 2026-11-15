@@ -27,6 +27,13 @@ Wire package/service names remain `flexmodule.core.v2` and
 `flexmodule.discord.v2`; this namespace migration does not rename protocol
 identities, capabilities or broker IDs.
 
+`ModuleManifest.description` (field 9) is optional human-readable purpose text.
+It grants no authority and does not alter backend/capability negotiation.
+Manifests without it remain valid. It is part of the same canonical manifest
+embedded in the executable and copied into the image label; update and rebuild
+those artifacts together. `make list-module` reads local source manifests for
+inspection without starting the runtime.
+
 The schemas do not serialize `discordgo.Session`, live `State`,
 `VoiceConnection`, file readers or raw host credentials. File bytes use explicit
 streaming refs. Interaction/webhook credentials use typed opaque references.
