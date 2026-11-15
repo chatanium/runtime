@@ -134,6 +134,12 @@ The language floor is Go 1.27.0; the compiler is pinned to **Go 1.27.3** in
 Version-manager shims are not accepted as compiler executables. The scripts
 select the pinned toolchain, neutralize inherited `GOROOT`, and use read-only module files.
 
+For a goenv installation, resolve the real pinned executable rather than its shim:
+
+```sh
+export BOOTSTRAP_GO="$(GOENV_VERSION=1.27.3 goenv which go)"
+```
+
 `make tools` installs Buf 1.75.0, protoc-gen-go v1.36.12 and
 protoc-gen-go-grpc v1.6.2 under `.tools/bin`. From the repository root:
 
@@ -145,6 +151,20 @@ make build-media
 make buf
 make buf-check
 ```
+
+The host database bindings in `src/Database/Internal/` are checked in, so an
+ordinary build or startup does not require sqlc or leftover generated files.
+After editing `database/schema.sql` or `database/query.sql`, regenerate with
+**sqlc v1.30.0**:
+
+```sh
+sqlc version # v1.30.0
+make sqlc
+```
+
+Commit the SQL changes together with all three generated Go files
+(`db.go`, `models.go`, `query.sql.go`). SQL generation is independent of
+`make buf` and `make buf-check`.
 
 | Command | Artifact or scope |
 |---|---|
