@@ -16,6 +16,8 @@ class Backend:
     name: str
     major: int
     required: bool
+    required_capabilities: list[str]
+    optional_capabilities: list[str]
 
 
 @dataclass
@@ -27,6 +29,8 @@ class Module:
     description: str
     author: str
     backends: list[Backend]
+    required_capabilities: list[str]
+    optional_capabilities: list[str]
     required_count: int
     optional_count: int
 
@@ -62,16 +66,17 @@ def array(data, name, alias):
     return value
 
 
-def capability_count(data, name, alias):
+def capability_names(data, name, alias):
     requests = array(data, name, alias)
+    names = []
     for index, request in enumerate(requests):
         if not isinstance(request, dict):
             raise ValueError(f"{name}[{index}] must be a capability request object")
         try:
-            string(request, "name", required=True)
+            names.append(string(request, "name", required=True))
         except ValueError as error:
             raise ValueError(f"{name}[{index}]: {error}") from error
-    return len(requests)
+    return names
 
 
 def unique_object(pairs):
@@ -100,8 +105,10 @@ def load_module(directory):
     major = protocol_major(manifest)
     description = string(manifest, "description")
     author = string(manifest, "author")
-    required_count = capability_count(manifest, "requiredCapabilities", "required_capabilities")
-    optional_count = capability_count(manifest, "optionalCapabilities", "optional_capabilities")
+    required_capabilities = capability_names(manifest, "requiredCapabilities", "required_capabilities")
+    optional_capabilities = capability_names(manifest, "optionalCapabilities", "optional_capabilities")
+    required_count = len(required_capabilities)
+    optional_count = len(optional_capabilities)
     backends = []
     for index, backend in enumerate(array(manifest, "backendRequirements", "backend_requirements")):
         try:
@@ -114,13 +121,16 @@ def load_module(directory):
             required = field(backend, "required", default=False)
             if type(required) is not bool:
                 raise ValueError("required must be a boolean")
-            required_count += capability_count(backend, "requiredCapabilities", "required_capabilities")
-            optional_count += capability_count(backend, "optionalCapabilities", "optional_capabilities")
-            backends.append(Backend(backend_id, backend_major, required))
+            backend_required = capability_names(backend, "requiredCapabilities", "required_capabilities")
+            backend_optional = capability_names(backend, "optionalCapabilities", "optional_capabilities")
+            required_count += len(backend_required)
+            optional_count += len(backend_optional)
+            backends.append(Backend(backend_id, backend_major, required,
+                                    backend_required, backend_optional))
         except ValueError as error:
             raise ValueError(f"backendRequirements[{index}]: {error}") from error
     return Module(directory, name, version, major, description, author, backends,
-                  required_count, optional_count)
+                  required_capabilities, optional_capabilities, required_count, optional_count)
 
 
 def safe_text(value):
@@ -177,27 +187,50 @@ def wrapped(text, width, indent=0):
 
 
 def render_modules(modules, width):
-    if not modules:
-        return "\n".join(wrapped("No modules found (direct modules/* directories with manifest.json).", width)) + "\n"
-    lines = wrapped(f"Modules: {len(modules)}", width)
-    lines += wrapped("Manifest metadata; capability requests are not permission grants.", width)
+    width = min(width, 80)
+    separator = "-" * width
+    lines = []
     for module in modules:
-        lines.append("")
+        lines += [separator, ""]
         name = module.name.strip() or "(unnamed)"
-        version = module.version.strip() or "(not provided)"
-        lines += wrapped(f"{name} | {version} | core protocol {module.major}", width)
-        lines += wrapped(f"Folder: {module.directory}", width, indent=2)
-        lines += wrapped(f"Purpose: {module.description.strip() or '(no description provided)'}", width, indent=2)
-        lines += wrapped(f"Author: {module.author.strip() or '(not provided)'}", width, indent=2)
-        backends = "; ".join(
-            f"{backend.name} protocol {backend.major} ({'required' if backend.required else 'optional'})"
-            for backend in module.backends
-        )
-        lines += wrapped(f"Backends: {backends or '(none declared)'}", width, indent=2)
+        version = f"v{module.version.strip()}" if module.version.strip() else "(version not provided)"
+        lines += wrapped(f"{name} {version} ({module.directory})", width)
+        lines += wrapped(f"Author: {module.author.strip() or '(not provided)'}", width)
+        lines.append("")
+        lines += wrapped(module.description.strip() or "(no description provided)", width)
+        lines.append("")
+        lines += wrapped("Backend Protocol:", width)
+        lines += wrapped(f"- Core (v{module.major}, required)", width, indent=2)
+        for backend in module.backends:
+            label = "Discord" if backend.name == "discord" else backend.name
+            requirement = "required" if backend.required else "optional"
+            lines += wrapped(f"- {label} (v{backend.major}, {requirement})", width, indent=2)
+        lines.append("")
         lines += wrapped(
-            f"Requested capabilities (core + backends): {module.required_count} required, "
-            f"{module.optional_count} optional", width, indent=2,
+            f"Requested capabilities ({module.required_count} required, "
+            f"{module.optional_count} optional):", width,
         )
+        groups = [("Core", module.required_capabilities, module.optional_capabilities)]
+        groups += [
+            ("Discord" if backend.name == "discord" else backend.name,
+             backend.required_capabilities, backend.optional_capabilities)
+            for backend in module.backends
+        ]
+        for label, required, optional in groups:
+            if not required and not optional:
+                continue
+            lines += wrapped(f"- {label}", width, indent=2)
+            for names, requirement in ((required, "required"), (optional, "optional")):
+                for capability in names:
+                    lines += wrapped(f"- {capability} ({requirement})", width, indent=4)
+        if not module.required_count and not module.optional_count:
+            lines += wrapped("- (none requested)", width, indent=2)
+        lines.append("")
+    if not modules:
+        lines += wrapped("No modules found (direct modules/* directories with manifest.json).", width)
+        lines.append("")
+    lines += [separator, ""]
+    lines += wrapped(f"N/A Activated, Total {len(modules)} Plugin(s) installed locally.", width)
     return "\n".join(lines) + "\n"
 
 
