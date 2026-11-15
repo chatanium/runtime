@@ -14,9 +14,10 @@ explicitly approved capabilities, resource scopes and finite limits.
 
 **Clean cutover:** the old standard-library `plugin.Open`/`.so` loader, symbol
 lookup and direct `discordgo.Session` callback interfaces are removed. There is
-no native-plugin fallback, directory-scanning loader, dynamic installer or hot
-reload. `hashicorp/go-plugin` remains the authenticated v2 transport inside the
-sandbox runner; it is not the removed Go standard-library plugin mechanism.
+no native-plugin fallback, directory-scanning loader, dynamic installer or
+automatic production hot reload. Development-only image replacement requires
+explicit opt-in; `hashicorp/go-plugin` remains the authenticated v2 transport
+inside the sandbox runner, not the removed Go standard-library plugin mechanism.
 Modules use typed v2 events/helpers, not the host's Session or bot token.
 
 The independent `modules/MusicBot` checkout is not scanned, loaded or migrated by
@@ -360,7 +361,7 @@ from `new`. Publish the generated image through your approved registry workflow,
 obtain its real immutable `registry/repository@sha256:...` RepoDigest, make that
 digest available to the supervisor, and follow the approval/configuration flow
 below. Copying a binary into `modules/` does not install it; there is no installer
-or hot reload.
+or implicit production hot reload. Development reload is a separate opt-in path.
 
 ### Module images
 
@@ -625,6 +626,91 @@ drain instances before backend/upload cleanup. `--duration` provides an optional
 finite run interval, not interactive acceptance proof. `make run` exposes the
 same runtime flags through `CONFIG`, `SUPERVISOR_SOCKET`, `SUPERVISOR_UID` and
 `SUPERVISOR_MAX_BYTES`, but does not start/provision the supervisor.
+
+### Development-only hot reload
+
+Ordinary `make run` and `chatanium start` do not expose a reload controller.
+Enable the watched workflow explicitly:
+
+```sh
+DEV_MODE=1 \
+DEV_RUNTIME_USER="${DEV_RUNTIME_USER:?set an existing non-root, non-Docker runtime account}" \
+CONFIG="${CONFIG:?set canonical approved runtime JSON path}" \
+SUPERVISOR_SOCKET="${SUPERVISOR_SOCKET:?set prepared supervisor socket}" \
+SUPERVISOR_UID="${SUPERVISOR_UID:?set trusted supervisor UID}" \
+SUPERVISOR_MAX_BYTES="${SUPERVISOR_MAX_BYTES:?set prepared packet bound}" \
+make run
+```
+
+`DISABLE_VOICE=1` is still the only runtime voice opt-out. The supervisor, host
+storage and writable image registry must already be prepared; this command does
+not provision accounts, sudoers, mounts or services. Image publishing uses the
+builder's pre-provisioned registry access. The runtime must use a separate
+unprivileged account when the builder has Docker authority; existing authorized
+noninteractive run-as is required. Runtime generations contain only executable
+and ancillary native artifacts, never host secrets or copied `.env` files.
+Export the configured `env:NAME` host secrets in the invoking private environment.
+The canonical operator JSON must be root-owned or owned by that runtime UID,
+not group/world writable, and already readable by both runtime and builder.
+The watcher does not copy, chmod or chown the protected configuration.
+
+The watcher binds installed module IDs to unique local source manifest names,
+using the same module discovery as `make build`. It never auto-installs an
+unconfigured module or invents approvals. Module-only changes build an overlay
+from the existing immutable image, preserving its tooling/environment, push a
+new tag to the same repository, resolve its real RepoDigest, and reload only
+that installation. Runtime/shared-source changes rebuild before requesting an
+orderly runtime stop; a replacement process starts only after positive cleanup.
+Committed images, including successful manual reloads, survive development
+restarts unless the operator changes that installation's configured image.
+The protected operator JSON is not rewritten. A final development-only cleanup
+receipt can authorize restart after a logical module failure; an ordinary crash
+or uncertain cleanup cannot.
+
+Compatible rebuilds reuse a verified published base within the watcher session,
+rather than growing an image layer chain on every edit. An unknown/manual image
+or a changed executable path establishes a new lineage.
+
+Native build cancellation also waits for its checkout-owned Docker compiler
+container to be removed. Uncertain cleanup retains
+`.tools/native-container.receipt` and blocks new native builds.
+
+For direct host-side control, add `--dev-mode --dev-socket "$DEV_SOCKET"` to
+`chatanium start`. The canonical socket parent must already be owned by the
+runtime UID with mode 0700, outside module storage/IPC mounts. The socket is
+mode 0600 and authenticates the caller's Unix peer UID; invoke clients as the
+runtime account. No TCP endpoint or root/developer-UID exception is exposed.
+Socket/image-override options without `--dev-mode` are rejected. The watcher
+creates a private runtime-owned socket directory by default; `DEV_SOCKET` can
+select an explicitly prepared private path.
+
+```sh
+curl --fail-with-body --unix-socket "${DEV_SOCKET:?set runtime-owned private socket}" \
+  http://localhost/v1/modules
+
+jq -n --arg module_id "${MODULE_ID:?select an installed module}" \
+  --arg expected_instance_id "${INSTANCE_ID:?use the current instance from GET}" \
+  --arg image "${MODULE_REPODIGEST:?use a real locally prepared same-repository digest}" \
+  '{module_id:$module_id,expected_instance_id:$expected_instance_id,image:$image}' |
+  curl --fail-with-body --unix-socket "$DEV_SOCKET" \
+    -H 'Content-Type: application/json' --data-binary @- \
+    http://localhost/v1/modules/reload
+```
+
+Reload requests can replace **only the image digest** of an installed module.
+ModuleID, UID/GID, configuration, approval, credential bindings and revisions
+are preserved. The old instance drains and must complete positive cleanup
+before the normal authenticated launch path allocates a fresh InstanceID and
+credentials. Persistent installation storage is retained; instance credentials,
+upload refs, helper transports and scratch ownership are not reused.
+Stale/concurrent requests, foreign repositories, mutable tags and incomplete
+cleanup fail closed. Invalid builds/pushes/preflight leave a healthy old instance
+alone; failed activation after a clean stop remains a reported failed instance,
+without automatic rollback or permission expansion. Development control stays
+available for an explicit corrected reload, even when every module is terminal.
+The current immutable digest may also be reloaded, for example to retry a
+cleanly reclaimed failed activation.
+
 
 ## Generic modules, scopes and validation boundaries
 
