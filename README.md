@@ -169,7 +169,7 @@ Commit the SQL changes together with all three generated Go files
 | Command | Artifact or scope |
 |---|---|
 | `make prepare-sdk` | Download the pinned upstream DiscordGo module, verify its original checksums and apply the maintained patches; no application/native compilation |
-| `make list-module` | Read local module manifests and display purpose, name/version, author, backend requirements and requested capability counts; no Go/native/SDK preparation or module build |
+| `make list-module` | Display detailed manifest blocks with name/version, author, description, backend protocols and grouped capability names; no Go/native/SDK preparation, module build or runtime query |
 | `make build-runtime` | Voice-enabled `bin/chatanium` (CGO=1, pinned native DAVE), adjacent `bin/voice-runtime/` libraries/licenses/provenance, and `bin/flexmodule-supervisor`; no application modules |
 | `DISABLE_VOICE=1 make build-runtime` | Runtime and supervisor only, CGO=0 without native voice or its library dependency |
 | `make build` | Default voice-enabled runtime plus every direct v2 module directory under `modules/`; module executables remain CGO=0 |
@@ -205,8 +205,11 @@ DiscordGo checkout is required.
 
 Each manifest may set the optional `description` field to explain its module's
 purpose. `make list-module` uses the same `modules/` discovery as `make build`
-and reads this metadata directly; it does not report installed, approved or
-running modules. Capability counts are requests, not granted permissions.
+and displays backend protocol requirements and requested capability names grouped
+by Core and backend, with required/optional totals. `Activated` is `N/A` because
+this offline listing does not query live runtime state. The footer's "installed
+locally" total counts discovered source directories, not configured, approved or
+running runtime installations. Capability requests are not permission grants.
 Update the description in the manifest rather than maintaining a separate
 module catalog. Missing descriptions are shown explicitly. Changing an embedded
 manifest still requires rebuilding the module executable and OCI image together.
