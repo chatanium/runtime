@@ -63,6 +63,17 @@ type InstanceSnapshot struct {
 	Grants           *wire.Grants
 }
 
+// ModuleSnapshot contains only lightweight polling data, never configuration,
+// credentials or cloned grants.
+type ModuleSnapshot struct {
+	Principal            InstancePrincipal
+	ImageDigest          string
+	CommittedImageDigest string
+	State                RuntimeState
+	Reloading            bool
+	CleanupComplete      bool
+}
+
 // Instance has one authoritative lock for lifecycle, authority, queues and leases.
 // All externally visible protobuf values are immutable copies.
 type Instance struct {
@@ -159,8 +170,17 @@ func (e *Error) GRPCStatus() *status.Status {
 func runtimeError(code codes.Code, reason string) error { return &Error{code: code, reason: reason} }
 
 var (
-	ErrModuleNotInstalled  = runtimeError(codes.NotFound, "MODULE_NOT_INSTALLED")
-	ErrModuleAlreadyActive = runtimeError(codes.AlreadyExists, "MODULE_ALREADY_ACTIVE")
+	ErrModuleNotInstalled     = runtimeError(codes.NotFound, "MODULE_NOT_INSTALLED")
+	ErrModuleAlreadyActive    = runtimeError(codes.AlreadyExists, "MODULE_ALREADY_ACTIVE")
+	ErrDevelopmentDisabled    = runtimeError(codes.PermissionDenied, "DEVELOPMENT_MODE_DISABLED")
+	ErrModuleInstanceNotFound = runtimeError(codes.FailedPrecondition, "MODULE_INSTANCE_NOT_FOUND")
+	ErrStaleInstance          = runtimeError(codes.Aborted, "STALE_INSTANCE")
+	ErrReloadInProgress       = runtimeError(codes.Aborted, "RELOAD_IN_PROGRESS")
+	ErrInvalidReloadImage     = runtimeError(codes.InvalidArgument, "INVALID_RELOAD_IMAGE")
+	ErrImageRepositoryChanged = runtimeError(codes.PermissionDenied, "IMAGE_REPOSITORY_CHANGED")
+	ErrReloadPreflight        = runtimeError(codes.FailedPrecondition, "RELOAD_PREFLIGHT_FAILED")
+	ErrReloadCleanup          = runtimeError(codes.FailedPrecondition, "RELOAD_CLEANUP_INCOMPLETE")
+	ErrReloadLaunch           = runtimeError(codes.FailedPrecondition, "RELOAD_LAUNCH_FAILED")
 )
 
 func invalidConfig() error                   { return runtimeError(codes.InvalidArgument, "INVALID_CONFIGURATION") }
@@ -201,8 +221,9 @@ type InstanceServices struct {
 type FileTransferFactory func(InstanceServices) (core.HelperRegistrar, error)
 type InstanceCleanup func(context.Context, InstancePrincipal) error
 type ManagerOptions struct {
-	Host         *host.Client
-	Backends     []BackendRegistration
-	FileTransfer FileTransferFactory
-	FileCleanup  InstanceCleanup
+	DevelopmentMode bool
+	Host            *host.Client
+	Backends        []BackendRegistration
+	FileTransfer    FileTransferFactory
+	FileCleanup     InstanceCleanup
 }

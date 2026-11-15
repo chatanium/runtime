@@ -43,6 +43,12 @@ func runIntegrationRuntimeReturnHold(args []string) int {
 	flags.Int64Var(&options.SupervisorUID, "supervisor-uid", -1, "")
 	flags.IntVar(&options.SupervisorMaxBytes, "supervisor-max-bytes", 0, "")
 	flags.DurationVar(&options.Duration, "duration", 0, "")
+	flags.BoolVar(&options.DevelopmentMode, "dev-mode", false, "")
+	flags.StringVar(&options.DevelopmentSocket, "dev-socket", "", "")
+	flags.Func("dev-module-image", "", func(value string) error {
+		options.DevelopmentImages = append(options.DevelopmentImages, value)
+		return nil
+	})
 	if flags.Parse(args[3:]) != nil || flags.NArg() != 0 {
 		return 2
 	}

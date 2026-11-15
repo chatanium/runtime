@@ -4,6 +4,7 @@ Copyright © 2025 ANTEGRAL <antegral@antegral.net>
 package cmd
 
 import (
+	"errors"
 	"os"
 	"os/signal"
 	"syscall"
@@ -21,6 +22,9 @@ var startCmd = &cobra.Command{
 	Short: "Start the supervised v2 modules",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if !startOptions.DevelopmentMode && (cmd.Flags().Changed("dev-socket") || cmd.Flags().Changed("dev-module-image")) {
+			return errors.New("development options require explicit development mode")
+		}
 		if err := Util.InitEnv(); err != nil {
 			return err
 		}
@@ -41,5 +45,8 @@ func init() {
 	flags.Int64Var(&startOptions.SupervisorUID, "supervisor-uid", -1, "trusted supervisor UID")
 	flags.IntVar(&startOptions.SupervisorMaxBytes, "supervisor-max-bytes", 0, "supervisor packet bound")
 	flags.DurationVar(&startOptions.Duration, "duration", 0, "optional finite observation duration before orderly stop")
+	flags.BoolVar(&startOptions.DevelopmentMode, "dev-mode", false, "enable private development module reload control")
+	flags.StringVar(&startOptions.DevelopmentSocket, "dev-socket", "", "canonical absolute private development Unix socket")
+	flags.StringArrayVar(&startOptions.DevelopmentImages, "dev-module-image", nil, "development image override: module_id=repository@sha256:digest (repeatable)")
 	rootCmd.AddCommand(startCmd)
 }
