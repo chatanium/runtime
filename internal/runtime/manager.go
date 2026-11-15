@@ -27,6 +27,7 @@ type Manager struct {
 	options     ManagerOptions
 	instances   map[ModuleID]*Instance
 	installed   map[ModuleID]struct{}
+	lifecycles  map[ModuleID]*moduleLifecycle
 	backends    map[string]BackendRegistration
 	operations  map[string]OperationPolicy
 	events      map[string]EventPolicy
@@ -123,7 +124,18 @@ func (m *Manager) Instance(id ModuleID) (*Instance, bool) {
 	i, ok := m.instances[id]
 	return i, ok
 }
-func (m *Manager) Launch(ctx context.Context, spec ModuleSpec) (result *Instance, launchErr error) {
+func (m *Manager) Launch(ctx context.Context, spec ModuleSpec) (*Instance, error) {
+	lifecycle, err := m.acquireLifecycle(ctx, spec.ModuleID, false)
+	if err != nil {
+		return nil, err
+	}
+	defer m.releaseLifecycle(lifecycle, false)
+	return m.launch(ctx, spec)
+}
+
+// launch requires the module lifecycle gate. Failure cleanup belongs to the
+// captured instance, never to a later instance installed under the same ID.
+func (m *Manager) launch(ctx context.Context, spec ModuleSpec) (result *Instance, launchErr error) {
 	if ctx == nil {
 		return nil, invalidConfig()
 	}
@@ -399,15 +411,21 @@ func (m *Manager) Launch(ctx context.Context, spec ModuleSpec) (result *Instance
 			return i, err
 		}
 	}
+	// Commit the image together with the ordinary RUNNING transition. Both
+	// public Launch and development replacement use this same success path.
+	m.mu.Lock()
 	i.mu.Lock()
 	if i.state != Ready || startup.Err() != nil {
 		i.mu.Unlock()
+		m.mu.Unlock()
 		return i, context.Canceled
 	}
 	i.state = Running
+	m.lifecycles[spec.ModuleID].committedImageDigest = spec.ImageDigest
 	i.laneDone = make(chan struct{})
 	i.openGateLocked()
 	i.mu.Unlock()
+	m.mu.Unlock()
 	go i.eventLane()
 	go i.watchHelperErrors(hooks.HelperErrors())
 	return i, nil
@@ -510,6 +528,16 @@ func (m *Manager) fail(i *Instance, reason string) {
 	}
 }
 func (m *Manager) Stop(ctx context.Context, id ModuleID) error {
+	lifecycle, err := m.acquireLifecycle(ctx, id, false)
+	if err != nil {
+		return err
+	}
+	defer m.releaseLifecycle(lifecycle, false)
+	return m.stop(ctx, id)
+}
+
+// stop requires the module lifecycle gate and joins the captured cleanup.
+func (m *Manager) stop(ctx context.Context, id ModuleID) error {
 	m.mu.Lock()
 	_, installed := m.installed[id]
 	i := m.instances[id]

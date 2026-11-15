@@ -26,9 +26,15 @@ type StartOptions struct {
 	SupervisorUID      int64
 	SupervisorMaxBytes int
 	Duration           time.Duration
+	DevelopmentMode    bool
+	DevelopmentSocket  string
+	DevelopmentImages  []string
 }
 
 func Start(ctx context.Context, options StartOptions) error {
+	if err := validateDevelopmentOptions(options); err != nil {
+		return err
+	}
 	if !canonicalPath(options.SupervisorSocket) || options.SupervisorUID < 0 || options.SupervisorUID > 1<<32-1 || options.SupervisorMaxBytes <= 0 || options.Duration < 0 {
 		return errors.New("invalid runtime arguments")
 	}
@@ -39,6 +45,9 @@ func Start(ctx context.Context, options StartOptions) error {
 	config, err := runtime.DecodeConfig(raw)
 	if err != nil {
 		return errors.New("invalid operator configuration")
+	}
+	if err := applyDevelopmentImages(&config, options.DevelopmentImages); err != nil {
+		return err
 	}
 	if len(config.Modules) == 0 {
 		return errors.New("at least one installed module is required")
@@ -51,18 +60,23 @@ func Start(ctx context.Context, options StartOptions) error {
 		ctx, cancel = context.WithTimeout(ctx, options.Duration)
 		defer cancel()
 	}
-	return serve(ctx, config, host.ClientConfig{SocketPath: options.SupervisorSocket, SupervisorUID: uint32(options.SupervisorUID), MaxMessageBytes: options.SupervisorMaxBytes, OperationTimeout: time.Duration(config.Limits.DockerAPIDeadline)})
+	return serve(ctx, config, host.ClientConfig{SocketPath: options.SupervisorSocket, SupervisorUID: uint32(options.SupervisorUID), MaxMessageBytes: options.SupervisorMaxBytes, OperationTimeout: time.Duration(config.Limits.DockerAPIDeadline)}, options)
 }
 
 type observation struct {
-	Phase       string                  `json:"phase"`
-	Modules     int                     `json:"modules"`
-	Voice       bool                    `json:"voice"`
-	StopFailure *stopFailureObservation `json:"stop_failure,omitempty"`
+	Phase           string                      `json:"phase"`
+	Modules         int                         `json:"modules"`
+	Voice           bool                        `json:"voice"`
+	StopFailure     *stopFailureObservation     `json:"stop_failure,omitempty"`
+	DevelopmentStop *developmentStopObservation `json:"development_stop,omitempty"`
 }
 
 func observe(phase string, n int) error {
-	if json.NewEncoder(os.Stdout).Encode(observation{Phase: phase, Modules: n, Voice: voiceEnabled}) != nil {
+	return emitObservation(os.Stdout, observation{Phase: phase, Modules: n, Voice: voiceEnabled})
+}
+
+func emitObservation(output io.Writer, value observation) error {
+	if json.NewEncoder(output).Encode(value) != nil {
 		return errors.New("runtime observation output failed")
 	}
 	return nil
@@ -87,7 +101,7 @@ func reconcileHost(ctx context.Context, supervisor interface{ Reconcile(context.
 
 // serve has no executable fallback: every module launch goes through the real
 // authenticated supervisor client and Manager's sandbox RunnerFunc.
-func serve(ctx context.Context, config runtime.Config, clientConfig host.ClientConfig) (result error) {
+func serve(ctx context.Context, config runtime.Config, clientConfig host.ClientConfig, options StartOptions) (result error) {
 	startup, cancel := context.WithTimeout(ctx, time.Duration(config.Defaults.StartupDeadline))
 	defer cancel()
 	supervisor, err := host.Dial(startup, clientConfig)
@@ -110,11 +124,25 @@ func serve(ctx context.Context, config runtime.Config, clientConfig host.ClientC
 	var manager *runtime.Manager
 	var database *Database.DB
 	var stopRecording func()
+	var development *developmentController
+	developmentReady := false
 	defer func() {
 		var failures []error
+		resourcesClean := options.DevelopmentMode && developmentReady && development != nil
+		var moduleStops []developmentModuleStop
+		if options.DevelopmentMode {
+			moduleStops = make([]developmentModuleStop, 0, len(config.Modules))
+		}
+		// Reject, cancel and join every reload before any module/backend teardown.
+		if development != nil {
+			if development.Close() != nil {
+				failures = append(failures, errors.New("development control cleanup failed"))
+				resourcesClean = false
+			}
+		}
 		if manager != nil {
 			// Stop independently: one owner's failed cleanup cannot skip another owner.
-			done := make(chan *stopFailureObservation, len(config.Modules))
+			done := make(chan developmentModuleStop, len(config.Modules))
 			for _, spec := range config.Modules {
 				go func(id runtime.ModuleID) {
 					bounded, cancel := context.WithTimeout(context.Background(), time.Duration(config.Defaults.DrainDeadline)+time.Duration(config.Limits.TerminationDeadline))
@@ -125,14 +153,19 @@ func serve(ctx context.Context, config runtime.Config, clientConfig host.ClientC
 						value := instance.Snapshot()
 						snapshot = &value
 					}
-					done <- describeStopFailure(snapshot, err)
+					done <- describeDevelopmentModuleStop(snapshot, err)
 				}(spec.ModuleID)
 			}
 			for range config.Modules {
-				if failure := <-done; failure != nil {
+				stopped := <-done
+				if options.DevelopmentMode {
+					moduleStops = append(moduleStops, stopped)
+				}
+				if failure := stopped.failure; failure != nil {
 					failures = append(failures, errors.New("module stop or terminal failure"))
 					if json.NewEncoder(os.Stdout).Encode(observation{Phase: "STOP_FAILED", Modules: len(config.Modules), Voice: voiceEnabled, StopFailure: failure}) != nil {
 						failures = append(failures, errors.New("runtime observation output failed"))
+						resourcesClean = false
 					}
 				}
 			}
@@ -143,21 +176,28 @@ func serve(ctx context.Context, config runtime.Config, clientConfig host.ClientC
 		if backend != nil {
 			if backend.Close() != nil {
 				failures = append(failures, errors.New("Discord backend cleanup failed"))
+				resourcesClean = false
 			}
 		}
 		if database != nil && database.Shutdown() != nil {
 			failures = append(failures, errors.New("host database cleanup failed"))
+			resourcesClean = false
 		}
 		cancelLife()
 		bounded, cancel := context.WithTimeout(context.Background(), time.Duration(config.Limits.TerminationDeadline))
 		defer cancel()
 		if files.Close(bounded) != nil {
 			failures = append(failures, errors.New("upload store cleanup failed"))
+			resourcesClean = false
 		}
 		if len(failures) == 0 && manager != nil {
 			if e := observe("STOPPED", len(config.Modules)); e != nil {
 				failures = append(failures, e)
+				resourcesClean = false
 			}
+		}
+		if err := emitDevelopmentStopped(os.Stdout, manager, config.Modules, moduleStops, resourcesClean); err != nil {
+			failures = append(failures, err)
 		}
 		result = errors.Join(append([]error{result}, failures...)...)
 	}()
@@ -182,7 +222,7 @@ func serve(ctx context.Context, config runtime.Config, clientConfig host.ClientC
 		}
 		registrations = append(registrations, backend.Registration())
 	}
-	manager, err = runtime.NewManager(config, runtime.ManagerOptions{Host: supervisor, Backends: registrations, FileTransfer: files.RegistrarFactory, FileCleanup: files.CleanupInstance})
+	manager, err = runtime.NewManager(config, runtime.ManagerOptions{Host: supervisor, Backends: registrations, FileTransfer: files.RegistrarFactory, FileCleanup: files.CleanupInstance, DevelopmentMode: options.DevelopmentMode})
 	if err != nil {
 		return errors.New("runtime manager initialization failed")
 	}
@@ -204,46 +244,61 @@ func serve(ctx context.Context, config runtime.Config, clientConfig host.ClientC
 			return errors.New("Discord Gateway startup failed")
 		}
 	}
-	for _, spec := range config.Modules {
-		if _, err = manager.Launch(ctx, spec); err != nil {
-			return errors.New("module activation failed")
-		}
-	}
-	cancel()
-	if err = observe("RUNNING", len(config.Modules)); err != nil {
+	startupObservation, err := activateInitialModules(ctx, manager, config.Modules, options.DevelopmentMode)
+	if err != nil {
 		return err
 	}
+	cancel()
+	development, err = startDevelopmentController(ctx, options, config, manager)
+	if err != nil {
+		return err
+	}
+	var developmentDone <-chan struct{}
+	if development != nil {
+		developmentDone = development.done
+	}
+	if err = emitObservation(os.Stdout, startupObservation); err != nil {
+		return err
+	}
+	developmentReady = options.DevelopmentMode
 	ticker := time.NewTicker(time.Duration(config.Limits.ReadinessPollInterval))
 	defer ticker.Stop()
 	hadFailure := false
 	for {
 		select {
 		case <-ctx.Done():
+			if options.DevelopmentMode {
+				if development.Close() != nil {
+					return errors.New("development control cleanup failed")
+				}
+				_, hadFailure, err = moduleHealth(manager, config.Modules)
+				if err != nil {
+					return err
+				}
+			}
 			if hadFailure {
 				return errors.New("one or more module instances failed")
 			}
 			return nil
+		case <-developmentDone:
+			return errors.New("development control listener stopped")
 		case <-backendErrors:
 			// Report only an allowlisted phase, never raw remote errors or event data.
 			if e := observe("BACKEND_ERROR", len(config.Modules)); e != nil {
+				developmentReady = false
 				return e
 			}
 		case <-ticker.C:
-			allStopped := true
-			for _, spec := range config.Modules {
-				instance, ok := manager.Instance(spec.ModuleID)
-				if !ok {
-					return errors.New("module instance disappeared")
-				}
-				s := instance.Snapshot()
-				if s.State == runtime.Running {
-					allStopped = false
-				}
-				if s.State == runtime.Failed {
-					hadFailure = true
-				}
+			allStopped, failed, healthErr := moduleHealth(manager, config.Modules)
+			if healthErr != nil {
+				return healthErr
 			}
-			if allStopped {
+			if options.DevelopmentMode {
+				hadFailure = failed
+			} else {
+				hadFailure = hadFailure || failed
+			}
+			if allStopped && !options.DevelopmentMode {
 				return errors.New("all module instances stopped")
 			}
 		}
