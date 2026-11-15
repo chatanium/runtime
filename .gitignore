@@ -2,7 +2,6 @@
 /logs
 .env
 __debug_bin
-/src/Database/Internal/**/*
 /src/__debug
 **/__debug*
 .vscode/**/*
