@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build OCI images from allowlisted executables and their canonical manifests."""
+"""Build OCI images from selected executables and their canonical manifests."""
 import fcntl
 import json
 import os
@@ -22,11 +22,16 @@ lockfile = (work / 'build.lock').open('w')
 fcntl.flock(lockfile, fcntl.LOCK_EX)
 mode = sys.argv[1]
 go = os.environ['GO_BINARY']
+if mode == 'module':
+    prefixes = ['MODULE']
+elif mode == 'media':
+    prefixes = ['MUSIC', 'PLAYER']
+else:
+    raise RuntimeError('Expected module or media image build')
 # Direct Python entrypoints enforce preparation too, before any compilation
 # (including the manifest parser) or image construction.
-sdk_modules = [root]
-if mode == 'media':
-    sdk_modules += [root / 'modules/music-bot', root / 'modules/audio-player']
+sdk_modules = list(dict.fromkeys(
+    [root] + [root / os.environ[prefix + '_GO_DIRECTORY'] for prefix in prefixes]))
 for module in sdk_modules:
     resolve_sdk(go, module)
 # A concurrent preparer cannot replace the go.mod alias while Go compiles the
@@ -66,7 +71,7 @@ def build_image(module_dir, binary, image, dockerfile, base=None):
                     'manifest_source': str(manifest.relative_to(root)), 'manifest_sha256': digest(manifest),
                     'executable_sha256': digest(root / binary), 'media_base_local_tag': base,
                     'build_context_sha256': inventory(context)}
-        return work / (Path(binary).name + '-image.json'), evidence
+        return work / module_dir / 'image.json', evidence
 
 
 def publish_images(results):
@@ -76,6 +81,7 @@ def publish_images(results):
     try:
         for output, evidence in results:
             image = evidence['image_tag']
+            output.parent.mkdir(parents=True, exist_ok=True)
             old_ids = capture('docker', 'image', 'ls', '--no-trunc', '--quiet', image).splitlines()
             old = old_ids[0] if old_ids else None
             previous.append((image, old, output, output.read_bytes() if output.exists() else None))
@@ -102,12 +108,8 @@ if mode == 'module':
     base = json.loads((root / 'tools/native/native-lock.json').read_text())['builder_base']
     if f'FROM {base} AS trust' not in (root / 'tools/build/Module.Dockerfile').read_text().splitlines():
         raise RuntimeError('Module trust source must match tools/native/native-lock.json builder_base')
-    kind = os.environ.get('MODULE_KIND', 'general')
-    choices = {'general': ('examples/general-bot', 'bin/test-module'),
-               'sandbox': ('tests/integration/fixtures/sandbox', 'bin/sandbox-module')}
-    if kind not in choices:
-        raise RuntimeError('MODULE_KIND must be general or sandbox')
-    directory, binary = choices[kind]
+    directory = os.environ['MODULE_DIRECTORY']
+    binary = os.environ['MODULE_BINARY']
     publish_images([build_image(directory, binary, os.environ['MODULE_IMAGE'], 'tools/build/Module.Dockerfile')])
 elif mode == 'media':
     jobs = os.environ.get('BUILD_JOBS', '2')
@@ -133,8 +135,8 @@ elif mode == 'media':
         (stage / 'rootfs/opt/flexmodule/provenance/builder-image-id.txt').write_text(builder + '\n')
         run('docker', 'build', '--platform', 'linux/amd64', '--network=none', '--iidfile', tools_id, '-t', base, stage)
         results = [
-            build_image('modules/music-bot', 'bin/chatanium-musicbot', os.environ['MUSIC_IMAGE'], 'tools/media/Module.Dockerfile', base),
-            build_image('modules/audio-player', 'bin/voice-player-module', os.environ['PLAYER_IMAGE'], 'tools/media/Module.Dockerfile', base),
+            build_image(os.environ['MUSIC_DIRECTORY'], os.environ['MUSIC_BINARY'], os.environ['MUSIC_IMAGE'], 'tools/media/Module.Dockerfile', base),
+            build_image(os.environ['PLAYER_DIRECTORY'], os.environ['PLAYER_BINARY'], os.environ['PLAYER_IMAGE'], 'tools/media/Module.Dockerfile', base),
         ]
         publish_images(results)
 else:

@@ -49,8 +49,7 @@ fi
 use_go
 runtime=${RUNTIME:-bin/chatanium}
 if [[ "$scenario" == voice ]]; then
-    runtime=${RUNTIME:-bin/chatanium-voice}
-    [[ -f bin/voice-runtime/provenance/native-lock.json ]] || fail 'Build real voice-enabled native artifact with make build-voice first'
+    [[ -f bin/voice-runtime/provenance/native-lock.json ]] || fail 'Build the voice-enabled runtime with make build-runtime (without DISABLE_VOICE=1) first'
 fi
 [[ -x "$runtime" ]] || fail 'Build the requested runtime before smoke; no automatic installs or fake success'
 # The go-run harness consumes the same prepared SDK as ordinary builds.

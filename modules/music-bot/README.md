@@ -1,6 +1,6 @@
 # Chatanium MusicBot (FlexModule v2)
 
-This optional media module resolves YouTube queries, prepares complete module-owned Opus artifacts, and streams them to the host's authenticated playback-job service. It does not join a Discord connection, hold voice credentials, pace packets, install software, or own the runtime scheduler. The ordinary bot remains the default example.
+This optional media module resolves YouTube queries, prepares complete module-owned Opus artifacts, and streams them to the host's authenticated playback-job service. It does not join a Discord connection, hold voice credentials, pace packets, install software, or own the runtime scheduler. The ordinary bot is a separate example.
 
 ## Build and installation
 
@@ -13,10 +13,11 @@ and follow the root [shared-lease and revalidation instructions](../../README.md
 The prepared source comes from the maintained upstream patch stack, not a
 published fork dependency. Original upstream checksums belong to
 `third_party/discordgo/upstream.sum`, not this module's `go.sum`.
-The preserved executable name is `bin/chatanium-musicbot`; the source move does
-not change the manifest, ModuleID or image/grant contract.
+`make build-module music-bot` builds `bin/modules/music-bot/module`. Plain
+`make build` includes this module automatically; its directory does not change
+the manifest, ModuleID or image/grant contract.
 
-Use the repository's `make build-media` and `make image-media` interfaces. Run the music OCI image through the v2 runtime with its media resource profile, approved public Internet egress, and an actual voice-enabled Discord backend. `manifest.json` is the **only** manifest source: the executable embeds those bytes and the image builder uses the same file for `org.chatanium.flexmodule.manifest.v2`. The image label requests capabilities; it does not grant them.
+Use `make image-media` to package the media modules and pinned tools. Run the music OCI image through the v2 runtime with its media resource profile, approved public Internet egress, and an actual voice-enabled Discord backend. `manifest.json` is the **only** manifest source: the executable embeds those bytes and the image builder uses the same file for `org.chatanium.flexmodule.manifest.v2`. The image label requests capabilities; it does not grant them.
 
 The backend is required. Discord operations are optional manifest requests so installation can narrow their all-resource requests to the operator's exact scopes. INIT then requires every configured operation, scope, and voice priority constraint; missing grants fail readiness rather than silently disabling music. Required core capabilities are `core.config.read` and `core.network.public_egress`, with actual `PUBLIC_INTERNET` policy. Required configured Discord capabilities are:
 

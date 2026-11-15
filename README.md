@@ -147,7 +147,6 @@ protoc-gen-go-grpc v1.6.2 under `.tools/bin`. From the repository root:
 make tools
 make prepare-sdk
 make build
-make build-media
 make buf
 make buf-check
 ```
@@ -169,19 +168,30 @@ Commit the SQL changes together with all three generated Go files
 | Command | Artifact or scope |
 |---|---|
 | `make prepare-sdk` | Download the pinned upstream DiscordGo module, verify its original checksums and apply the maintained patches; no application/native compilation |
-| `make build` | `bin/chatanium`, `bin/flexmodule-supervisor`, `bin/test-module`; Linux/amd64 and CGO=0 by default, no native DAVE or media tools |
-| `make build-media` | `bin/chatanium-musicbot`, `bin/voice-player-module`; Go compilation only, no media tool installation |
-| `make build-all` | All three local Go modules, including root packages and ordinary/media binaries; native voice is a separate target |
+| `make build-runtime` | Voice-enabled `bin/chatanium` (CGO=1, pinned native DAVE), adjacent `bin/voice-runtime/` libraries/licenses/provenance, and `bin/flexmodule-supervisor`; no application modules |
+| `DISABLE_VOICE=1 make build-runtime` | Runtime and supervisor only, CGO=0 without native voice or its library dependency |
+| `make build` | Default voice-enabled runtime plus every direct v2 module directory under `modules/`; module executables remain CGO=0 |
+| `make build-module music-bot` | Build only `modules/music-bot` into `bin/modules/music-bot/module`; any module folder name works without editing the Makefile |
+| `make build-module examples/general-bot` | Explicitly build the root-module example into `bin/examples/general-bot/module` |
 | `make build-native BUILD_JOBS=2` | Independent native C++/ABI/loader/license gate; `.tools/native/prefix` and `.tools/native/bundle`, no application Go compilation or `bin/voice-runtime` publication |
-| `make build-voice BUILD_JOBS=2` | `bin/chatanium-voice` plus ancillary `bin/voice-runtime/{lib,licenses,provenance}/`; explicit voice/CGO build |
 | `make buf` / `make buf-check` | Transactional owned protobuf publication / non-mutating generation comparison; see [protocol maintenance](proto/README.md) |
 | `make build-integration` | `bin/flexmodule-integration` from `tests/integration` and the `internal/app`-package `bin/flexmodule-runtime-return-holder`; CGO=0, no test execution |
-| `make build-sandbox` | `bin/sandbox-module` from `tests/integration/fixtures/sandbox` |
-| `make check-offline` | 21 focused SDK-preparation tests, Buf schema/generation comparison and bounded ordinary tests in the prepared SDK and all three local Go modules; no separate SDK checkout, live Discord or native build |
-| `make clean` | Enumerated ordinary binaries only; no Docker prune or deletion of retained native work |
+| `make build-module tests/integration/fixtures/sandbox` | Explicitly build the backendless integration fixture into `bin/tests/integration/fixtures/sandbox/module` |
+| `make check-offline` | Focused SDK-preparation tests, Buf schema/generation comparison and bounded ordinary tests in the prepared SDK, root and discovered local Go modules; no live Discord or native build |
+| `make clean` | Owned runtime/integration binaries and directory-derived module outputs only; no native bundle deletion or Docker prune |
 
-The three local Go modules are `.`, `modules/music-bot`, and
-`modules/audio-player`. All require `github.com/bwmarrin/discordgo`
+Voice support is enabled by default for both `make build-runtime` and
+`make build`. Set `DISABLE_VOICE=1` in the environment to turn it off; setting
+`CGO_ENABLED=0` alone does not disable runtime voice. Native runtime builds
+require the Linux/amd64 and Docker prerequisites below. Module-only builds
+do not build native libraries or install media tools.
+
+Module discovery uses each direct `modules/<name>/manifest.json`, not a fixed
+module list. Symlinks and non-v2 entries such as the old `modules/MusicBot`
+checkout are not discovered. Examples and integration fixtures outside
+`modules/` are built only when selected explicitly. A selected directory uses
+its nearest enclosing `go.mod`, so both independent modules and packages in the
+root Go module work. The current independent modules require `github.com/bwmarrin/discordgo`
 `v0.29.1-0.20260214123928-f43dd94faaac`, upstream commit
 `f43dd94faaacd5b163e9e783f14b5bd8be639fc9`. The root `go.mod` is the version
 authority and replaces that module with `./.tools/deps/discordgo`; each nested
@@ -241,9 +251,10 @@ Go replacements do not propagate to downstream consumers. Host runtime behavior
 requires the maintained patches. Historical external-consumer evidence in the
 original repository is not verification of this Chatanium checkout.
 
-Source moves preserve output names: `examples/general-bot` builds
-`bin/test-module`, `modules/music-bot` builds `bin/chatanium-musicbot`, and
-`modules/audio-player` builds `bin/voice-player-module`.
+Module outputs mirror their repository-relative source directory:
+`<directory>` builds `bin/<directory>/module`. Adding a module under
+`modules/` needs no new target or executable-name mapping. Building a module
+does not install or activate it; OCI images and operator approvals remain separate.
 
 Native/media artifact builds require Linux/amd64, Docker Engine with BuildKit
 supporting `ADD --checksum` and `COPY --chmod`, Python 3.8+, GNU
@@ -256,7 +267,7 @@ and `tools/media/tool-lock.json` pin compiler bases, package inputs and sources.
 Native work, prefixes and bundles remain under `.tools/native`. Builds do not
 install host packages or prune/restart Docker.
 
-The optional native bundle uses an EL9 builder and pinned libdave commit
+The default native runtime bundle uses an EL9 builder and pinned libdave commit
 `6396c90aedbb9a6ee117ea9ce1ce9832af6a3375` with
 [`third_party/libdave/patches/0001-flexmodule-abi.patch`](third_party/libdave/patches/0001-flexmodule-abi.patch).
 This repository owns the native lock, ABI patch, EL9 builder and bundle packaging.
@@ -267,8 +278,8 @@ There is no separate `/sdk` mount or SDK-owned native input.
 It is a **source-patched fork**, not an upstream libdave release binary.
 Publication requires its actual ELF providers, eager relocation and target loader
 checks; a distro glibc version alone is not an ABI compatibility guarantee.
-The voice executable has RUNPATH `$ORIGIN/voice-runtime/lib`: install
-`chatanium-voice` alongside the complete `voice-runtime/` directory, preserving
+The default runtime resolves native libraries from `$ORIGIN/voice-runtime/lib`: install
+`chatanium` alongside the complete `voice-runtime/` directory, preserving
 its `lib/`, `licenses/` and `provenance/` contents and relative layout. The latter
 is ancillary data, not another runtime entry point. Do not install just the Go
 executable or rename its companion directory. A native build does not prove
@@ -347,8 +358,9 @@ or hot reload.
 Set these variables to real writable OCI repository/tag names before invoking:
 
 ```sh
-make image-module MODULE_IMAGE="${MODULE_IMAGE:?set an ordinary module image tag}"
-make image-module MODULE_KIND=sandbox \
+make image-module MODULE=examples/general-bot \
+  MODULE_IMAGE="${MODULE_IMAGE:?set an ordinary module image tag}"
+make image-module MODULE=tests/integration/fixtures/sandbox \
   MODULE_IMAGE="${SANDBOX_IMAGE:?set a sandbox fixture image tag}"
 make image-media \
   MUSIC_IMAGE="${MUSIC_IMAGE:?set a music module image tag}" \
@@ -597,9 +609,9 @@ sudo --preserve-env=FLEXMODULE_DISCORD_BOT_TOKEN -u flexmodule-runtime -- \
   --supervisor-max-bytes "${SUPERVISOR_MAX_BYTES:?use the prepared packet bound}"
 ```
 
-For backendless operation omit secret preservation; for optional voice use the
-installed `chatanium-voice start` command with its adjacent
-`voice-runtime/` directory instead. `SIGINT`/`SIGTERM`
+For backendless operation omit secret preservation. Voice support is compiled
+into the default `chatanium start` executable; deploy its adjacent
+`voice-runtime/` directory too unless built with `DISABLE_VOICE=1`. `SIGINT`/`SIGTERM`
 drain instances before backend/upload cleanup. `--duration` provides an optional
 finite run interval, not interactive acceptance proof. `make run` exposes the
 same runtime flags through `CONFIG`, `SUPERVISOR_SOCKET`, `SUPERVISOR_UID` and
