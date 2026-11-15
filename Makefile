@@ -7,8 +7,11 @@ CGO_ENABLED ?= 0
 BUILD_JOBS ?= 2
 MODULE ?= examples/general-bot
 DISABLE_VOICE ?= 0
+DEV_MODE ?= 0
+DEV_SOCKET ?=
+DEV_RUNTIME_USER ?=
 export GOOS GOARCH CGO_ENABLED GO_TOOLCHAIN BUF_VERSION PROTOC_GEN_GO_VERSION PROTOC_GEN_GO_GRPC_VERSION
-export BUILD_JOBS MODULE DISABLE_VOICE MODULE_IMAGE MUSIC_IMAGE PLAYER_IMAGE
+export BUILD_JOBS MODULE DISABLE_VOICE MODULE_IMAGE MUSIC_IMAGE PLAYER_IMAGE DEV_MODE DEV_SOCKET DEV_RUNTIME_USER
 export CONFIG SUPERVISOR_SOCKET SUPERVISOR_UID SUPERVISOR_MAX_BYTES CHECK_DEADLINE TEST_TIMEOUT OBSERVE RUNTIME
 export INTEGRATION POLICY_PLAN POLICY_RUNNER EVIDENCE
 
@@ -128,9 +131,16 @@ buf-check:
 clean:
 	@bash tools/build.sh clean
 
+ifeq ($(DEV_MODE),1)
+run:
+	@python3 tools/dev/watch.py --config "$(CONFIG)" --socket "$(DEV_SOCKET)" \
+		--supervisor-socket "$(SUPERVISOR_SOCKET)" --supervisor-uid "$(SUPERVISOR_UID)" \
+		--supervisor-max-bytes "$(SUPERVISOR_MAX_BYTES)"
+else
 run: build-runtime
 	@./bin/chatanium start --config "$(CONFIG)" --supervisor-socket "$(SUPERVISOR_SOCKET)" \
 		--supervisor-uid "$(SUPERVISOR_UID)" --supervisor-max-bytes "$(SUPERVISOR_MAX_BYTES)"
+endif
 
 # Existing Chatanium database generation remains separate from protocol generation.
 sqlc:
