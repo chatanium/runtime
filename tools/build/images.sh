@@ -4,13 +4,17 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../common.sh"
 mode=${1:?Expected module, media or build-media-modules}
 [[ $# == 1 ]] || fail 'Expected one image build mode'
 
+target="${GOOS:-linux}/${GOARCH:-amd64}"
+[[ "$target" == linux/amd64 || ( "$mode" == module && "$target" == linux/arm64 ) ]] ||
+    fail 'Module images support Linux amd64/arm64; pinned media tooling supports Linux amd64 only'
+[[ "${CGO_ENABLED:-0}" == 0 ]] || fail 'Module images require static Go executables (CGO_ENABLED=0)'
+
 if [[ "$mode" == build-media-modules ]]; then
     run env CGO_ENABLED=0 bash tools/build.sh module modules/music-bot
     run env CGO_ENABLED=0 bash tools/build.sh module modules/audio-player
     exit 0
 fi
 [[ "$mode" == module || "$mode" == media ]] || fail 'Expected module, media or build-media-modules'
-[[ "${GOOS:-linux}/${GOARCH:-amd64}" == linux/amd64 && "${CGO_ENABLED:-0}" == 0 ]] || fail 'Module images require static Linux AMD64 Go executables (CGO_ENABLED=0)'
 
 module_inputs() {
     local prefix=$1 directory binary go_directory

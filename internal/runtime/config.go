@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"net/netip"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -50,8 +51,8 @@ type Limits struct {
 	ControlRPCsPerInstance    int      `json:"control_rpcs_per_instance"`
 	CredentialRefsPerInstance int      `json:"credential_refs_per_instance"`
 	CredentialRefMaxTTL       Duration `json:"credential_ref_max_ttl"`
-	PersistentInodeLimit      int64    `json:"persistent_inode_limit"`
-	ScratchInodeLimit         int64    `json:"scratch_inode_limit"`
+	PersistentInodeLimit      int64    `json:"persistent_inode_limit,omitempty"`
+	ScratchInodeLimit         int64    `json:"scratch_inode_limit,omitempty"`
 	LogBufferBytes            int64    `json:"log_buffer_bytes"`
 	LogFileMaxBytes           int64    `json:"log_file_max_bytes"`
 	LogRetainedFiles          int      `json:"log_retained_files"`
@@ -72,6 +73,7 @@ type NetworkConfig struct {
 	MetadataDestinations   []string `json:"metadata_destinations"`
 }
 type HostConfig struct {
+	Format                string        `json:"format,omitempty"`
 	DockerEndpoint      string        `json:"docker_endpoint"`
 	DockerEngineVersion string        `json:"docker_engine_version"`
 	RunscRuntimeName    string        `json:"runsc_runtime_name"`
@@ -82,6 +84,7 @@ type HostConfig struct {
 	IPCRoot             string        `json:"ipc_root"`
 	QuotaBackend        string        `json:"quota_backend"`
 	Network             NetworkConfig `json:"network"`
+	QuotaBackend          string        `json:"quota_backend,omitempty"`
 }
 type BackendConfig struct {
 	Major         uint32            `json:"major"`
@@ -206,6 +209,19 @@ func (c Config) Validate() error {
 	h := c.Host
 	d := c.Defaults
 	if c.SchemaVersion != 2 || c.Backends == nil || l.TerminationDeadline <= 0 || l.DockerAPIDeadline <= 0 || l.HookRPCDeadline <= 0 || l.ReadinessPollInterval <= 0 || l.CredentialRefMaxTTL <= 0 || l.ControlMessageMaxBytes <= 0 || l.ConfigMaxBytes <= 0 || l.ControlRPCsPerInstance <= 0 || l.CredentialRefsPerInstance <= 0 || l.PersistentInodeLimit <= 0 || l.ScratchInodeLimit <= 0 || l.LogBufferBytes <= 0 || l.LogFileMaxBytes <= 0 || l.LogRetainedFiles <= 0 || l.UploadRecordsPerInstance <= 0 || l.UploadRecordsPerHost <= 0 {
+	if c.SchemaVersion != 2 || c.Backends == nil || l.TerminationDeadline <= 0 || l.HostOperationDeadline <= 0 || l.HookRPCDeadline <= 0 || l.ReadinessPollInterval <= 0 || l.CredentialRefMaxTTL <= 0 || l.ControlMessageMaxBytes <= 0 || l.ConfigMaxBytes <= 0 || l.ControlRPCsPerInstance <= 0 || l.CredentialRefsPerInstance <= 0 || l.LogBufferBytes <= 0 || l.LogFileMaxBytes <= 0 || l.LogRetainedFiles <= 0 || l.UploadRecordsPerInstance <= 0 || l.UploadRecordsPerHost <= 0 {
+		return invalidConfig()
+	}
+	switch h.Format {
+	case "":
+		if h.QuotaBackend != "xfs-project" || l.PersistentInodeLimit <= 0 || l.ScratchInodeLimit <= 0 {
+			return invalidConfig()
+		}
+	case PortableFormat:
+		if h.QuotaBackend != "" || l.PersistentInodeLimit != 0 || l.ScratchInodeLimit != 0 || !c.validPortableBudgets() {
+			return invalidConfig()
+		}
+	default:
 		return invalidConfig()
 	}
 	if l.UploadFileNameMaxBytes <= 0 || l.UploadContentTypeMaxBytes <= 0 || l.UploadDeadline <= 0 || l.UploadFileNameMaxBytes > math.MaxInt32 || l.UploadContentTypeMaxBytes > math.MaxInt32 {
@@ -230,6 +246,7 @@ func (c Config) Validate() error {
 		return invalidConfig()
 	}
 	if !strings.HasPrefix(h.DockerEndpoint, "unix://") || !cleanAbsolute(strings.TrimPrefix(h.DockerEndpoint, "unix://")) || !dockerVersionPattern.MatchString(h.DockerEngineVersion) || !runtimeNamePattern.MatchString(h.RunscRuntimeName) || !runscVersionPattern.MatchString(h.RunscVersion) || !shaPattern.MatchString(h.RunscSHA256) || h.QuotaBackend != "xfs-project" {
+	if h.RuntimeInstallationID == "" || strings.TrimSpace(h.RuntimeInstallationID) != h.RuntimeInstallationID || strings.ContainsAny(h.RuntimeInstallationID, "/\x00") || !bundleDigestPattern.MatchString(h.BundleDigest) || h.Format == PortableFormat && strings.ContainsAny(h.RuntimeInstallationID, "\\\r\n") {
 		return invalidConfig()
 	}
 	paths := []string{h.ManagementDirectory, h.StorageRoot, h.IPCRoot}
@@ -253,6 +270,10 @@ func (c Config) Validate() error {
 		for _, s := range addresses {
 			a, e := netip.ParseAddr(s)
 			if e != nil || !a.IsGlobalUnicast() || a.IsPrivate() || a.IsLoopback() || a.IsLinkLocalUnicast() {
+	if n.Profile == host.NetworkNone || h.Format == PortableFormat {
+		if h.Format == PortableFormat && n.Profile != host.NetworkNone && n.Profile != host.NetworkPublicV4 {
+			return invalidConfig()
+		}
 				return invalidConfig()
 			}
 		}
@@ -277,7 +298,7 @@ func (c Config) Validate() error {
 		}
 	}
 	for name, p := range c.ResourceProfiles {
-		if name == "" || !p.valid() {
+		if name == "" || !p.valid() || h.Format == PortableFormat && !p.validPortable() {
 			return invalidConfig()
 		}
 	}
@@ -295,6 +316,20 @@ func (c Config) Validate() error {
 }
 func (c Config) validateSpec(s ModuleSpec) error {
 	if strings.TrimSpace(string(s.ModuleID)) == "" || !imagePattern.MatchString(s.ImageDigest) || s.UID == 0 || s.GID == 0 || len(s.Entrypoint) == 0 || !cleanAbsolute(s.Entrypoint[0]) || s.Approval == nil {
+	imageOK := imagePattern.MatchString(s.ImageDigest) || recordImagePattern.MatchString(s.ImageDigest)
+	pathOK := false
+	if len(s.Entrypoint) > 0 {
+		if c.Host.Format == PortableFormat {
+			entry := s.Entrypoint[0]
+			pathOK = entry != "/" && path.IsAbs(entry) && path.Clean(entry) == entry && !strings.ContainsAny(entry, "\\\x00\r\n")
+		} else {
+			pathOK = cleanAbsolute(s.Entrypoint[0])
+		}
+	}
+	if c.Host.Format == PortableFormat && (!recordImagePattern.MatchString(s.ImageDigest) || len(s.ModuleID) > 256 || strings.TrimSpace(string(s.ModuleID)) != string(s.ModuleID) || strings.ContainsAny(string(s.ModuleID), "\x00\r\n") || s.UID == ^uint32(0) || s.GID == ^uint32(0)) {
+		return invalidConfig()
+	}
+	if strings.TrimSpace(string(s.ModuleID)) == "" || !imageOK || s.UID == 0 || s.GID == 0 || !pathOK || s.Approval == nil {
 		return invalidConfig()
 	}
 	for _, arguments := range [][]string{s.Entrypoint, s.Args} {

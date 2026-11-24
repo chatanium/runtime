@@ -9,23 +9,27 @@ import (
 	"testing"
 	"time"
 
+	"github.com/thirdscam/chatanium/internal/portable/process"
 	runtime "github.com/thirdscam/chatanium/internal/runtime"
 	wire "github.com/thirdscam/chatanium/proto/core-v2"
-	"golang.org/x/sys/unix"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 func testConfig(t *testing.T) Config {
 	t.Helper()
-	config := Config{ManagementDirectory: t.TempDir(), ModuleMountRoots: []string{t.TempDir()}, Limits: runtime.Limits{UploadRecordsPerInstance: 4, UploadRecordsPerHost: 8, UploadFileNameMaxBytes: 128, UploadContentTypeMaxBytes: 128, UploadDeadline: runtime.Duration(time.Minute)}}
-	// testing.TempDir creates its numbered child with mode 0777 subject to
-	// umask, not 0700. Provision this owned fixture like the supervisor does;
-	// production must continue rejecting a public management parent.
-	if err := os.Chmod(config.ManagementDirectory, 0700); err != nil {
+	management, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Mkdir(filepath.Join(config.ManagementDirectory, "uploads"), 0700); err != nil {
+	config := Config{ManagementDirectory: management, ModuleMountRoots: []string{t.TempDir()}, Limits: runtime.Limits{UploadRecordsPerInstance: 4, UploadRecordsPerHost: 8, UploadFileNameMaxBytes: 128, UploadContentTypeMaxBytes: 128, UploadDeadline: runtime.Duration(time.Minute)}}
+	if err := os.Chmod(management, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := process.ProtectPrivateDir(management); err != nil {
+		t.Fatal(err)
+	}
+	if err := process.EnsurePrivateDir(filepath.Join(management, "uploads")); err != nil {
 		t.Fatal(err)
 	}
 	return config
@@ -166,8 +170,8 @@ func TestUnlinkFailureRetainsAllChargesAndCanRetry(t *testing.T) {
 	if err := s.spool.remove(r.name); err != nil {
 		t.Fatal(err)
 	}
-	fd := int(s.spool.directory.Fd())
-	if err := unix.Mkdirat(fd, r.name, 0700); err != nil {
+	path := filepath.Join(s.config.ManagementDirectory, "uploads", r.name)
+	if err := os.Mkdir(path, 0700); err != nil {
 		t.Fatal(err)
 	}
 	r.retiring = true
@@ -178,7 +182,7 @@ func TestUnlinkFailureRetainsAllChargesAndCanRetry(t *testing.T) {
 	if s.usage != before || !r.storage || !r.charged || s.LastCleanupError() == nil {
 		t.Fatal("failed unlink released accounting")
 	}
-	if err := unix.Unlinkat(fd, r.name, unix.AT_REMOVEDIR); err != nil {
+	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.reclaimLocked(r, time.Now()); err != nil {
@@ -190,7 +194,16 @@ func TestUnlinkFailureRetainsAllChargesAndCanRetry(t *testing.T) {
 }
 
 func TestExclusiveSpoolOwnershipAndOrphanReclaim(t *testing.T) {
-	config := testConfig(t)
+	t.Run("legacy", func(t *testing.T) {
+		checkExclusiveSpoolOwnershipAndOrphanReclaim(t, testConfig(t))
+	})
+	t.Run("portable", func(t *testing.T) {
+		checkExclusiveSpoolOwnershipAndOrphanReclaim(t, portableSpoolConfig(t))
+	})
+}
+
+func checkExclusiveSpoolOwnershipAndOrphanReclaim(t *testing.T, config Config) {
+	t.Helper()
 	first, err := New(context.Background(), config)
 	if err != nil {
 		t.Fatal(err)

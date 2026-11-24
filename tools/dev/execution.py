@@ -78,6 +78,7 @@ class Identity:
         self.python = trusted('python3')
         self.directory = None
         self.generated_socket_directory = None
+        self.launcher = None
         self.safe_env = {'PATH': '/usr/bin:/bin', 'HOME': self.account.pw_dir,
                          'USER': self.account.pw_name, 'LOGNAME': self.account.pw_name,
                          'LANG': 'C.UTF-8'}
@@ -165,7 +166,13 @@ class Identity:
             raise ExecutionError('operator config must already be readable by runtime account')
         if not self.test('-w', supervisor):
             raise ExecutionError('supervisor socket must already be accessible by runtime account')
+        if not path.is_absolute() or path.resolve(strict=True) != path:
+            raise ExecutionError('existing v1 launcher must have an absolute canonical path')
+        self.launcher = path
 
+        if self.launcher is None:
+            raise ExecutionError('explicit legacy launcher must be verified before management')
+                '--', str(self.launcher), *map(str, arguments)]
     def stage(self, artifact):
         # Only executable/native artifacts and the small public client are
         # staged. No source checkout, config, .env, or credentials are copied.

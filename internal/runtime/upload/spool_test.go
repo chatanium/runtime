@@ -5,18 +5,21 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/thirdscam/chatanium/internal/portable/process"
 )
 
 func TestConstructorRejectsPublicManagementParent(t *testing.T) {
 	config := testConfig(t)
-	if err := os.Chmod(config.ManagementDirectory, 0755); err != nil {
-		t.Fatal(err)
-	}
+	makeSpoolPublic(t, config.ManagementDirectory)
 	if store, err := New(context.Background(), config); err == nil {
 		_ = store.Close(context.Background())
 		t.Fatal("constructor accepted a public management parent")
 	}
 	if err := os.Chmod(config.ManagementDirectory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := process.ProtectPrivateDir(config.ManagementDirectory); err != nil {
 		t.Fatal(err)
 	}
 	store, err := New(context.Background(), config)
@@ -89,5 +92,43 @@ func TestOrphanSymlinkDoesNotDeleteTarget(t *testing.T) {
 	bytes, err := os.ReadFile(target)
 	if err != nil || string(bytes) != "owned elsewhere" {
 		t.Fatalf("target modified: %q %v", bytes, err)
+	}
+}
+
+func portableSpoolConfig(t *testing.T) Config {
+	t.Helper()
+	config := testConfig(t)
+	config.Portable = true
+	config.ModuleMountRoots = nil
+	config.Limits.UploadRecordsPerHost = 1
+	config.Limits.UploadRecordsPerInstance = 1
+	return config
+}
+
+func TestPortableSpoolRejectsExtraArtifactsBeforeReclaim(t *testing.T) {
+	config := portableSpoolConfig(t)
+	root := filepath.Join(config.ManagementDirectory, "uploads")
+	for _, name := range []string{"file-00000000000000000000000000000000", "file-11111111111111111111111111111111"} {
+		if err := os.WriteFile(filepath.Join(root, name), nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if store, err := New(context.Background(), config); err == nil {
+		store.Close(context.Background())
+		t.Fatal("accepted multiple artifacts for the single reserved upload slot")
+	}
+	for _, name := range []string{"file-00000000000000000000000000000000", "file-11111111111111111111111111111111"} {
+		if _, err := os.Stat(filepath.Join(root, name)); err != nil {
+			t.Fatalf("unexpected recovery mutation: %v", err)
+		}
+	}
+}
+
+func TestPortableSpoolRejectsUnreservedCapacity(t *testing.T) {
+	config := portableSpoolConfig(t)
+	config.Limits.UploadRecordsPerHost++
+	if store, err := New(context.Background(), config); err == nil {
+		store.Close(context.Background())
+		t.Fatal("accepted a second portable upload slot without reserved capacity")
 	}
 }

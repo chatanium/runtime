@@ -1,3 +1,5 @@
+//go:build linux
+
 package host
 
 import (
@@ -235,10 +237,14 @@ func (j *journal) initializeCreateRejections(ctx context.Context) error {
 	tx, err := j.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
+func (j *Store) RecordFailure(ctx context.Context, o Ownership, phase FailurePhase, reason FailureReason) error {
+	if !validFailurePhase(phase) || !validFailureReason(reason) {
+		return invalid("invalid sandbox failure diagnostic code")
 	}
 	defer tx.Rollback()
 	var initialized int
 	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM metadata WHERE key='create_journal_v2'").Scan(&initialized); err != nil {
+	if err := j.creationOwner(ctx, o); err != nil {
 		return err
 	}
 	if initialized != 0 {
@@ -256,4 +262,5 @@ func (j *journal) initializeCreateRejections(ctx context.Context) error {
 		}
 	}
 	return tx.Commit()
+	return j.state(ctx, o.InstanceID, "CLEANUP_PENDING", string(phase)+":"+string(reason))
 }

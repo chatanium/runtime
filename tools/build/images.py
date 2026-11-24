@@ -22,6 +22,11 @@ lockfile = (work / 'build.lock').open('w')
 fcntl.flock(lockfile, fcntl.LOCK_EX)
 mode = sys.argv[1]
 go = os.environ['GO_BINARY']
+arch = os.environ.get('GOARCH', 'amd64')
+if arch not in ('amd64', 'arm64') or (mode != 'module' and arch != 'amd64'):
+    raise RuntimeError('Module images support Linux amd64/arm64; pinned media tooling supports Linux amd64 only')
+host_os, host_arch = capture(go, 'env', 'GOHOSTOS', 'GOHOSTARCH').splitlines()
+parser_env = dict(os.environ, GOOS=host_os, GOARCH=host_arch, CGO_ENABLED='0')
 if mode == 'module':
     prefixes = ['MODULE']
 elif mode == 'media':
@@ -41,36 +46,55 @@ fcntl.flock(sdk_lease, fcntl.LOCK_SH)
 for module in sdk_modules:
     resolve_sdk(go, module, prepare=False)
 label_key = 'org.chatanium.flexmodule.manifest.v2'
+resource_label = 'org.chatanium.flexmodule.resources.v2'
+portable_module_recipes = {
+    'examples/general-bot': 'tools/build/Module.Dockerfile',
+    'tests/integration/fixtures/sandbox': 'tools/build/Module.Dockerfile',
+    'modules/audio-player': 'tools/media/Module.Dockerfile',
+    'modules/music-bot': 'tools/media/Module.Dockerfile',
+}
 
 
 def build_image(module_dir, binary, image, dockerfile, base=None):
     if not image or '@' in image or any(c.isspace() for c in image):
         raise RuntimeError('Explicit writable OCI tag required')
     manifest = root / module_dir / 'manifest.json'
+    build_info = capture(go, 'version', '-m', root / binary).splitlines()
+    settings = {line.strip().removeprefix('build\t') for line in build_info if line.startswith('\tbuild\t')}
+    if not {'CGO_ENABLED=0', 'GOOS=linux', 'GOARCH=' + arch}.issubset(settings):
+        raise RuntimeError('Selected module executable does not match the requested Linux guest target')
     # Execute the actual generated strict protobuf parser; retain original bytes.
     with open(os.devnull, 'w') as discard:
-        run(go, 'run', '-mod=readonly', './tools/build/manifest', manifest, stdout=discard)
+        run(go, 'run', '-mod=readonly', './tools/build/manifest', manifest, stdout=discard, env=parser_env)
     declaration = manifest.read_bytes().decode('utf-8')
+    resources = 'portable-v2' if portable_module_recipes.get(module_dir) == dockerfile else None
     with tempfile.TemporaryDirectory(prefix='context-', dir=work) as directory:
         context = Path(directory)
         shutil.copy2(root / binary, context / 'module')
         shutil.copy2(manifest, context / 'manifest.json')
         shutil.copy2(root / dockerfile, context / 'Dockerfile')
-        args = ['docker', 'build', '--platform', 'linux/amd64', '--network=none', '--iidfile', context / 'image-id',
+        args = ['docker', 'build', '--platform', 'linux/' + arch, '--network=none', '--iidfile', context / 'image-id',
                 '--label', label_key + '=' + declaration,
                 '--label', 'org.chatanium.flexmodule.manifest.sha256=' + digest(manifest)]
+        if resources:
+            args += ['--label', resource_label + '=' + resources]
         if base:
             args += ['--build-arg', 'MEDIA_BASE=' + base]
         run(*args, context)
         image_id = (context / 'image-id').read_text().strip()
         metadata = json.loads(capture('docker', 'image', 'inspect', image_id))[0]
-        if metadata['Config']['Labels'].get(label_key) != declaration:
-            raise RuntimeError('OCI manifest label differs from canonical embedded source')
+        if (metadata['Os'], metadata['Architecture']) != ('linux', arch):
+            raise RuntimeError('Built OCI image does not match the requested Linux guest target')
+        labels = metadata['Config']['Labels']
+        if labels.get(label_key) != declaration or labels.get(resource_label) != resources:
+            raise RuntimeError('OCI resource format or manifest label differs from the build inputs')
         evidence = {'image_tag': image, 'local_image_id': image_id, 'registry_digest': None,
                     'registry_digest_note': 'Publish to a registry, then use its real RepoDigest for installation.',
                     'manifest_source': str(manifest.relative_to(root)), 'manifest_sha256': digest(manifest),
                     'executable_sha256': digest(root / binary), 'media_base_local_tag': base,
-                    'build_context_sha256': inventory(context)}
+                    'platform': 'linux/' + arch, 'build_context_sha256': inventory(context)}
+        if resources:
+            evidence['resource_format'] = resources
         return work / module_dir / 'image.json', evidence
 
 
@@ -106,7 +130,7 @@ def publish_images(results):
 
 if mode == 'module':
     base = json.loads((root / 'tools/native/native-lock.json').read_text())['builder_base']
-    if f'FROM {base} AS trust' not in (root / 'tools/build/Module.Dockerfile').read_text().splitlines():
+    if f'FROM --platform=linux/amd64 {base} AS trust' not in (root / 'tools/build/Module.Dockerfile').read_text().splitlines():
         raise RuntimeError('Module trust source must match tools/native/native-lock.json builder_base')
     directory = os.environ['MODULE_DIRECTORY']
     binary = os.environ['MODULE_BINARY']

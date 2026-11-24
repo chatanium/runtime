@@ -1,9 +1,6 @@
 package host
 
-import (
-	"context"
-	"errors"
-)
+import "errors"
 
 // These finite codes are host-selected diagnostics, never module text, paths,
 // certificates, output, or daemon error bodies.
@@ -98,14 +95,7 @@ func failureReason(err error, fallback FailureReason) FailureReason {
 }
 
 func (j *journal) RecordFailure(ctx context.Context, o Ownership, phase FailurePhase, reason FailureReason) error {
-	if !validFailurePhase(phase) || !validFailureReason(reason) {
-		return invalid("invalid sandbox failure diagnostic code")
-	}
-	if err := j.creationOwner(ctx, o); err != nil {
-		return err
-	}
 	return j.state(ctx, o.InstanceID, "FAILED", string(phase)+":"+string(reason))
-}
 func (p *DockerPlatform) recordFailure(o Ownership, phase FailurePhase, err error, fallback FailureReason) error {
 	if err == nil {
 		return nil

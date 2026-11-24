@@ -1,3 +1,5 @@
+//go:build linux
+
 package app
 
 import (
@@ -6,7 +8,6 @@ import (
 	"errors"
 	"io"
 	"os"
-	"path/filepath"
 	"time"
 
 	discordbackend "github.com/thirdscam/chatanium/internal/backend/discord"
@@ -303,10 +304,6 @@ func serve(ctx context.Context, config runtime.Config, clientConfig host.ClientC
 			}
 		}
 	}
-}
-
-func canonicalPath(path string) bool {
-	return filepath.IsAbs(path) && filepath.Clean(path) == path && path != "/"
 }
 
 const operatorMaxBytes = 16 << 20

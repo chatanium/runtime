@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"strconv"
 	"sync"
 	"time"
 
@@ -46,7 +45,7 @@ func NewManager(config Config, options ManagerOptions) (*Manager, error) {
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
-	if options.Host == nil || options.FileTransfer == nil || options.FileCleanup == nil {
+	if options.Host == nil || options.FileTransfer == nil || options.FileCleanup == nil || config.Host.Format == PortableFormat && options.DevelopmentMode {
 		return nil, invalidConfig()
 	}
 	m := &Manager{config: config, options: options, instances: make(map[ModuleID]*Instance), installed: make(map[ModuleID]struct{}), backends: make(map[string]BackendRegistration), operations: make(map[string]OperationPolicy), events: make(map[string]EventPolicy)}
@@ -248,7 +247,7 @@ func (m *Manager) launch(ctx context.Context, spec ModuleSpec) (result *Instance
 	if startup.Err() != nil {
 		return i, startup.Err()
 	}
-	factory := host.NewRunnerFactory(m.options.Host, lease)
+	factory := m.options.Host.NewRunnerTransport(lease)
 	primary := &primaryTransport{}
 	clientConfig := &plugin.ClientConfig{
 		HandshakeConfig:     core.HandshakeConfig(),
@@ -265,6 +264,7 @@ func (m *Manager) launch(ctx context.Context, spec ModuleSpec) (result *Instance
 		SyncStderr:          io.Discard,
 		PluginLogBufferSize: l.ControlMessageMaxBytes,
 		UnixSocketConfig:    &plugin.UnixSocketConfig{TempDir: lease.IPCPath, Group: strconv.FormatUint(uint64(lease.SocketGID), 10)},
+		UnixSocketConfig:    factory.SocketConfig(),
 		GRPCDialOptions: []grpc.DialOption{
 			grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(l.ControlMessageMaxBytes), grpc.MaxCallSendMsgSize(l.ControlMessageMaxBytes)),
 			guard.DialOption(),
@@ -351,6 +351,13 @@ func (m *Manager) launch(ctx context.Context, spec ModuleSpec) (result *Instance
 	if actual.EgressPolicy != predictedCore.EgressPolicy {
 		return i, runtimeError(codes.FailedPrecondition, "EGRESS_POLICY_MISMATCH")
 	}
+	egress := host.EgressNone
+	if actual.EgressPolicy == wire.EgressPolicy_EGRESS_POLICY_PUBLIC_INTERNET {
+		egress = host.EgressPublicInternet
+	}
+	if err = m.options.Host.SetEgress(startup, id, egress); err != nil {
+		return i, err
+	}
 	i.mu.Lock()
 	if i.state != Starting || startup.Err() != nil {
 		i.mu.Unlock()
@@ -361,13 +368,6 @@ func (m *Manager) launch(ctx context.Context, spec ModuleSpec) (result *Instance
 	i.state = Initializing
 	i.signalLocked()
 	i.mu.Unlock()
-	egress := host.EgressNone
-	if actual.EgressPolicy == wire.EgressPolicy_EGRESS_POLICY_PUBLIC_INTERNET {
-		egress = host.EgressPublicInternet
-	}
-	if err = m.options.Host.SetEgress(startup, id, egress); err != nil {
-		return i, err
-	}
 	init := &wire.InitContext{ModuleId: string(spec.ModuleID), InstanceId: id, Grants: proto.Clone(actual).(*wire.Grants), PersistentDirectory: host.GuestPersistentPath, ScratchDirectory: host.GuestScratchPath}
 	if err = m.stage(startup, i, wire.Stage_STAGE_INIT, init); err != nil {
 		return i, err
@@ -477,7 +477,8 @@ func failureReason(startup context.Context, err error, fallback string) string {
 	var hostError *host.Error
 	if errors.As(err, &hostError) {
 		switch hostError.Reason {
-		case "HOST_PREREQUISITE_FAILED", "INVALID_CONFIGURATION", "CLEANUP_INCOMPLETE", "MODULE_ALREADY_ACTIVE":
+		case "HOST_PREREQUISITE_FAILED", "INVALID_CONFIGURATION", "CLEANUP_INCOMPLETE", "MODULE_ALREADY_ACTIVE",
+			"APPROVAL_MISMATCH", "BUDGET_EXCEEDED", "VOLUME_BUSY", "EGRESS_REVOKED", "UNSUPPORTED_TARGET", "ENGINE_CAPABILITY_MISSING", "NOT_FOUND":
 			return hostError.Reason
 		}
 	}

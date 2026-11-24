@@ -2,15 +2,19 @@ package discordbackend
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/thirdscam/chatanium/internal/portable/process"
 	runtime "github.com/thirdscam/chatanium/internal/runtime"
 	corewire "github.com/thirdscam/chatanium/proto/core-v2"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 func TestLeafScopesRetainEveryDistinctRelatedResource(t *testing.T) {
@@ -53,17 +57,27 @@ func TestAdministratorDoesNotNeedUnrelatedOverwriteLookup(t *testing.T) {
 }
 func ownershipFixture(t *testing.T) (*ownershipStore, string, Config) {
 	t.Helper()
-	dir := t.TempDir()
-	if err := os.Chmod(dir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(dir, "ownership.sqlite")
-	config := Config{OwnershipDirectory: dir, RoutesPerModule: 4, RoutesPerHost: 8}
+	path, config := ownershipTestLocation(t)
 	store, err := openOwnership(path, config)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return store, path, config
+}
+
+func ownershipTestLocation(t *testing.T) (string, Config) {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := process.ProtectPrivateDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(dir, "ownership.sqlite"), Config{OwnershipDirectory: dir, RoutesPerModule: 4, RoutesPerHost: 8}
 }
 func seedCommand(t *testing.T, s *ownershipStore, name, id, state string) {
 	t.Helper()
@@ -149,5 +163,52 @@ func TestRouteLeaseRejectsForeignOwnerAndReleasesOnce(t *testing.T) {
 	store.mu.Unlock()
 	if readers != 0 {
 		t.Fatalf("route lease did not return its one admission: %d", readers)
+	}
+}
+
+func TestOwnershipDatabaseRejectsLinkedSidecar(t *testing.T) {
+	store, path, config := ownershipFixture(t)
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(config.OwnershipDirectory, "other")
+	if err := os.WriteFile(target, []byte("preserve"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(target, path+"-wal"); err != nil {
+		t.Fatal(err)
+	}
+	if reopened, err := openOwnership(path, config); err == nil {
+		reopened.Close()
+		t.Fatal("accepted an aliased SQLite WAL")
+	}
+	data, err := os.ReadFile(target)
+	if err != nil || string(data) != "preserve" {
+		t.Fatalf("modified linked SQLite WAL target: %q %v", data, err)
+	}
+}
+
+func TestPortableOwnershipRejectsGrowthPastReservationOnReconnect(t *testing.T) {
+	path, config := ownershipTestLocation(t)
+	config.PortableOwnership = true
+	store, err := openOwnership(path, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	seedCommand(t, store, "preserved", "300", "CONFIRMED")
+	// Every subsequent statement gets a fresh SQLite connection.
+	store.db.SetMaxIdleConns(0)
+	if _, err := store.db.Exec("CREATE TABLE budget_probe(payload BLOB)"); err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.db.Exec("INSERT INTO budget_probe VALUES (zeroblob(?))", portableOwnershipMainBytes)
+	var sqliteErr *sqlite.Error
+	if !errors.As(err, &sqliteErr) || sqliteErr.Code() != sqlite3.SQLITE_FULL {
+		t.Fatalf("portable ownership DB grew past its reservation: %v", err)
+	}
+	var state string
+	if err := store.db.QueryRow("SELECT state FROM commands WHERE name = 'preserved'").Scan(&state); err != nil || state != "CONFIRMED" {
+		t.Fatalf("failed write damaged committed ownership: %q %v", state, err)
 	}
 }

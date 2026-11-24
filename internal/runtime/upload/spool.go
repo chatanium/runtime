@@ -1,51 +1,60 @@
-// Package upload implements the backend-neutral, instance-owned core file store.
+//go:build linux || (darwin && arm64)
+
 package upload
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
-	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
+	"github.com/thirdscam/chatanium/internal/portable/process"
 	"golang.org/x/sys/unix"
 )
 
-// spool holds both the directory inode and an exclusive process lock. The lock
-// file is never unlinked: replacing it would permit two independent owners.
-type spool struct {
-	directory *os.File
-	lock      *os.File
-}
-
-func openSpool(ctx context.Context, management string) (_ *spool, result error) {
+func openSpool(ctx context.Context, management string, portable bool) (_ *spool, result error) {
 	if ctx == nil || ctx.Err() != nil || !filepath.IsAbs(management) || filepath.Clean(management) != management {
 		return nil, invalid()
 	}
-	fd, err := unix.Open(management, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	search := managementSearchFlag
+	if portable {
+		if err := process.CheckPrivateDir(management); err != nil {
+			return nil, invalid()
+		}
+		search = unix.O_RDONLY
+	}
+	fd, err := unix.Open(management, search|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 	if err != nil {
 		return nil, internal()
 	}
-	defer unix.Close(fd)
 	var stat unix.Stat_t
-	// The supervisor may own this parent and grant only runtime-group
-	// traversal; journal files remain private. Never chmod a shared ancestor.
-	if unix.Fstat(fd, &stat) != nil || (stat.Uid != 0 && stat.Uid != uint32(os.Geteuid())) || stat.Mode&0027 != 0 {
-		return nil, invalid()
+	if portable {
+		parent := os.NewFile(uintptr(fd), "upload management")
+		defer parent.Close()
+		if unix.Fstat(fd, &stat) != nil || stat.Mode&07777 != 0700 || process.CheckPrivateFileACL(parent) != nil {
+			return nil, invalid()
+		}
+	} else {
+		defer unix.Close(fd)
+		// The legacy supervisor may own this parent and grant only runtime-group
+		// traversal; journal files remain private. Never chmod a shared ancestor.
+		if unix.Fstat(fd, &stat) != nil || (stat.Uid != 0 && stat.Uid != uint32(os.Geteuid())) || stat.Mode&0027 != 0 {
+			return nil, invalid()
+		}
 	}
 	root, err := unix.Openat(fd, "uploads", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 	if err != nil {
 		return nil, internal()
 	}
-	s := &spool{directory: os.NewFile(uintptr(root), "uploads")}
+	s := &spool{directory: os.NewFile(uintptr(root), "uploads"), portable: portable}
 	defer func() {
 		if result != nil {
 			s.close()
 		}
 	}()
-	if unix.Fstat(root, &stat) != nil || stat.Uid != uint32(os.Geteuid()) || stat.Mode&0777 != 0700 {
+	if unix.Fstat(root, &stat) != nil || stat.Uid != uint32(os.Geteuid()) || stat.Mode&0777 != 0700 || portable && stat.Mode&07777 != 0700 {
+		return nil, invalid()
+	}
+	if portable && process.CheckPrivateFileACL(s.directory) != nil {
 		return nil, invalid()
 	}
 	lock, err := unix.Openat(root, ".owner", unix.O_RDWR|unix.O_CREAT|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0600)
@@ -56,53 +65,37 @@ func openSpool(ctx context.Context, management string) (_ *spool, result error) 
 	if unix.Fstat(lock, &stat) != nil || stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Uid != uint32(os.Geteuid()) || stat.Nlink != 1 || stat.Mode&077 != 0 {
 		return nil, invalid()
 	}
+	if portable && process.CheckPrivateFileACL(s.lock) != nil {
+		return nil, invalid()
+	}
 	if unix.Flock(lock, unix.LOCK_EX|unix.LOCK_NB) != nil {
 		return nil, internal()
 	}
-	// No refs survive a runtime epoch. Only our exact internal file namespace is
-	// reclaimed, and only after acquiring exclusive ownership of this directory.
-	for {
-		entries, readErr := s.directory.ReadDir(1)
-		if len(entries) == 0 {
-			if readErr != nil && readErr != io.EOF {
-				return nil, internal()
-			}
-			break
-		}
-		if ctx.Err() != nil {
-			return nil, contextFailure(ctx)
-		}
-		name := entries[0].Name()
-		if name == ".owner" {
-			continue
-		}
-		if !spoolName(name) {
-			return nil, invalid()
-		}
-		if unix.Fstatat(root, name, &stat, unix.AT_SYMLINK_NOFOLLOW) != nil || stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Uid != uint32(os.Geteuid()) || stat.Nlink != 1 {
-			return nil, invalid()
-		}
-		if unix.Unlinkat(root, name, 0) != nil {
-			return nil, internal()
-		}
+	if err := s.recover(ctx, portable); err != nil {
+		return nil, err
 	}
 	return s, nil
 }
 
-func spoolName(name string) bool {
-	if !strings.HasPrefix(name, "file-") || len(name) != len("file-")+32 {
-		return false
+func (s *spool) removeOrphan(name string) error {
+	fd := int(s.directory.Fd())
+	var stat unix.Stat_t
+	if unix.Fstatat(fd, name, &stat, unix.AT_SYMLINK_NOFOLLOW) != nil || stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Uid != uint32(os.Geteuid()) || stat.Nlink != 1 {
+		return invalid()
 	}
-	_, err := hex.DecodeString(strings.TrimPrefix(name, "file-"))
-	return err == nil
-}
-
-func newID() (string, error) {
-	var bytes [16]byte
-	if _, err := rand.Read(bytes[:]); err != nil {
-		return "", internal()
+	if s.portable {
+		file, err := s.open(name)
+		if err != nil {
+			return err
+		}
+		if err := file.Close(); err != nil {
+			return internal()
+		}
 	}
-	return hex.EncodeToString(bytes[:]), nil
+	if unix.Unlinkat(fd, name, 0) != nil {
+		return internal()
+	}
+	return nil
 }
 
 func (s *spool) create(name string) (*os.File, error) {
@@ -123,7 +116,12 @@ func (s *spool) open(name string) (*os.File, error) {
 		unix.Close(fd)
 		return nil, internal()
 	}
-	return os.NewFile(uintptr(fd), "upload reader"), nil
+	file := os.NewFile(uintptr(fd), "upload reader")
+	if s.portable && process.CheckPrivateFileACL(file) != nil {
+		file.Close()
+		return nil, internal()
+	}
+	return file, nil
 }
 
 func (s *spool) remove(name string) error {
@@ -131,19 +129,4 @@ func (s *spool) remove(name string) error {
 		return internal()
 	}
 	return nil
-}
-
-func (s *spool) close() error {
-	var result error
-	if s.lock != nil {
-		if err := s.lock.Close(); err != nil {
-			result = internal()
-		}
-	}
-	if s.directory != nil {
-		if err := s.directory.Close(); err != nil {
-			result = internal()
-		}
-	}
-	return result
 }

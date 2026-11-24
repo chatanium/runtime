@@ -1,0 +1,54 @@
+{
+  "repository": "gfire-sigs/gvx",
+  "repository_id": "1426636867",
+  "owner_id": "201134404",
+  "release": "v0.22.10002026111600",
+  "commit": "a90476e02630e7d35861e1da16d407e03e71e8b7",
+  "workflow": "gfire-sigs/gvx/.github/workflows/release.yml",
+  "certificate_sha256": "5f4cb873166088c50a2ae5dfd7aa853f9cd15226e9f64f163da84872446e293e",
+  "attestation_sha256": "3f6274047cdfdc61f102b7e010a0bef2e71fee1747fa6d9ead56c16d652d3e5e",
+  "attestation_size": 12339,
+  "targets": {
+    "linux/amd64": {
+      "backend": "systrap",
+      "cpu_baseline": "amd64-v2",
+      "go_arch_setting": "GOAMD64=v2",
+      "archive_sha256": "328e8eb27209ec3bdf8af78945125baeeceaba674c8373b6993e0beb482269c5",
+      "archive_size": 15300716,
+      "executable_sha256": "d1b9f9fa588c008b9ada478634931602f72c85cfde6050a048e779c40e75d891"
+    },
+    "linux/arm64": {
+      "backend": "systrap",
+      "cpu_baseline": "arm64-v8.0",
+      "go_arch_setting": "GOARM64=v8.0",
+      "archive_sha256": "7f1f64b3fc9062b51bf9ff60e9406d9b1eb444bef8e6a1138143d69a5bb9ac54",
+      "archive_size": 13780470,
+      "executable_sha256": "4e3dc15e4c5381768afad0182756746dc2d64a8ed8debc5c3b65d89715aeafac"
+    },
+    "darwin/arm64": {
+      "backend": "hvf",
+      "cpu_baseline": "arm64-v8.4",
+      "go_arch_setting": "GOARM64=v8.4",
+      "archive_sha256": "25678cc0ee7d4978d64f16c6bd430f1b2301a2237b0c4464ca362d992e2b4a54",
+      "archive_size": 13671550,
+      "executable_sha256": "afb09832cd1e8c34f0e4aee0056c9f858c09fec13e1833db24aca2a37e6b3b54",
+      "native_signature": "adhoc-hvf-entitlement"
+    },
+    "windows/amd64": {
+      "backend": "whpx",
+      "cpu_baseline": "amd64-v2",
+      "go_arch_setting": "GOAMD64=v2",
+      "archive_sha256": "ba0fbfc7264d73b4e7b76ab8c8fb37f629985b3b7702ee9e5bf91385f1622847",
+      "archive_size": 15451433,
+      "executable_sha256": "9be19830d27da2b82a5dcb62ecf2b08570fece1335699572ac9780285bf78126"
+    },
+    "windows/arm64": {
+      "backend": "whpx",
+      "cpu_baseline": "arm64-v8.1",
+      "go_arch_setting": "GOARM64=v8.1",
+      "archive_sha256": "442b73fc3584c84643c26991debfb2c2830ea1e61f3e08f5ebb9b19ca1e11524",
+      "archive_size": 13570658,
+      "executable_sha256": "39383308a5bed1e16a352a65f1ca0ba1203ddfbe9f0d714c32ee417064985e4a"
+    }
+  }
+}

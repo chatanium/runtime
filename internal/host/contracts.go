@@ -1,5 +1,5 @@
-// Package host implements the trusted Linux supervisor boundary. No module
-// configuration, backend secret, or caller-provided host path belongs here.
+// Package host defines the trusted sandbox and worker boundary. The legacy
+// native supervisor implementation is available only on Linux.
 package host
 
 import (

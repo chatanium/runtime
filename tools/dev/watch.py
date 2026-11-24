@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Opt-in local build/publish/reload coordinator; the runtime never builds images."""
+"""Legacy v1 build/publish/reload coordinator for an explicitly selected launcher."""
 from __future__ import annotations
 
 import argparse
@@ -36,6 +36,7 @@ BUILD_ENV = {'PATH', 'HOME', 'USER', 'LOGNAME', 'TMPDIR', 'LANG', 'LC_ALL',
              'GOOS', 'GOARCH', 'GO_TOOLCHAIN', 'BUF_VERSION',
              'PROTOC_GEN_GO_VERSION', 'PROTOC_GEN_GO_GRPC_VERSION', 'BUILD_JOBS',
              'BUILD_OUTPUTS', 'MODULE', 'DISABLE_VOICE'}
+             'BUILD_OUTPUTS', 'MODULE', 'DISABLE_VOICE', 'LEGACY_RUNTIME', 'BOOTSTRAP_GO'}
 
 
 class DevelopmentError(Exception):
@@ -797,6 +798,7 @@ class Watcher:
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', required=True)
+    parser.add_argument('--runtime', required=True, help='verified, already installed v1 launcher')
     parser.add_argument('--socket', required=True)
     parser.add_argument('--supervisor-socket', required=True)
     parser.add_argument('--supervisor-uid', required=True)
@@ -813,6 +815,8 @@ def main(argv=None):
     watcher = None
     try:
         load_config(config, runtime_uid=identity.account.pw_uid)
+        identity.check_inputs(args.runtime)
+        os.environ['LEGACY_RUNTIME'] = args.runtime
         # All source/compiler/native work stays under /home. Public execution
         # generations contain no secrets and require no home permission changes.
         tools = root / '.tools'

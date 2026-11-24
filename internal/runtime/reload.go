@@ -90,7 +90,7 @@ func (m *Manager) moduleSnapshotLocked(id ModuleID) (ModuleSnapshot, bool) {
 	}
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	snapshot := ModuleSnapshot{Principal: i.principal, ImageDigest: i.spec.ImageDigest, State: i.state, CleanupComplete: i.cleanupComplete}
+	snapshot := ModuleSnapshot{Principal: i.principal, ImageDigest: i.spec.ImageDigest, State: i.state, FailureReason: i.failure, CleanupComplete: i.cleanupComplete}
 	if lifecycle := m.lifecycles[id]; lifecycle != nil {
 		snapshot.Reloading = lifecycle.reloading
 		snapshot.CommittedImageDigest = lifecycle.committedImageDigest

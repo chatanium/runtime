@@ -15,6 +15,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 	discordbackend "github.com/thirdscam/chatanium/internal/backend/discord"
 	discordhttp "github.com/thirdscam/chatanium/internal/backend/discord/http"
+	"github.com/thirdscam/chatanium/internal/portable/process"
 	runtime "github.com/thirdscam/chatanium/internal/runtime"
 	"github.com/thirdscam/chatanium/internal/runtime/upload"
 	wire "github.com/thirdscam/chatanium/proto/core-v2"
@@ -75,6 +76,12 @@ func hostSecret(source string) (string, error) {
 
 func newDiscordBackend(ctx context.Context, config runtime.Config, backend runtime.BackendConfig, c *discordOperatorConfig, files *upload.UploadStore, onError func(error)) (*discordbackend.Backend, error) {
 	if !isolatedHostDirectory(c.OwnershipDirectory, config.Host.StorageRoot, config.Host.IPCRoot) {
+	portable := config.Host.Format == runtime.PortableFormat
+	if portable {
+		if c.OwnershipDirectory != filepath.Join(config.Host.ManagementDirectory, "discord") || process.CheckPrivateDir(c.OwnershipDirectory) != nil {
+			return nil, errors.New("portable Discord requires the private installation app/discord directory")
+		}
+	} else if !isolatedHostDirectory(c.OwnershipDirectory, config.Host.ModuleMountRoots()...) {
 		return nil, errors.New("Discord ownership directory must be private and outside module mounts")
 	}
 	if len(backend.SecretSources) != len(c.ProvisionedSecrets)+1 {
@@ -128,7 +135,20 @@ func newDiscordBackend(ctx context.Context, config runtime.Config, backend runti
 		}
 	}
 	h := c.HTTP
-	b, err := discordbackend.New(ctx, discordbackend.Config{BotToken: token, ApplicationID: c.ApplicationID, BotUserID: c.BotUserID, OwnershipDirectory: c.OwnershipDirectory, Intents: c.Intents, GatewayFrameMaxBytes: c.GatewayFrameMaxBytes, GatewayDecodedMaxBytes: c.GatewayDecodedMaxBytes, CredentialTTL: time.Duration(c.CredentialTTL), InteractionTTL: time.Duration(c.InteractionTTL), NonceTTL: time.Duration(c.NonceTTL), NoncesPerInstance: c.NoncesPerInstance, NoncesPerHost: c.NoncesPerHost, NonceChunksMax: c.NonceChunksMax, RoutesPerModule: c.RoutesPerModule, RoutesPerHost: c.RoutesPerHost, MaxRoutesPerRequest: c.MaxRoutesPerRequest, MaxFilesPerRequest: c.MaxFilesPerRequest, FileMaxBytes: c.FileMaxBytes, RequestMaxBytes: c.RequestMaxBytes, PresenceOwner: c.PresenceOwner, Secrets: secrets, Uploads: files, OnError: onError, HTTP: discordhttp.Config{RequestDeadline: time.Duration(h.RequestDeadline), JSONMaxBytes: h.JSONMaxBytes, ResponseMaxBytes: h.ResponseMaxBytes, HeaderMaxBytes: h.HeaderMaxBytes, RequestsPerInstance: h.RequestsPerInstance, RequestsPerHost: h.RequestsPerHost, RateLimitBuckets: h.RateLimitBuckets, RateLimitRetention: time.Duration(h.RateLimitRetention)}})
+	b, err := discordbackend.New(ctx, discordbackend.Config{
+		BotToken: token, ApplicationID: c.ApplicationID, BotUserID: c.BotUserID,
+		OwnershipDirectory: c.OwnershipDirectory, PortableOwnership: portable, Intents: c.Intents,
+		GatewayFrameMaxBytes: c.GatewayFrameMaxBytes, GatewayDecodedMaxBytes: c.GatewayDecodedMaxBytes,
+		CredentialTTL: time.Duration(c.CredentialTTL), InteractionTTL: time.Duration(c.InteractionTTL), NonceTTL: time.Duration(c.NonceTTL),
+		NoncesPerInstance: c.NoncesPerInstance, NoncesPerHost: c.NoncesPerHost, NonceChunksMax: c.NonceChunksMax,
+		RoutesPerModule: c.RoutesPerModule, RoutesPerHost: c.RoutesPerHost, MaxRoutesPerRequest: c.MaxRoutesPerRequest,
+		MaxFilesPerRequest: c.MaxFilesPerRequest, FileMaxBytes: c.FileMaxBytes, RequestMaxBytes: c.RequestMaxBytes,
+		PresenceOwner: c.PresenceOwner, Secrets: secrets, Uploads: files, OnError: onError,
+		HTTP: discordhttp.Config{RequestDeadline: time.Duration(h.RequestDeadline), JSONMaxBytes: h.JSONMaxBytes,
+			ResponseMaxBytes: h.ResponseMaxBytes, HeaderMaxBytes: h.HeaderMaxBytes,
+			RequestsPerInstance: h.RequestsPerInstance, RequestsPerHost: h.RequestsPerHost,
+			RateLimitBuckets: h.RateLimitBuckets, RateLimitRetention: time.Duration(h.RateLimitRetention)},
+	})
 	if err != nil {
 		return nil, errors.New("Discord backend initialization failed")
 	}
@@ -223,6 +243,10 @@ func containsSecretJSON(raw []byte, secrets []string) bool {
 			}
 		}
 	}
+}
+
+func canonicalPath(path string) bool {
+	return filepath.IsAbs(path) && filepath.Clean(path) == path && path != filepath.VolumeName(path)+string(filepath.Separator)
 }
 
 func isolatedHostDirectory(path string, mounts ...string) bool {

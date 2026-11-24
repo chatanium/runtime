@@ -70,6 +70,7 @@ type ModuleSnapshot struct {
 	ImageDigest          string
 	CommittedImageDigest string
 	State                RuntimeState
+	FailureReason        string
 	Reloading            bool
 	CleanupComplete      bool
 }
@@ -86,7 +87,7 @@ type Instance struct {
 	launchDone         chan struct{}
 	connectDone        chan struct{}
 	killDone           chan struct{}
-	factory            *host.RunnerFactory
+	factory            host.RunnerTransport
 	primaryTransport   *primaryTransport
 	drainReady         chan struct{}
 	bound              bool
@@ -222,7 +223,7 @@ type FileTransferFactory func(InstanceServices) (core.HelperRegistrar, error)
 type InstanceCleanup func(context.Context, InstancePrincipal) error
 type ManagerOptions struct {
 	DevelopmentMode bool
-	Host            *host.Client
+	Host            host.RuntimeHost
 	Backends        []BackendRegistration
 	FileTransfer    FileTransferFactory
 	FileCleanup     InstanceCleanup

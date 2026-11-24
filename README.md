@@ -40,13 +40,17 @@ Operator-approved configuration and immutable OCI images
     |
     +-- privileged flexmodule-supervisor (independent host service)
     |     Docker/runsc, quota, network policy, cleanup/reconciliation
-    |
+    +-- portable foreground supervisor (ordinary installation-owner account)
+    |     verified local bundle and image generations, SQLite admission/cleanup ledger
+    |     one managed GVX engine per instance; authenticated gvx-ctrl/2
     +-- unprivileged runtime
           core manager, ordered event admission, uploads, credentials
           optional Discord backend (host-only bot token and Gateway)
           optional voice service (separate native-enabled artifact)
+          native voice only if the target bundle advertises it
               |
               +-- runsc module instances
+              +-- original rungv -> trusted guest bridge -> nonroot module
                     authenticated core-v2 Hook
                     one fixed reverse connection for core/file/backend helpers
                     authenticated storage paths, explicit resource/egress approval
@@ -67,12 +71,10 @@ reconnection/replacement is not authorized. Helper transport failure fails the
 instance rather than silently reconnecting with old authority.
 Shutdown closes and joins the primary physical yamux session, not just its gRPC
 stream, before releasing pinned socket descriptors and requesting host cleanup.
-Temporary storage claims remain reserved until the paths are removed and XFS
-allocation counters are zero. Cleanup synchronizes once, then observes the XFS
-reclamation barrier and exact project counters within the existing cleanup
-deadline; deferred inode reclamation is not mistaken for an immediate leak.
-Kernel errors or an expired deadline remain cleanup failures and retain claims,
-never a successful stop.
+Each module has one persistent ext4lite image and each instance has one ephemeral
+image shared by scratch and `/tmp`. Limits are logical image maxima, not host
+reservations or guaranteed writable bytes. A slot remains charged until native
+exit and scratch removal are confirmed; a lost control connection is not proof.
 
 Discord helper HTTP requests use fresh HTTP/1 connections with matching
 `http/1.1` TLS ALPN, not the default Go transport's inherited `h2` advertisement.
@@ -86,6 +88,8 @@ Current entry points:
 | `internal/app/` | Runtime orchestration, configuration generation and optional backend/voice composition |
 | `src/Database/`, `src/Backends/Discord/Database/` | Chatanium-owned in-memory database and host guild/message recording |
 | `cmd/flexmodule-supervisor/`, `internal/host/` | Privileged host control and Docker/runsc execution |
+| `main.go`, `cmd/`, `internal/portable/install/` | User-local doctor, initialization, review, foreground start/stop, offline update, uninstall and purge |
+| `internal/portable/{engine,process,service,session,sandbox,images,store}/` | Native child lifetime, authenticated controls, guest grants, verified images and the installation ledger |
 | `internal/runtime/`, `internal/runtime/upload/` | Backend-neutral instance lifecycle, grants, admission and file ownership |
 | `proto/core-v2/`, `shared/core-v2/` | Lifecycle, configuration, file transfer and authenticated transport |
 | `proto/discord-v2/`, `shared/discord-v2/`, `internal/backend/discord/` | Typed Discord domain/events/helpers and host adapter |
@@ -172,7 +176,9 @@ Commit the SQL changes together with all three generated Go files
 | `make list-module` | Display detailed manifest blocks with name/version, author, description, backend protocols and grouped capability names; no Go/native/SDK preparation, module build or runtime query |
 | `make build-runtime` | Voice-enabled `bin/chatanium` (CGO=1, pinned native DAVE), adjacent `bin/voice-runtime/` libraries/licenses/provenance, and `bin/flexmodule-supervisor`; no application modules |
 | `DISABLE_VOICE=1 make build-runtime` | Runtime and supervisor only, CGO=0 without native voice or its library dependency |
-| `make build` | Default voice-enabled runtime plus every direct v2 module directory under `modules/`; module executables remain CGO=0 |
+| `TRUSTED_GH=/usr/bin/gh make build-runtime GOOS=linux GOARCH=amd64` | Build the offline portable launcher, target-matched original GVX and worker, Linux guest bridge/preparer and their provenance |
+| `TRUSTED_GH=/usr/bin/gh make build-runtime GOOS=windows GOARCH=arm64` | Cross-build a Windows arm64 artifact on the Linux build host; this is not a WHPX execution test |
+| `make build` | Build the portable runtime plus direct v2 module directories under `modules/` |
 | `make build-module music-bot` | Build only `modules/music-bot` into `bin/modules/music-bot/module`; any module folder name works without editing the Makefile |
 | `make build-module examples/general-bot` | Explicitly build the root-module example into `bin/examples/general-bot/module` |
 | `make build-native BUILD_JOBS=2` | Independent native C++/ABI/loader/license gate; `.tools/native/prefix` and `.tools/native/bundle`, no application Go compilation or `bin/voice-runtime` publication |
@@ -182,11 +188,10 @@ Commit the SQL changes together with all three generated Go files
 | `make check-offline` | Focused SDK-preparation tests, Buf schema/generation comparison and bounded ordinary tests in the prepared SDK, root and discovered local Go modules; no live Discord or native build |
 | `make clean` | Owned runtime/integration binaries and directory-derived module outputs only; no native bundle deletion or Docker prune |
 
-Voice support is enabled by default for both `make build-runtime` and
-`make build`. Set `DISABLE_VOICE=1` in the environment to turn it off; setting
-`CGO_ENABLED=0` alone does not disable runtime voice. Native runtime builds
-require the Linux/amd64 and Docker prerequisites below. Module-only builds
-do not build native libraries or install media tools.
+Portable bundles currently have no native voice closure. `doctor` reports the
+capability of the embedded bundle, not the capabilities of another target or an
+old installation. The native/media build instructions below concern those
+separate artifacts, not portable installation prerequisites.
 
 Module discovery uses each direct `modules/<name>/manifest.json`, not a fixed
 module list. Symlinks and non-v2 entries such as the old `modules/MusicBot`
@@ -420,6 +425,89 @@ module manifest with that image declaration. Declarations are requirements,
 registry RepoDigests. Publish through your approved registry workflow and use the
 actual `registry/repository@sha256:...` RepoDigest in installation config; a local
 tag or image ID is not a substitute.
+
+## Run a portable installation
+
+Verify the **outer launcher** against your release publisher's independently
+trusted provenance before running it. Its embedded GVX is pinned to
+[`v0.22.10002026111600`](https://github.com/gfire-sigs/gvx/releases/tag/v0.22.10002026111600);
+pulling `latest` or installing a system container engine is not part of setup.
+
+Run `doctor --installation-id ID` from the same user account that will own the
+installation. `doctor` is read-only; it distinguishes authenticated bundle
+metadata from checks that require opening files or starting the engine. Target
+backends are Linux amd64/arm64 `systrap`, macOS arm64 `hvf`, and Windows
+amd64/arm64 `whpx`. WHPX must already be enabled. The installer does not enable
+a hypervisor, create accounts, run a service, mount host volumes or alter host
+cgroups, routing or firewall rules.
+
+For a first module in an offline OCI archive, `init` can also run preparation
+and approval in one invocation. Read each displayed plan; `READY` means the
+configuration was approved, not that the module is running.
+
+```sh
+./chatanium doctor --installation-id demo
+./chatanium init --installation-id demo \
+  --source-kind oci-archive --source "$PWD/module.tar" --digest "$ARCHIVE_SHA256" \
+  --module-id demo --module-config "$PWD/module.json" --approval "$PWD/grants.json"
+./chatanium start --foreground --installation-id demo
+# In another terminal, using the same account:
+./chatanium stop --installation-id demo
+```
+
+`ARCHIVE_SHA256` is the trusted `sha256:…` of the whole archive. The
+`--approval` file proposes grants; it does not answer the digest prompts.
+To stage an installation or add another module separately:
+
+1. Run `init --installation-id ID`, inspect the location and disk budget, and
+   approve the exact `PlanDigest`. An empty installation cannot start a module.
+2. `prepare-image` accepts a digest-pinned registry source or an explicitly
+   selected OCI archive. Parsing and compilation take place in a separate,
+   networkless guest. Images must declare
+   `org.chatanium.flexmodule.resources.v2=portable-v2` in addition to their
+   core-v2 manifest. Rebuild old images; do not reuse their old approvals.
+3. `generate-config` binds the prepared generation to a module, UID/GID,
+   resource limits and network grant. `configure` requires the matching module
+   `ReviewDigest` before activation. The guest sees its approved PID, RAM and
+   CPU limits; these are not constraints on the host worker's RSS or threads.
+4. `start --foreground --installation-id ID` runs the actual worker and modules.
+   `stop --installation-id ID` fences new launches before waiting for exit.
+   `NONE` has no external networking. `PUBLIC_INTERNET` starts denied and opens
+   the reviewed GVX NAT policy only after module authentication and grant checks.
+5. Stop before `update` or `uninstall`. Uninstall removes installed code, not
+   module data. `purge` lists what it will delete and needs a fresh approval.
+   The downloaded executable and shared parent directory are not purge targets.
+
+**Restoring a stopped update backup after copying it to another filesystem:**
+restore only the listed members (including `config.json`) to a fresh private
+installation at the original approved path, using the matching verified code.
+Keep the cache read-only and `app/discord`, `app/uploads` and `ipc` owner-only.
+Keep the original backup elsewhere; never overlay a live installation.
+Copy `backups/B/inventory.json` to `restore-inventory.json` in that installation.
+Use the digest you saved independently from the original backup, not a digest
+calculated from the copy you are attempting to trust:
+
+```sh
+./chatanium bind-restored-volumes --installation-id demo \
+  --backup-id "$BACKUP_ID" --receipt-digest "$TRUSTED_INVENTORY_SHA256"
+```
+
+This is not an image importer. It verifies the restored snapshot and volume
+contents before binding their new native file identities. The exact command
+can be retried before the first activation. The receipt and config are retained;
+this command cannot rebind volumes from an ordinary installation.
+
+No raw ext4 image import: GVX opens an existing volume before host lockdown.
+Only this installation's recorded volume with the expected native file
+identity and maximum length may be reopened. Details and upstream source:
+[portable-v2 design](chatanium-1-portable-module-runtime.md).
+
+<details>
+<summary>Legacy Linux administrator installation (v1 launcher only)</summary>
+
+The following runbooks describe installations made by the older root launcher.
+Use that original binary to manage them. Do not run their privileged setup
+commands for a portable installation; portable-v2 never migrates or removes v1.
 
 ## Prepare a host
 
@@ -714,6 +802,8 @@ available for an explicit corrected reload, even when every module is terminal.
 The current immutable digest may also be reloaded, for example to retry a
 cleanly reclaimed failed activation.
 
+
+</details>
 
 ## Generic modules, scopes and validation boundaries
 

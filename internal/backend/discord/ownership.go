@@ -4,7 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"net/url"
 	"os"
+	"path/filepath"
+	goruntime "runtime"
 	"sync"
 
 	runtime "github.com/thirdscam/chatanium/internal/runtime"
@@ -18,6 +22,7 @@ import (
 
 type ownershipStore struct {
 	db            *sql.DB
+	directory     *os.Root
 	config        Config
 	commands      chan struct{}
 	mu            sync.Mutex
@@ -26,30 +31,60 @@ type ownershipStore struct {
 	changed       chan struct{}
 }
 
-func openOwnership(path string, c Config) (*ownershipStore, error) {
-	directory, e := os.Lstat(c.OwnershipDirectory)
-	if e != nil || !directory.IsDir() || directory.Mode().Perm() != 0700 {
+func openOwnership(path string, c Config) (_ *ownershipStore, result error) {
+	directory, e := openOwnershipDirectory(c.OwnershipDirectory)
+	if e != nil {
 		return nil, unavailable("DISCORD_OWNERSHIP_DIRECTORY_INVALID")
 	}
-	db, e := sql.Open("sqlite", path)
+	defer func() {
+		if result != nil {
+			directory.Close()
+		}
+	}()
+	if e = prepareOwnershipDatabase(directory, path, c.PortableOwnership); e != nil {
+		return nil, unavailable("DISCORD_OWNERSHIP_OPEN_FAILED")
+	}
+	uriPath := filepath.ToSlash(path)
+	if goruntime.GOOS == "windows" {
+		uriPath = "/" + uriPath
+	}
+	locator := url.URL{Scheme: "file", Path: uriPath, RawQuery: "mode=rw"}
+	if c.PortableOwnership {
+		locator.RawQuery = portableOwnershipQuery()
+	}
+	db, e := sql.Open("sqlite", locator.String())
 	if e != nil {
 		return nil, unavailable("DISCORD_OWNERSHIP_OPEN_FAILED")
 	}
 	db.SetMaxOpenConns(1)
-	for _, q := range []string{"PRAGMA journal_mode=WAL", "PRAGMA synchronous=FULL", "PRAGMA foreign_keys=ON", `CREATE TABLE IF NOT EXISTS commands(application TEXT NOT NULL,guild TEXT NOT NULL,type INTEGER NOT NULL,name TEXT NOT NULL,command_id TEXT NOT NULL DEFAULT '',module TEXT NOT NULL,state TEXT NOT NULL,PRIMARY KEY(application,guild,type,name))`, `CREATE INDEX IF NOT EXISTS command_id_idx ON commands(application,command_id)`, `CREATE TABLE IF NOT EXISTS routes(application TEXT NOT NULL,kind INTEGER NOT NULL,custom_id TEXT NOT NULL,module TEXT NOT NULL,PRIMARY KEY(application,kind,custom_id))`} {
+	if c.PortableOwnership {
+		db.SetMaxIdleConns(1)
+		if e = verifyPortableOwnershipSQLite(db); e != nil {
+			db.Close()
+			return nil, unavailable("DISCORD_OWNERSHIP_OPEN_FAILED")
+		}
+	} else {
+		for _, q := range [...]string{"PRAGMA journal_mode=WAL", "PRAGMA synchronous=FULL", "PRAGMA foreign_keys=ON"} {
+			if _, e = db.Exec(q); e != nil {
+				db.Close()
+				return nil, unavailable("DISCORD_OWNERSHIP_OPEN_FAILED")
+			}
+		}
+	}
+	for _, q := range [...]string{
+		`CREATE TABLE IF NOT EXISTS commands(application TEXT NOT NULL,guild TEXT NOT NULL,type INTEGER NOT NULL,name TEXT NOT NULL,command_id TEXT NOT NULL DEFAULT '',module TEXT NOT NULL,state TEXT NOT NULL,PRIMARY KEY(application,guild,type,name))`,
+		`CREATE INDEX IF NOT EXISTS command_id_idx ON commands(application,command_id)`,
+		`CREATE TABLE IF NOT EXISTS routes(application TEXT NOT NULL,kind INTEGER NOT NULL,custom_id TEXT NOT NULL,module TEXT NOT NULL,PRIMARY KEY(application,kind,custom_id))`,
+	} {
 		if _, e = db.Exec(q); e != nil {
 			db.Close()
 			return nil, unavailable("DISCORD_OWNERSHIP_OPEN_FAILED")
 		}
 	}
-	if e = os.Chmod(path, 0600); e != nil {
-		db.Close()
-		return nil, unavailable("DISCORD_OWNERSHIP_OPEN_FAILED")
-	}
-	return &ownershipStore{db: db, config: c, commands: make(chan struct{}, 1), routeReaders: make(map[RouteKey]int), routeDeleting: make(map[RouteKey]bool), changed: make(chan struct{})}, nil
+	return &ownershipStore{db: db, directory: directory, config: c, commands: make(chan struct{}, 1), routeReaders: make(map[RouteKey]int), routeDeleting: make(map[RouteKey]bool), changed: make(chan struct{})}, nil
 }
 func (s *ownershipStore) Close() error {
-	if e := s.db.Close(); e != nil {
+	if e := errors.Join(s.db.Close(), s.directory.Close()); e != nil {
 		return unavailable("DISCORD_OWNERSHIP_CLOSE_FAILED")
 	}
 	return nil

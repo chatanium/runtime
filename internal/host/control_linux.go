@@ -178,46 +178,8 @@ func controlError(err error) *Error {
 }
 func validateSpec(s LaunchSpec) error {
 	if s.ModuleID == "" || !safeID(s.InstanceID) || s.UID == 0 || s.GID == 0 {
-		return invalid("module identity, fresh instance ID and nonroot UID/GID required")
-	}
-	if err := validateImageDigest(s.ImageDigest); err != nil {
-		return err
-	}
-	if s.InitialEgress != EgressNone && s.InitialEgress != EgressPublicInternet {
+func validateSpec(s LaunchSpec) error { return validateLaunchSpec(s, true) }
 		return invalid("initial egress topology must be explicit NONE or PUBLIC_INTERNET")
-	}
-	if len(s.Entrypoint) == 0 || !strings.HasPrefix(s.Entrypoint[0], "/") {
-		return invalid("absolute image entrypoint required")
-	}
-	for _, args := range [][]string{s.Entrypoint, s.Args} {
-		for _, a := range args {
-			if strings.IndexByte(a, 0) >= 0 {
-				return invalid("process argument contains NUL")
-			}
-		}
-	}
-	r := s.Resources
-	for _, n := range []int64{r.NanoCPUs, r.MemoryBytes, r.Pids, r.PersistentBytes, r.ScratchBytes, r.PersistentInodes, r.ScratchInodes, r.ControlMessageMaxBytes, r.LogBufferBytes, r.LogFileMaxBytes, int64(r.LogRetainedFiles)} {
-		if n <= 0 {
-			return invalid("all resource and logging limits must be finite positive")
-		}
-	}
-	if r.PersistentBytes%512 != 0 || r.ScratchBytes%512 != 0 || r.LogBufferBytes < r.ControlMessageMaxBytes {
-		return invalid("inconsistent byte limits")
-	}
-	return nil
-}
-func safeID(s string) bool {
-	if len(s) != 32 {
-		return false
-	}
-	for _, c := range s {
-		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
-			return false
-		}
-	}
-	return true
-}
 func operationContext(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(parent, timeout)
 }

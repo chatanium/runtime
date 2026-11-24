@@ -26,13 +26,14 @@ const (
 	CompletionTTL                   = 30 * time.Minute
 )
 
-// Config deliberately has no defaults for the five operator-required upload
-// limits. The supervisor provisions ManagementDirectory/uploads as a private,
-// runtime-owned 0700 child outside every module mount. The management parent
-// may remain root-owned and grant only trusted runtime-group traversal.
+// Config has required upload limits. The supervisor provisions
+// ManagementDirectory/uploads as private runtime storage outside every module mount.
 type Config struct {
 	ManagementDirectory string
 	Limits              runtime.Limits
+	// Portable requires installation-owned private storage. No host directory is
+	// bound into the guest, so a module mount root inventory is not required.
+	Portable bool
 	// ModuleMountRoots lists every trusted host subtree exposed to modules.
 	// Roots must already exist; lexical and resolved overlap both fail closed.
 	ModuleMountRoots []string
@@ -82,10 +83,13 @@ func New(ctx context.Context, config Config) (*UploadStore, error) {
 	if l.UploadRecordsPerInstance <= 0 || l.UploadRecordsPerHost <= 0 || l.UploadFileNameMaxBytes <= 0 || l.UploadContentTypeMaxBytes <= 0 || l.UploadDeadline <= 0 {
 		return nil, invalid()
 	}
+	if config.Portable && (l.UploadRecordsPerInstance != 1 || l.UploadRecordsPerHost != 1) {
+		return nil, invalid()
+	}
 	if err := validateIsolation(config); err != nil {
 		return nil, err
 	}
-	spool, err := openSpool(ctx, config.ManagementDirectory)
+	spool, err := openSpool(ctx, config.ManagementDirectory, config.Portable)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +97,7 @@ func New(ctx context.Context, config Config) (*UploadStore, error) {
 }
 
 func validateIsolation(config Config) error {
-	if !filepath.IsAbs(config.ManagementDirectory) || filepath.Clean(config.ManagementDirectory) != config.ManagementDirectory || len(config.ModuleMountRoots) == 0 {
+	if !filepath.IsAbs(config.ManagementDirectory) || filepath.Clean(config.ManagementDirectory) != config.ManagementDirectory || !config.Portable && len(config.ModuleMountRoots) == 0 {
 		return invalid()
 	}
 	management, err := filepath.EvalSymlinks(config.ManagementDirectory)

@@ -5,6 +5,7 @@ go 1.27.0
 replace github.com/bwmarrin/discordgo => ./.tools/deps/discordgo
 
 require (
+	github.com/Microsoft/go-winio v0.6.2
 	github.com/bwmarrin/discordgo v0.29.1-0.20260214123928-f43dd94faaac
 	github.com/charmbracelet/bubbles v0.20.0
 	github.com/charmbracelet/bubbletea v1.3.3

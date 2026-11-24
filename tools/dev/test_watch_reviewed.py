@@ -53,6 +53,7 @@ class ConfigIdentityTests(TemporaryTree):
             raise watch.DevelopmentError('root/runtime-owned prerequisite')
         args = ['--config', str(self.config), '--socket', '', '--supervisor-socket', '/supervisor/socket',
                 '--supervisor-uid', '0', '--supervisor-max-bytes', '65536']
+        args = ['--runtime', '/usr/local/bin/chatanium-v1', '--socket', '', '--installation-id', 'fixture-installation']
         with patch.dict(os.environ, {'DEV_MODE': '1'}), patch.object(watch.os, 'geteuid', return_value=1000), patch.object(watch, 'Identity', side_effect=select_identity), patch.object(watch, 'load_config', side_effect=reject_config), patch.object(watch, 'Watcher') as start:
             with self.assertRaises(watch.DevelopmentError):
                 watch.main(args)

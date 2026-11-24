@@ -17,9 +17,11 @@ type Config struct {
 	BotToken      string
 	ApplicationID string
 	BotUserID     string
-	// OwnershipDirectory is a separate operator-created, runtime-owned 0700
-	// directory, never the generic root-owned runtime management directory.
-	OwnershipDirectory     string
+	// OwnershipDirectory is a separate operator-created, worker-owned private
+	// directory (0700 on Unix, owner-only DACL on Windows).
+	OwnershipDirectory string
+	// PortableOwnership confines SQLite to the approved portable storage reservation.
+	PortableOwnership      bool
 	HTTP                   discordhttp.Config
 	Client                 *http.Client
 	Intents                discordgo.Intent

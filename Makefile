@@ -2,16 +2,18 @@ include tools/versions.mk
 
 .DEFAULT_GOAL := build
 GOOS ?= linux
-GOARCH ?= amd64
+HOST_GOARCH := $(subst aarch64,arm64,$(subst x86_64,amd64,$(shell uname -m)))
+GOARCH ?= $(HOST_GOARCH)
 CGO_ENABLED ?= 0
 BUILD_JOBS ?= 2
 MODULE ?= examples/general-bot
-DISABLE_VOICE ?= 0
+DISABLE_VOICE ?= $(if $(filter build-dev-worker run-legacy-dev,$(MAKECMDGOALS)),0,1)
 DEV_MODE ?= 0
 DEV_SOCKET ?=
 DEV_RUNTIME_USER ?=
+LEGACY_RUNTIME ?=
 export GOOS GOARCH CGO_ENABLED GO_TOOLCHAIN BUF_VERSION PROTOC_GEN_GO_VERSION PROTOC_GEN_GO_GRPC_VERSION
-export BUILD_JOBS MODULE DISABLE_VOICE MODULE_IMAGE MUSIC_IMAGE PLAYER_IMAGE DEV_MODE DEV_SOCKET DEV_RUNTIME_USER
+export BUILD_JOBS MODULE DISABLE_VOICE MODULE_IMAGE MUSIC_IMAGE PLAYER_IMAGE DEV_MODE DEV_SOCKET DEV_RUNTIME_USER LEGACY_RUNTIME
 export CONFIG SUPERVISOR_SOCKET SUPERVISOR_UID SUPERVISOR_MAX_BYTES CHECK_DEADLINE TEST_TIMEOUT OBSERVE RUNTIME
 export INTEGRATION POLICY_PLAN POLICY_RUNNER EVIDENCE
 
@@ -32,6 +34,7 @@ GENERATED_FILES := $(GENERATED_EXPECTED_FILES)
 export GENERATED_FILES GENERATED_EXPECTED_FILES BUILD_OUTPUTS
 
 MAKE_COMMAND_TARGETS := tools prepare-sdk build build-runtime build-module build-native build-integration buf buf-check clean run \
+MAKE_COMMAND_TARGETS := tools prepare-sdk build build-runtime build-dev-worker build-module build-native build-integration buf buf-check clean run run-legacy-dev \
 	sqlc start new_module list-module image-module image-media check-offline check-sandbox check-sandbox-policy smoke-discord smoke-voice
 .PHONY: $(MAKE_COMMAND_TARGETS)
 
@@ -62,7 +65,11 @@ prepare-sdk:
 	@bash -euo pipefail -c 'source tools/common.sh; use_go; run python3 tools/sdk.py --go "$$GO_BINARY"'
 
 # Full native voice runtime by default; static runtime is an explicit opt-out.
+# Cross-build the portable-v2 launcher and its matching host/guest payload.
 build-runtime:
+# The v1 watcher can replace only the worker of an explicitly selected legacy installation.
+	@test -n "$$LEGACY_RUNTIME" || { echo 'Use build-runtime for portable-v2; a v1 worker build requires LEGACY_RUNTIME' >&2; exit 1; }
+	@test "$$GOOS/$$GOARCH" = linux/amd64 || { echo 'The v1 worker archive supports Linux amd64 only' >&2; exit 1; }
 	@if [ "$$DISABLE_VOICE" = 1 ]; then \
 		CGO_ENABLED=0 bash tools/build.sh build $(RUNTIME_TARGETS); \
 	else \
@@ -72,10 +79,10 @@ build-runtime:
 
 # Build every direct, non-symlink v2 module, without a per-module target catalog.
 build: build-runtime
-	@bash tools/build.sh modules
+	@GOOS=linux bash tools/build.sh modules
 
 build-module:
-	@bash tools/build.sh module "$$MODULE_BUILD_DIRECTORY"
+	@GOOS=linux bash tools/build.sh module "$$MODULE_BUILD_DIRECTORY"
 
 # Inspect canonical manifests only; no compiler, native runtime or SDK is needed.
 list-module:
@@ -96,13 +103,13 @@ build-native:
 
 image-module:
 	@test -n "$(MODULE_IMAGE)" || { echo 'Set MODULE_IMAGE to an explicit writable OCI tag' >&2; exit 1; }
-	@CGO_ENABLED=0 bash tools/build.sh module "$$MODULE"
-	@CGO_ENABLED=0 bash tools/build/images.sh module
+	@GOOS=linux CGO_ENABLED=0 bash tools/build.sh module "$$MODULE"
+	@GOOS=linux CGO_ENABLED=0 bash tools/build/images.sh module
 
 image-media:
 	@test -n "$(MUSIC_IMAGE)" -a -n "$(PLAYER_IMAGE)" || { echo 'Set MUSIC_IMAGE and PLAYER_IMAGE to explicit writable OCI tags' >&2; exit 1; }
-	@CGO_ENABLED=0 bash tools/build/images.sh build-media-modules
-	@CGO_ENABLED=0 bash tools/build/images.sh media
+	@GOOS=linux CGO_ENABLED=0 bash tools/build/images.sh build-media-modules
+	@GOOS=linux CGO_ENABLED=0 bash tools/build/images.sh media
 
 check-offline:
 	@bash tools/build/check-offline.sh
@@ -131,16 +138,25 @@ buf-check:
 clean:
 	@bash tools/build.sh clean
 
-ifeq ($(DEV_MODE),1)
+# Start only a portable output built for this Linux host, not an old bin/chatanium.
+PORTABLE_LOCAL := .tools/release/portable/linux-$(HOST_GOARCH)/chatanium-linux-$(HOST_GOARCH)
 run:
 	@python3 tools/dev/watch.py --config "$(CONFIG)" --socket "$(DEV_SOCKET)" \
 		--supervisor-socket "$(SUPERVISOR_SOCKET)" --supervisor-uid "$(SUPERVISOR_UID)" \
 		--supervisor-max-bytes "$(SUPERVISOR_MAX_BYTES)"
-else
 run: build-runtime
 	@./bin/chatanium start --config "$(CONFIG)" --supervisor-socket "$(SUPERVISOR_SOCKET)" \
 		--supervisor-uid "$(SUPERVISOR_UID)" --supervisor-max-bytes "$(SUPERVISOR_MAX_BYTES)"
-endif
+	@test "$$DEV_MODE" = 0 || { echo 'Portable-v2 development: build-runtime, then use update after stopping. For v1 hot-swap use run-legacy-dev.' >&2; exit 1; }
+	@test -z "$$CONFIG" || { echo 'Portable-v2 start uses the reviewed installation configuration, not CONFIG' >&2; exit 1; }
+	@test -n "$$INSTALLATION_ID" || { echo 'Set INSTALLATION_ID for the portable installation' >&2; exit 1; }
+	@test -x "$(PORTABLE_LOCAL)" || { echo 'Run build-runtime for the local portable-v2 launcher first' >&2; exit 1; }
+	@./$(PORTABLE_LOCAL) start --foreground --installation-id "$$INSTALLATION_ID"
+
+run-legacy-dev:
+	@test -n "$$LEGACY_RUNTIME" || { echo 'Set LEGACY_RUNTIME to the existing v1 launcher' >&2; exit 1; }
+	@DEV_MODE=1 python3 tools/dev/watch.py --runtime "$$LEGACY_RUNTIME" \
+		--socket "$$DEV_SOCKET" --installation-id "$$INSTALLATION_ID"
 
 # Existing Chatanium database generation remains separate from protocol generation.
 sqlc:

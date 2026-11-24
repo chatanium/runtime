@@ -1,0 +1,11 @@
+{
+  "protocolMajor": 2,
+  "name": "portable-release-probe",
+  "version": "1.0.0",
+  "description": "Checks the authenticated portable runtime lifecycle and bounded guest storage and networking for release qualification.",
+  "author": "Chatanium",
+  "repository": "https://github.com/chatanium/runtime",
+  "requiredCapabilities": [{"name": "core.config.read", "resourceScopes": [{"selector": {}}]}],
+  "optionalCapabilities": [{"name": "core.network.public_egress", "resourceScopes": [{"selector": {}}]}],
+  "backendRequirements": []
+}

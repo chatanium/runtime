@@ -14,7 +14,7 @@ import (
 
 // go-plugin constructs its own background startup context. Preserve the actual
 // single host startup deadline/cancellation rather than minting a second budget.
-func bindRunnerStartup(factory *host.RunnerFactory, startup context.Context) func(hclog.Logger, *exec.Cmd, string) (runner.Runner, error) {
+func bindRunnerStartup(factory host.RunnerTransport, startup context.Context) func(hclog.Logger, *exec.Cmd, string) (runner.Runner, error) {
 	return func(logger hclog.Logger, cmd *exec.Cmd, dir string) (runner.Runner, error) {
 		if startup.Err() != nil {
 			return nil, startup.Err()
