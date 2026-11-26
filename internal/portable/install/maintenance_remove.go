@@ -146,8 +146,7 @@ func Purge(ctx context.Context, path string, confirm Confirm) (resultErr error) 
 	if resumed, err := checkPurgeReceipt(ctx, parent, path, confirm); err != nil || resumed {
 		return err
 	}
-	id := filepath.Base(path)
-	root, err := maintenanceDir(parent, id)
+	root, err := maintenanceDir(parent, filepath.Base(path))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
@@ -598,7 +597,7 @@ func readPurgeScope(root *os.Root, name, path string) (purgeScope, error) {
 	if err != nil {
 		return p, err
 	}
-	if p.Format != Format || p.Root != path || p.ParentRetained != filepath.Dir(path) || p.Owner != owner || p.Ledger.Owner != owner || p.Ledger.ID != filepath.Base(path) || !digestPattern.MatchString(p.Ledger.Digest) || p.RootNativeID == "" || p.TerminalReceipt != purgeTerminalName(path) {
+	if p.Format != Format || p.Root != path || p.ParentRetained != filepath.Dir(path) || p.Owner != owner || p.Ledger.Owner != owner || !generationPattern.MatchString(p.Ledger.ID) || !digestPattern.MatchString(p.Ledger.Digest) || p.RootNativeID == "" || p.TerminalReceipt != purgeTerminalName(path) {
 		return p, store.ErrApprovalMismatch
 	}
 	return p, nil

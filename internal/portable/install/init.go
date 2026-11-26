@@ -2,6 +2,8 @@ package install
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +11,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 
 	discordbackend "github.com/thirdscam/chatanium/internal/backend/discord"
@@ -49,8 +52,8 @@ func planDigest(value any) (string, error) {
 
 // Doctor works without making any directory, lock, or ledger changes. Bundle
 // evidence and untested capabilities are deliberately reported separately.
-func Doctor(id string) (map[string]any, error) {
-	path, err := Directory(id)
+func Doctor(ctx context.Context) (_ map[string]any, resultErr error) {
+	path, err := Directory()
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +87,6 @@ func Doctor(id string) (map[string]any, error) {
 
 type initPlan struct {
 	Format        string                  `json:"format"`
-	ID            string                  `json:"installation_id"`
 	Owner         string                  `json:"owner"`
 	Path          string                  `json:"installation_directory"`
 	Staging       string                  `json:"initialization_staging_directory"`
@@ -98,6 +100,10 @@ type initPlan struct {
 	Bundle        bundle.PortableManifest `json:"bundle"`
 	FirstModule   *firstModulePlan        `json:"initial_module,omitempty"`
 	PlanDigest    string                  `json:"plan_digest,omitempty"`
+}
+
+func initStaging(path string) string {
+	return filepath.Join(filepath.Dir(path), ".init-"+filepath.Base(path))
 }
 
 type FirstModule struct {
@@ -152,8 +158,8 @@ func bundleBytes(m bundle.PortableManifest) (int64, error) {
 // Init creates a stopped installation. A complete initial module request
 // combines setup, bounded staging, and module review without executing it.
 // An empty request leaves the installation INITIALIZING for later setup.
-func Init(ctx context.Context, id string, budget int64, first *FirstModule, confirm Confirm) (Manifest, error) {
-	path, err := Directory(id)
+func Init(ctx context.Context, budget int64, first *FirstModule, confirm Confirm) (Manifest, error) {
+	path, err := Directory()
 	if err != nil {
 		return Manifest{}, err
 	}
@@ -183,8 +189,7 @@ func Init(ctx context.Context, id string, budget int64, first *FirstModule, conf
 	if confirm == nil {
 		return Manifest{}, errors.New("initialization requires exact PlanDigest approval")
 	}
-	stageName := ".init-" + id
-	p := initPlan{Format: Format, ID: id, Owner: owner, Path: path, Staging: filepath.Join(filepath.Dir(path), stageName), SharedParent: filepath.Dir(path), IPCFallback: fallback, BudgetBytes: budget, MetadataBytes: metadata, LogBytes: runtimeDiskBytes, UploadBytes: reservedUploadBytes, DiscordBytes: reservedDiscordBytes, Bundle: b}
+	p := initPlan{Format: Format, Owner: owner, Path: path, Staging: initStaging(path), SharedParent: filepath.Dir(path), IPCFallback: fallback, BudgetBytes: budget, MetadataBytes: metadata, LogBytes: runtimeDiskBytes, UploadBytes: reservedUploadBytes, DiscordBytes: reservedDiscordBytes, Bundle: b}
 	if first != nil {
 		p.FirstModule, err = planFirstModule(p, *first)
 		if err != nil {
@@ -219,7 +224,11 @@ func Init(ctx context.Context, id string, budget int64, first *FirstModule, conf
 }
 
 func initialize(ctx context.Context, p initPlan) (_ Manifest, resultErr error) {
-	path, id := p.Path, p.ID
+	path := p.Path
+	if p.Staging != initStaging(path) {
+		return Manifest{}, store.ErrApprovalMismatch
+	}
+	runtimeName := filepath.Base(path)
 	stageName := filepath.Base(p.Staging)
 	parent, err := anchor(path, true)
 	if err != nil {
@@ -234,22 +243,25 @@ func initialize(ctx context.Context, p initPlan) (_ Manifest, resultErr error) {
 	purgeName := purgeTerminalName(path)
 	for _, name := range []string{purgeName, ".writing-" + purgeName} {
 		if _, err := parent.Lstat(name); err == nil {
-			return Manifest{}, errors.New("installation has a pending terminal purge; finish purge before initializing the same ID")
+			return Manifest{}, errors.New("installation has a pending terminal purge; finish purge before initializing")
 		} else if !errors.Is(err, fs.ErrNotExist) {
 			return Manifest{}, err
 		}
 	}
-	if _, err := parent.Lstat(id); err == nil {
+	if _, err := parent.Lstat(runtimeName); err == nil {
 		i, err := lockInstallation(parent, path)
 		if err != nil {
 			return Manifest{}, err
 		}
 		defer i.Close()
 		if i.Manifest.State != store.Ready && i.Manifest.State != store.Initializing {
-			return Manifest{}, errors.New("installation ID is not available for initialization; retained portable data was not changed")
+			return Manifest{}, errors.New("installation is not available for initialization; retained portable data was not changed")
 		}
 		if i.Manifest.PlanDigest != p.PlanDigest {
-			return Manifest{}, errors.New("installation ID already has a different approved plan")
+			return Manifest{}, errors.New("installation already has a different approved plan")
+		}
+		if err := i.verifyInitializationLedger(ctx); err != nil {
+			return Manifest{}, err
 		}
 		return i.Manifest, nil
 	} else if !errors.Is(err, fs.ErrNotExist) {
@@ -259,27 +271,18 @@ func initialize(ctx context.Context, p initPlan) (_ Manifest, resultErr error) {
 	if err != nil {
 		return Manifest{}, err
 	}
-	config, err := defaultConfig(id, p.Bundle.Digest, path)
+	i := &Installation{Path: p.Staging, Root: stage}
+	defer func() { resultErr = errors.Join(resultErr, i.Close()) }()
+	m, err := initializeManifest(stage, p)
 	if err != nil {
-		stage.Close()
 		return Manifest{}, err
 	}
-	m := Manifest{ID: id, Format: Format, State: store.Initializing, CodeDir: codeDirectory(p.Bundle.Digest), PlanDigest: p.PlanDigest, Owner: p.Owner, IPCFallback: p.IPCFallback, BudgetBytes: p.BudgetBytes, MetadataBytes: p.MetadataBytes, LogBytes: p.LogBytes, Bundle: p.Bundle, Config: config, Modules: []Module{}}
-	i := &Installation{Path: p.Staging, Root: stage, Manifest: m}
-	defer func() { resultErr = errors.Join(resultErr, i.Close()) }()
-	previous, err := decodeManifest(stage, manifestName, id)
-	if errors.Is(err, fs.ErrNotExist) {
-		if err := ensureFreshStaging(stage); err != nil {
-			return Manifest{}, err
-		}
-		if err := writeManifest(stage, manifestName, m); err != nil {
-			return Manifest{}, err
-		}
-	} else if err != nil || previous.PlanDigest != m.PlanDigest {
-		return Manifest{}, errors.Join(errors.New("initialization staging belongs to a different plan"), err)
-	}
+	i.Manifest = m
 	i.OwnerLock, err = process.Lock(filepath.Join(p.Staging, ownerLock))
 	if err != nil {
+		return Manifest{}, err
+	}
+	if err := i.initializeLedger(ctx); err != nil {
 		return Manifest{}, err
 	}
 	if err := i.installBundle(ctx, m.Bundle, m.CodeDir); err != nil {
@@ -288,16 +291,64 @@ func initialize(ctx context.Context, p initPlan) (_ Manifest, resultErr error) {
 	if err := provisionApp(stage); err != nil {
 		return Manifest{}, err
 	}
-	if err := i.initializeLedger(ctx); err != nil {
-		return Manifest{}, err
-	}
 	if err := errors.Join(syncDirectory(stage), i.Close()); err != nil {
 		return Manifest{}, err
 	}
-	if err := replaceFile(parent, stageName, id); err != nil {
+	if err := replaceFile(parent, stageName, runtimeName); err != nil {
 		return Manifest{}, err
 	}
 	return m, nil
+}
+
+// initializeManifest runs under the parent lock. Once published, the staging
+// manifest supplies the ID and exact configuration for every retry.
+func initializeManifest(stage *os.Root, p initPlan) (Manifest, error) {
+	m, err := decodeManifest(stage, manifestName, "")
+	if err == nil {
+		if m.PlanDigest != p.PlanDigest || m.Owner != p.Owner || m.IPCFallback != p.IPCFallback ||
+			m.BudgetBytes != p.BudgetBytes || m.MetadataBytes != p.MetadataBytes || m.LogBytes != p.LogBytes ||
+			!reflect.DeepEqual(m.Bundle, p.Bundle) || m.State != store.Initializing || len(m.Modules) != 0 || m.ConfigPlanDigest != "" {
+			return Manifest{}, fmt.Errorf("%w: initialization staging belongs to a different plan", store.ErrApprovalMismatch)
+		}
+		if err := absent(stage, pendingName); err != nil {
+			return Manifest{}, err
+		}
+		return m, nil
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		return Manifest{}, err
+	}
+	if err := ensureFreshStaging(stage); err != nil {
+		return Manifest{}, err
+	}
+	var random [16]byte
+	rand.Read(random[:])
+	id := hex.EncodeToString(random[:])
+	config, err := defaultConfig(id, p.Bundle.Digest, p.Path)
+	if err != nil {
+		return Manifest{}, err
+	}
+	m = Manifest{ID: id, Format: Format, State: store.Initializing, CodeDir: codeDirectory(p.Bundle.Digest), PlanDigest: p.PlanDigest, Owner: p.Owner, IPCFallback: p.IPCFallback, BudgetBytes: p.BudgetBytes, MetadataBytes: p.MetadataBytes, LogBytes: p.LogBytes, Bundle: p.Bundle, Config: config, Modules: []Module{}}
+	if err := writeManifest(stage, manifestName, m); err != nil {
+		return Manifest{}, err
+	}
+	return m, nil
+}
+
+func (i *Installation) verifyInitializationLedger(ctx context.Context) (resultErr error) {
+	db, err := i.Store(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { resultErr = errors.Join(resultErr, db.Close()) }()
+	record, err := db.Installation(ctx)
+	if err != nil {
+		return err
+	}
+	if record.State != i.Manifest.State {
+		return store.ErrApprovalMismatch
+	}
+	return matchMaintenanceManifest(record, i.Manifest)
 }
 
 // Create SQLite in an unpublished owned work directory so an interrupted
@@ -305,12 +356,7 @@ func initialize(ctx context.Context, p initPlan) (_ Manifest, resultErr error) {
 func (i *Installation) initializeLedger(ctx context.Context) error {
 	const building = ".creating-ledger"
 	if _, err := i.Root.Lstat(store.DatabaseName); err == nil {
-		db, err := i.Store(ctx)
-		if err != nil {
-			return err
-		}
-		if err := db.Close(); err != nil {
-			return err
+		if err := i.verifyInitializationLedger(ctx); err != nil {
 		}
 		return removeOwned(i.Root, building)
 	} else if !errors.Is(err, fs.ErrNotExist) {

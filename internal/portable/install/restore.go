@@ -66,7 +66,7 @@ func BindRestoredVolumes(ctx context.Context, path, backupID, receiptDigest stri
 	if _, err := verifiedRestoreMember(ctx, root, inventory[manifestName], false); err != nil {
 		return err
 	}
-	i.Manifest, err = decodeManifest(root, manifestName, filepath.Base(path))
+	i.Manifest, err = decodeManifest(root, manifestName, "")
 	if err != nil {
 		return err
 	}

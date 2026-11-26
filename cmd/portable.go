@@ -18,21 +18,17 @@ import (
 
 func init() {
 	doctor := &cobra.Command{Use: "doctor", Short: "Read-only inspection of portable runtime prerequisites", Args: cobra.NoArgs}
-	doctor.Flags().String("installation-id", "default", "portable installation ID to inspect")
 	doctor.RunE = func(cmd *cobra.Command, _ []string) error {
-		id, _ := cmd.Flags().GetString("installation-id")
-		result, err := install.Doctor(id)
+		result, err := install.Doctor(cmd.Context())
 		return errors.Join(err, printJSON(cmd, result))
 	}
 	initialize := &cobra.Command{Use: "init", Short: "Review and create a private, stopped portable installation", Args: cobra.NoArgs}
-	installationFlag(initialize)
 	approvalFlag(initialize)
 	initialize.SetFlagErrorFunc(legacyFlagError)
 	initialize.Flags().Int64("budget-bytes", install.DefaultBudgetBytes, "maximum simultaneous installation-owned bytes")
 	imageArgs := imageFlags(initialize)
 	moduleArgs := moduleFlags(initialize, false)
 	initialize.RunE = func(cmd *cobra.Command, _ []string) error {
-		id, _ := cmd.Flags().GetString("installation-id")
 		budget, _ := cmd.Flags().GetInt64("budget-bytes")
 		var first *install.FirstModule
 		if initialModuleRequested(cmd) {
@@ -47,7 +43,7 @@ func init() {
 				return err
 			}
 		}
-		m, err := install.Init(cmd.Context(), id, budget, first, approval(cmd))
+		m, err := install.Init(cmd.Context(), budget, first, approval(cmd))
 		return manifestResult(cmd, m, err)
 	}
 	start := installedCommand("start", "Run the portable supervisor in the foreground", func(cmd *cobra.Command, path string) error {
@@ -111,27 +107,25 @@ func init() {
 	}
 }
 
-func installationFlag(cmd *cobra.Command) {
-	cmd.Flags().String("installation-id", "", "explicit portable installation ID")
-}
-
 func installedCommand(name, summary string, run func(*cobra.Command, string) error) *cobra.Command {
 	cmd := &cobra.Command{Use: name, Short: summary, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		id, _ := cmd.Flags().GetString("installation-id")
-		path, err := install.Directory(id)
+		path, err := install.Directory()
 		if err != nil {
 			return err
 		}
 		return run(cmd, path)
 	}}
-	installationFlag(cmd)
 	cmd.SetFlagErrorFunc(legacyFlagError)
 	return cmd
 }
 
 func legacyFlagError(_ *cobra.Command, err error) error {
-	if strings.HasPrefix(err.Error(), "unknown flag:") {
-		return errors.Join(err, install.ErrLegacy)
+	if name, ok := strings.CutPrefix(err.Error(), "unknown flag: --"); ok {
+		switch name {
+		case "archive-digest", "credential-file", "dev-mode", "dev-module-image", "dev-revision",
+			"dev-socket", "draft", "entrypoint", "input", "job-id", "operator", "plan":
+			return errors.Join(err, install.ErrLegacy)
+		}
 	}
 	return err
 }
@@ -176,7 +170,7 @@ func manifestResult(cmd *cobra.Command, m install.Manifest, err error) error {
 	return printJSON(cmd, struct {
 		PlanDigest string `json:"plan_digest"`
 		ConfigPlan string `json:"config_plan_digest,omitempty"`
-	}{m.ID, m.State, m.PlanDigest, m.ConfigPlanDigest, m.Revision, len(m.Modules)})
+	}{m.State, m.PlanDigest, m.ConfigPlanDigest, m.Revision, len(m.Modules)})
 }
 
 func initialModuleRequested(cmd *cobra.Command) bool {

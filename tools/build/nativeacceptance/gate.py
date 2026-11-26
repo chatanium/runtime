@@ -13,6 +13,7 @@ from pathlib import Path
 import platform
 import re
 import socket
+import stat
 import subprocess
 import tarfile
 import tempfile
@@ -28,12 +29,13 @@ BUDGET = 12 << 30
 MODULE = 'release-probe'
 CHECKS = [
     'read-only doctor and bounded installation plan',
+    'fixed singleton path and bounded installation plan on an isolated data home or disposable account',
     'same-ISA offline OCI preparation and approved configuration',
     'native nonroot init, start and observed clean stop in NONE and PUBLIC_INTERNET',
     'TCP closed before approval, public TCP open after approval, private listener blocked',
     'requested NAT policy and nonzero send/receive ceilings verified by native adapter',
     'persistent seed survived, scratch and tmp were fresh, shared and separate volume ceilings enforced',
-    'uninstall removed code and retained data; approved purge retained shared parent and launcher',
+    'uninstall removed code and retained data; approved purge retained the shared parent and launcher without a terminal receipt',
 ]
 
 
@@ -145,6 +147,9 @@ def require_native_user(target):
     arch = {'x86_64': 'amd64', 'amd64': 'amd64', 'arm64': 'arm64', 'aarch64': 'arm64'}.get(machine)
     require(target == platform.system().lower() + '/' + str(arch), 'runner is not native to the requested OS/ISA')
     if os.name == 'nt':
+        # LocalAppData follows the native token, not HOME or LOCALAPPDATA in the environment.
+        require(os.environ.get('GITHUB_ACTIONS') == 'true' and os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted',
+                'Windows qualification requires a disposable GitHub-hosted runner account')
         # PROCESSOR_ARCHITEW6432 is set for a WOW64-emulated Python process.
         require(not os.environ.get('PROCESSOR_ARCHITEW6432') and not ctypes.windll.shell32.IsUserAnAdmin(),
                 'Windows runner requires a native, non-administrator token')
@@ -157,23 +162,75 @@ def require_native_user(target):
             require(len(caps) == 4 and all(int(value, 16) == 0 for value in caps), 'Linux runner has elevated process capabilities')
 
 
+def windows_local_app_data():
+    # FOLDERID_LocalAppData, with the same flags and current token as the launcher.
+    folder = (ctypes.c_ubyte * 16).from_buffer_copy(uuid.UUID('f1b32785-6fba-4fcf-9d55-7b8e7f157091').bytes_le)
+    get_path = ctypes.windll.shell32.SHGetKnownFolderPath
+    get_path.argtypes = (ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p))
+    get_path.restype = ctypes.c_long
+    free = ctypes.windll.ole32.CoTaskMemFree
+    free.argtypes = (ctypes.c_void_p,)
+    free.restype = None
+    result = ctypes.c_void_p()
+    try:
+        status = get_path(ctypes.byref(folder), 0, None, ctypes.byref(result))
+        require(status == 0 and result.value, f'could not resolve native LocalAppData (HRESULT 0x{status & 0xffffffff:08x})')
+        raw = ctypes.wstring_at(result.value)
+    finally:
+        free(result)
+    path = Path(raw)
+    require(path.is_absolute() and re.fullmatch(r'[A-Za-z]:', path.drive) and str(path) == raw and '..' not in path.parts,
+            'native LocalAppData is not a canonical absolute path on a local drive')
+    return path
+
+
+def directory_identity(path):
+    info = path.lstat()
+    require(stat.S_ISDIR(info.st_mode) and
+            not (os.name == 'nt' and info.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT),
+            f'qualification path is not a plain directory: {path}')
+    return info.st_dev, info.st_ino
+
+
 class Trial:
     def __init__(self, launcher, base, target):
         self.launcher = launcher
         self.base = base
-        self.id = 'rg-' + uuid.uuid4().hex[:12]
         self.env = {key: value for key, value in os.environ.items() if key.upper() in {
-            'PATH', 'SYSTEMROOT', 'WINDIR', 'LANG', 'TMP', 'TEMP', 'TMPDIR', 'USERPROFILE', 'LOCALAPPDATA'}}
-        self.env.update(HOME=str(base), XDG_DATA_HOME=str(base / 'data'))
+            'PATH', 'SYSTEMROOT', 'WINDIR', 'LANG', 'TMP', 'TEMP', 'TMPDIR', 'USERPROFILE'}}
+        self.env['HOME'] = str(base)
         if target.startswith('linux/'):
-            self.root = base / 'data/chatanium/portable-v2' / self.id
+            data_home = base / 'data'
+            self.env['XDG_DATA_HOME'] = str(data_home)
         elif target.startswith('darwin/'):
-            self.root = base / 'Library/Application Support/chatanium/portable-v2' / self.id
+            data_home = base / 'Library/Application Support'
         else:
-            self.root = Path(os.environ['LOCALAPPDATA']).resolve(strict=True) / 'chatanium/portable-v2' / self.id
+            data_home = windows_local_app_data()
+            self.env['LOCALAPPDATA'] = str(data_home)
+        self.root = data_home / 'chatanium' / 'runtime'
+        self.staging = self.root.with_name('.init-runtime')
+        self.terminal = self.root.with_name('.purge-runtime.json')
+
+    def check_slot(self, identity=None):
+        for parent in reversed(self.root.parents):
+            try:
+                directory_identity(parent)
+            except FileNotFoundError:
+                break
+        paths = (self.staging, self.terminal, self.terminal.with_name('.writing-' + self.terminal.name))
+        if identity is None:
+            paths = (self.root, *paths)
+        else:
+            require(directory_identity(self.root) == identity, 'qualification installation was replaced')
+        for path in paths:
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                continue
+            raise RuntimeError(f'refusing to use an occupied qualification path: {path}')
 
     async def spawn(self, command, *args):
-        return await asyncio.create_subprocess_exec(str(self.launcher), command, '--installation-id', self.id, *map(str, args),
+        return await asyncio.create_subprocess_exec(str(self.launcher), command, *map(str, args),
             env=self.env, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
 
     async def call(self, command, *args, approvals=()):
@@ -207,7 +264,7 @@ class Trial:
             if not stdout.done():
                 stdout.cancel()
 
-    async def run(self):
+    async def run(self, identity):
         proc = await self.spawn('start', '--foreground')
         stderr = asyncio.create_task(proc.stderr.read())
         try:
@@ -223,6 +280,7 @@ class Trial:
             require(len(modules) == 1 and modules[0]['module_id'] == MODULE and modules[0]['state'] == 'RUNNING',
                     'the real release probe module did not reach RUNNING')
             live = modules[0]['instance_id']
+            self.check_slot(identity)
             stopped = await self.call('stop')
             require(stopped['state'] == 'STOPPED', 'supervisor did not observe STOPPED')
             async with asyncio.timeout(75):
@@ -281,18 +339,37 @@ async def qualify(candidate, target, image):
             control.close()
         trial = Trial(launcher, Path(temporary).resolve(strict=True), target)
         root = trial.root
-        require(not root.exists(), 'release fixture installation ID unexpectedly exists')
+        trial.check_slot()
+        own = lambda plan: plan.get('format') == 'portable-v2' and plan.get('installation_directory') == str(root)
         doc = await trial.call('doctor')
         require(doc['format'] == 'portable-v2' and Path(doc['installation_directory']) == root and not root.exists() and
                 doc['bundle_target'] == bundle['target'] and doc['pinned_engine'] == bundle['engine'] and
                 doc['verified_embedded_manifest'] == bundle['digest'], 'doctor crossed a user path or disagreed with the exact release manifest')
-        own = lambda plan: plan.get('format') == 'portable-v2' and Path(plan.get('installation_directory', '.')) == root
-        init = await trial.call('init', '--budget-bytes', BUDGET, approvals=(lambda plan:
-            own(plan) and plan.get('bundle') == bundle and plan.get('maximum_installation_bytes') == BUDGET,))
-        require(init['state'] == 'INITIALIZING', 'empty portable root was not initialized')
+
+        def approve_init(plan):
+            trial.check_slot()
+            return (own(plan) and plan.get('initialization_staging_directory') == str(trial.staging) and
+                    'installation_id' not in plan and
+                    plan.get('shared_parent_retained_after_purge') == str(root.parent) and
+                    plan.get('bundle') == bundle and plan.get('maximum_installation_bytes') == BUDGET)
+
+        init = await trial.call('init', '--budget-bytes', BUDGET, approvals=(approve_init,))
+        require(init['state'] == 'INITIALIZING' and 'installation_id' not in init,
+                'empty portable root was not initialized or its internal identity was exposed in status')
+        root_identity = directory_identity(root)
+        require(root_identity[1] != 0, 'cannot establish qualification installation directory identity')
+        trial.check_slot(root_identity)
+        manifest_path = root / 'installation.json'
+        manifest = json.loads(manifest_path.read_bytes())
+        installation_id = manifest['installation_id']
+        require(re.fullmatch(r'[0-9a-f]{32}', installation_id) and manifest['plan_digest'] == init['plan_digest'] and
+                manifest['config']['host']['runtime_installation_id'] == installation_id,
+                'initialized manifest and host config did not share the new installation identity')
         prepared = await trial.call('prepare-image', '--source-kind', 'oci-archive', '--source', image, '--digest', source,
-            approvals=(lambda plan: own(plan) and Path(plan.get('archive_path', '.')) == image and
-                plan.get('bundle_digest') == bundle['digest'],))
+            approvals=(lambda plan: own(plan) and plan.get('archive_path') == str(image) and
+                plan.get('bundle_digest') == bundle['digest'] and
+                plan['image_plan']['architecture'] == bundle['target']['arch'] and
+                plan['image_plan']['source'] == {'kind': 'oci-archive', 'digest': source},))
         require(prepared['state'] == 'PREPARED' and prepared['source_digest'] == source, 'exact offline OCI image was not prepared')
         instance = None
         for public in (False, True):
@@ -308,24 +385,41 @@ async def qualify(candidate, target, image):
                 '--module-config', config, '--approval', grant, *(['--network-profile', network] if network else []))
             candidate_file = document(trial.base / 'candidate.json', proposal)
             state = await trial.call('configure', '--config', candidate_file, approvals=(
-                lambda p: Path(p['plan']['Installation']) == root and p['plan']['BundleDigest'] == bundle['digest'],
+                lambda p: p['plan']['Installation'] == str(root) and p['plan']['BundleDigest'] == bundle['digest'],
                 lambda p: p['module_id'] == MODULE and p['source_digest'] == source and
+                    p['review']['installation_id'] == installation_id and
                     p['review']['module_config'] == module_cfg and p['review']['grant'] == proposed_grant and
                     p['review']['engine_digest'] == bundle['engine']['executable_digest'] and
                     (all(p['review']['network'][k] == v for k, v in profile.items()) if public
                      else p['review']['network']['mode'] == 'NONE')))
-            require(state['state'] == 'READY' and state['modules'] == 1, 'reviewed native module configuration was not activated')
-            live = await trial.run()
+            require(state['state'] == 'READY' and 'installation_id' not in state and state['modules'] == 1,
+                    'reviewed native module configuration was not activated or its internal identity was exposed in status')
+            live = await trial.run(root_identity)
             require(live and live != instance, 'first and second native launches did not have distinct instance identities')
             instance = live
         volumes = list((root / 'volumes').glob('*.ext4'))
         require(len(volumes) == 1 and volumes[0].stat().st_size == VOLUME, 'persistent volume did not retain the approved bounded image')
+        trial.check_slot(root_identity)
+
+        def approve_purge(plan):
+            trial.check_slot(root_identity)
+            ledger_identity = plan['ledger']['installation_identity']
+            return (own(plan) and plan.get('shared_parent_retained') == str(root.parent) and
+                    plan.get('temporary_parent_receipt') == trial.terminal.name and
+                    plan.get('installation_manifest_digest') == manifest_digest and
+                    ledger_identity['ID'] == installation_id and ledger_identity['BundleDigest'] == bundle['digest'])
+
         code = root / json.loads((root / 'installation.json').read_bytes())['code_directory']
         require(code.parent == root and code.is_dir(), 'code generation is outside the fixture installation')
         state = await trial.call('uninstall')
+        require('installation_id' not in state, 'uninstall status exposed the internal installation identity')
         require(state['state'] == 'UNINSTALLED' and not code.exists() and volumes[0].is_file(), 'uninstall did not preserve the data-only state')
-        state = await trial.call('purge', approvals=(own,))
-        require(state['state'] == 'PURGED' and not root.exists() and root.parent.exists(), 'purge did not delete only the owned installation')
+
+        trial.check_slot(root_identity)
+        manifest_digest = file_hash(manifest_path)
+        state = await trial.call('purge', approvals=(approve_purge,))
+        trial.check_slot()
+        require(state['state'] == 'PURGED' and root.parent.is_dir(), 'purge did not delete only the owned installation')
     require(expected_receipt(candidate, target) == receipt, 'release candidate changed during native qualification')
     receipt['tested_oci_sha256'] = source
     document(result_path, receipt)

@@ -149,9 +149,8 @@ run: build-runtime
 		--supervisor-uid "$(SUPERVISOR_UID)" --supervisor-max-bytes "$(SUPERVISOR_MAX_BYTES)"
 	@test "$$DEV_MODE" = 0 || { echo 'Portable-v2 development: build-runtime, then use update after stopping. For v1 hot-swap use run-legacy-dev.' >&2; exit 1; }
 	@test -z "$$CONFIG" || { echo 'Portable-v2 start uses the reviewed installation configuration, not CONFIG' >&2; exit 1; }
-	@test -n "$$INSTALLATION_ID" || { echo 'Set INSTALLATION_ID for the portable installation' >&2; exit 1; }
 	@test -x "$(PORTABLE_LOCAL)" || { echo 'Run build-runtime for the local portable-v2 launcher first' >&2; exit 1; }
-	@./$(PORTABLE_LOCAL) start --foreground --installation-id "$$INSTALLATION_ID"
+	@./$(PORTABLE_LOCAL) start --foreground
 
 run-legacy-dev:
 	@test -n "$$LEGACY_RUNTIME" || { echo 'Set LEGACY_RUNTIME to the existing v1 launcher' >&2; exit 1; }

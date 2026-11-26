@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/thirdscam/chatanium/internal/portable/process"
@@ -23,20 +22,11 @@ const (
 	maxDocument  = 16 << 20
 )
 
-var (
-	ErrLegacy = errors.New("LEGACY_INSTALLATION: use the original Chatanium binary to manage a v1 installation")
-	idPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$`)
-	winDevice = regexp.MustCompile(`^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])$`)
-)
+var ErrLegacy = errors.New("LEGACY_INSTALLATION: use the original Chatanium binary to manage a v1 installation")
 
-func validID(id string) bool { return idPattern.MatchString(id) && !winDevice.MatchString(id) }
-
-// Directory resolves an installation ID only inside the portable data location.
+// Directory resolves the single portable installation's canonical location.
 // It does not create or inspect any installation.
-func Directory(id string) (string, error) {
-	if !validID(id) {
-		return "", errors.New("--installation-id must be 1–48 lowercase ASCII letters, digits or internal hyphens")
-	}
+func Directory() (string, error) {
 	base, err := dataHome()
 	if err != nil {
 		return "", err
@@ -44,7 +34,7 @@ func Directory(id string) (string, error) {
 	if !filepath.IsAbs(base) || filepath.Clean(base) != base || strings.ContainsAny(base, ",\x00\r\n") {
 		return "", errors.New("portable data home must be a canonical absolute path")
 	}
-	path := filepath.Join(base, "chatanium", Format, id)
+	path := filepath.Join(base, "chatanium", "runtime")
 	if legacyPath(path) {
 		return "", ErrLegacy
 	}
@@ -62,9 +52,15 @@ func legacyPath(path string) bool {
 }
 
 func validateDirectory(path string) error {
-	expected, err := Directory(filepath.Base(path))
-	if err != nil || expected != path {
-		return errors.New("installation path is outside the portable-v2 data location")
+	if legacyPath(path) {
+		return ErrLegacy
+	}
+	expected, err := Directory()
+	if err != nil {
+		return err
+	}
+	if expected != path {
+		return errors.New("installation path does not match the portable runtime directory")
 	}
 	return nil
 }

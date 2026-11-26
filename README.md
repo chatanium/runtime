@@ -428,12 +428,21 @@ tag or image ID is not a substitute.
 
 ## Run a portable installation
 
+Chatanium uses one installation in `chatanium/runtime` under your user data
+directory. On Linux this is `${XDG_DATA_HOME:-$HOME/.local/share}/chatanium/runtime`;
+on macOS it is `~/Library/Application Support/chatanium/runtime`; on Windows it is
+`chatanium\runtime` under LocalAppData. All portable commands use that same
+location. `init` creates an internal identity for the ledger and backups;
+you do not name the installation. Module IDs still distinguish your modules.
+Older installations under `chatanium/portable-v2/<name>` stay untouched. Use
+their original launcher to manage them; the new launcher does not migrate them.
+
 Verify the **outer launcher** against your release publisher's independently
 trusted provenance before running it. Its embedded GVX is pinned to
 [`v0.22.10002026111600`](https://github.com/gfire-sigs/gvx/releases/tag/v0.22.10002026111600);
 pulling `latest` or installing a system container engine is not part of setup.
 
-Run `doctor --installation-id ID` from the same user account that will own the
+Run `doctor` from the same user account that will own the
 installation. `doctor` is read-only; it distinguishes authenticated bundle
 metadata from checks that require opening files or starting the engine. Target
 backends are Linux amd64/arm64 `systrap`, macOS arm64 `hvf`, and Windows
@@ -446,20 +455,20 @@ and approval in one invocation. Read each displayed plan; `READY` means the
 configuration was approved, not that the module is running.
 
 ```sh
-./chatanium doctor --installation-id demo
-./chatanium init --installation-id demo \
+./chatanium doctor
+./chatanium init \
   --source-kind oci-archive --source "$PWD/module.tar" --digest "$ARCHIVE_SHA256" \
   --module-id demo --module-config "$PWD/module.json" --approval "$PWD/grants.json"
-./chatanium start --foreground --installation-id demo
+./chatanium start --foreground
 # In another terminal, using the same account:
-./chatanium stop --installation-id demo
+./chatanium stop
 ```
 
 `ARCHIVE_SHA256` is the trusted `sha256:…` of the whole archive. The
 `--approval` file proposes grants; it does not answer the digest prompts.
 To stage an installation or add another module separately:
 
-1. Run `init --installation-id ID`, inspect the location and disk budget, and
+1. Run `init`, inspect the location and disk budget, and
    approve the exact `PlanDigest`. An empty installation cannot start a module.
 2. `prepare-image` accepts a digest-pinned registry source or an explicitly
    selected OCI archive. Parsing and compilation take place in a separate,
@@ -470,8 +479,8 @@ To stage an installation or add another module separately:
    resource limits and network grant. `configure` requires the matching module
    `ReviewDigest` before activation. The guest sees its approved PID, RAM and
    CPU limits; these are not constraints on the host worker's RSS or threads.
-4. `start --foreground --installation-id ID` runs the actual worker and modules.
-   `stop --installation-id ID` fences new launches before waiting for exit.
+4. `start --foreground` runs the actual worker and modules.
+   `stop` fences new launches before waiting for exit.
    `NONE` has no external networking. `PUBLIC_INTERNET` starts denied and opens
    the reviewed GVX NAT policy only after module authentication and grant checks.
 5. Stop before `update` or `uninstall`. Uninstall removes installed code, not
@@ -488,7 +497,7 @@ Use the digest you saved independently from the original backup, not a digest
 calculated from the copy you are attempting to trust:
 
 ```sh
-./chatanium bind-restored-volumes --installation-id demo \
+./chatanium bind-restored-volumes \
   --backup-id "$BACKUP_ID" --receipt-digest "$TRUSTED_INVENTORY_SHA256"
 ```
 

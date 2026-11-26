@@ -102,7 +102,8 @@ func identity(m Manifest) store.InstallationIdentity {
 	return store.InstallationIdentity{ID: m.ID, Owner: m.Owner, Target: m.Bundle.Target.OS + "/" + m.Bundle.Target.Arch + "/" + m.Bundle.Target.Backend, BundleDigest: m.Bundle.Digest, EngineDigest: m.Bundle.Engine.ExecutableDigest}
 }
 
-func decodeManifest(root *os.Root, name, id string) (Manifest, error) {
+// A nonempty expectedID binds a secondary manifest to the active installation.
+func decodeManifest(root *os.Root, name, expectedID string) (Manifest, error) {
 	raw, err := readDocument(root, name)
 	if err != nil {
 		return Manifest{}, err
@@ -117,7 +118,7 @@ func decodeManifest(root *os.Root, name, id string) (Manifest, error) {
 	if err := gvxcontract.DecodeStrict(raw, maxDocument, 128, &m); err != nil {
 		return Manifest{}, fmt.Errorf("invalid portable installation manifest: %w", err)
 	}
-	if m.ID != id || m.Format != Format || !digestPattern.MatchString(m.PlanDigest) || !digestPattern.MatchString(m.Bundle.Digest) || m.Bundle.Format != Format || m.CodeDir != codeDirectory(m.Bundle.Digest) || m.Modules == nil {
+	if !generationPattern.MatchString(m.ID) || expectedID != "" && m.ID != expectedID || m.Format != Format || !digestPattern.MatchString(m.PlanDigest) || !digestPattern.MatchString(m.Bundle.Digest) || m.Bundle.Format != Format || m.CodeDir != codeDirectory(m.Bundle.Digest) || m.Modules == nil {
 		return Manifest{}, errors.New("invalid portable installation identity")
 	}
 	owner, err := process.OwnerIdentity()
@@ -131,7 +132,12 @@ func decodeManifest(root *os.Root, name, id string) (Manifest, error) {
 	if m.IPCFallback == "" || m.IPCFallback != fallback {
 		return Manifest{}, errors.New("APPROVAL_MISMATCH: native IPC fallback path differs from the installation plan")
 	}
-	if err := verifyStoredReviews(m, root.Name()); err != nil {
+	// A staging or backup marker still describes the final runtime paths.
+	path, err := Directory()
+	if err != nil {
+		return Manifest{}, err
+	}
+	if err := verifyStoredReviews(m, path); err != nil {
 		return Manifest{}, err
 	}
 	return m, nil
@@ -142,7 +148,7 @@ func openInstallation(parent *os.Root, path string) (*Installation, error) {
 	if err != nil {
 		return nil, err
 	}
-	m, err := decodeManifest(root, manifestName, filepath.Base(path))
+	m, err := decodeManifest(root, manifestName, "")
 	if err != nil {
 		root.Close()
 		return nil, err

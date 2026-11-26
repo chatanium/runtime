@@ -443,6 +443,15 @@ func moduleReviewBytes(m Manifest, spec runtime.ModuleSpec, g images.Generation,
 }
 
 func verifyStoredReviews(m Manifest, path string) error {
+	cfg, err := runtime.DecodeConfig(m.Config)
+	if err != nil {
+		return store.ErrApprovalMismatch
+	}
+	h := cfg.Host
+	if h.Format != Format || h.RuntimeInstallationID != m.ID || h.BundleDigest != m.Bundle.Digest ||
+		h.StorageRoot != path || h.ManagementDirectory != filepath.Join(path, "app") || h.IPCRoot != filepath.Join(path, "ipc") || len(cfg.Modules) != len(m.Modules) {
+		return store.ErrApprovalMismatch
+	}
 	if len(m.Modules) == 0 {
 		if m.State == store.Ready || m.Revision != "" {
 			return store.ErrApprovalMismatch
@@ -450,10 +459,6 @@ func verifyStoredReviews(m Manifest, path string) error {
 		return nil
 	}
 	if !digestPattern.MatchString(m.Revision) || !digestPattern.MatchString(m.ConfigPlanDigest) {
-		return store.ErrApprovalMismatch
-	}
-	cfg, err := runtime.DecodeConfig(m.Config)
-	if err != nil || cfg.Host.Format != Format || cfg.Host.RuntimeInstallationID != m.ID || cfg.Host.BundleDigest != m.Bundle.Digest || cfg.Host.StorageRoot != path || len(cfg.Modules) != len(m.Modules) {
 		return store.ErrApprovalMismatch
 	}
 	configDigest, err := documentDigest(m.Config)

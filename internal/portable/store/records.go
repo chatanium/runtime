@@ -187,7 +187,9 @@ type Image struct {
 
 type Backup struct {
 	ID, EpochID, Path, State, PlanDigest, ConfigRevision, ConfigDigest string
-	InstallationIdentity
+	// A purge receipt must retain both the backup ID and its owning installation ID.
+	InstallationIdentity `json:"installation_identity"`
+
 	MaxBytes, SQLiteBytes    int64
 	ForUpdate, UpdatePending bool
 	Volumes                  []Volume
@@ -213,7 +215,8 @@ func (u Usage) Total() int64 {
 }
 
 type PurgePlan struct {
-	InstallationIdentity
+	InstallationIdentity `json:"installation_identity"`
+
 	Digest  string
 	Volumes []Volume
 	Images  []Image
