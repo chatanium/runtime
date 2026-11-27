@@ -5,17 +5,21 @@ package host
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/thirdscam/chatanium/internal/gvxcontract"
 	"golang.org/x/sys/unix"
 )
 
@@ -27,13 +31,14 @@ type runtimeEpoch struct {
 type Supervisor struct {
 	config      SupervisorConfig
 	platform    Platform
-	journal     *journal
-	storage     *storage
+	journal     *Store
+	lease       *InstallationLease
 	listener    *net.UnixListener
-	lockfile    *os.File
 	mu          sync.Mutex
 	epochs      map[string]*runtimeEpoch
 	locks       map[string]*sync.Mutex
+	epochID     string
+	draining    bool
 	connections chan struct{}
 	workers     sync.WaitGroup
 }
@@ -45,106 +50,58 @@ func newID() string {
 	}
 	return hex.EncodeToString(b[:])
 }
-func NewSupervisor(ctx context.Context, c SupervisorConfig, p Platform) (*Supervisor, error) {
+func NewSupervisor(ctx context.Context, c SupervisorConfig, p Platform, store *Store, lease *InstallationLease) (*Supervisor, error) {
 	if os.Geteuid() != 0 {
 		return nil, prerequisite(errors.New("supervisor requires host root"))
 	}
-	if p == nil || c.RuntimeUID == 0 || c.RuntimeGID == 0 || c.MaxMessageBytes <= 0 || c.OperationTimeout <= 0 || c.ReconcileInterval <= 0 || c.MaxConnections <= 0 {
-		return nil, invalid("supervisor requires explicit finite settings and nonroot runtime identity")
+	if p == nil || store == nil || lease == nil || lease.store != store || lease.closed || lease.owner.Name == "" || c.RuntimeInstallationID != store.productID || c.RuntimeUID == 0 || c.RuntimeGID == 0 || c.MaxMessageBytes <= 0 || c.OperationTimeout <= 0 || c.ReconcileInterval <= 0 || c.MaxConnections <= 0 {
+		return nil, invalid("live bound installation lease and finite settings required")
 	}
-	if filepath.Dir(c.SocketPath) != c.ManagementDirectory {
-		return nil, invalid("supervisor socket must be directly inside management directory")
+	if filepath.Dir(c.SocketPath) != c.ManagementDirectory || store.dir != c.ManagementDirectory {
+		return nil, invalid("control socket must be in installation control anchor")
 	}
-	management, err := trustedDirectory(c.ManagementDirectory)
+	installed, err := store.Installation(ctx)
 	if err != nil {
+		return nil, err
+	}
+	if c.RuntimeUID != installed.Identities.App.UID || c.RuntimeGID != installed.Identities.App.GID || c.App != installed.Identities.App || c.Sandbox != installed.Identities.Sandbox || c.Preparer != installed.Identities.Preparer || c.StorageRoot != installed.Paths.StorageRoot {
+		return nil, invalid("supervisor identities/paths differ from installed approval")
+	}
+	if err := store.requireLease(); err != nil {
+		return nil, err
+	}
+	if err := p.BindCreateJournal(store); err != nil {
+		return nil, err
+	}
+	if err := p.Preflight(ctx); err != nil {
 		return nil, prerequisite(err)
 	}
-	defer management.Close()
-	// Root owns the directory; runtime can traverse but cannot replace socket/db.
-	if err = unix.Fchown(int(management.Fd()), 0, int(c.RuntimeGID)); err != nil {
+	s := &Supervisor{config: c, platform: p, journal: store, lease: lease, epochID: newID(), epochs: make(map[string]*runtimeEpoch), locks: make(map[string]*sync.Mutex), connections: make(chan struct{}, c.MaxConnections)}
+	if err := s.reconcile(ctx, true); err != nil && !unresolvedCleanupOnly(err) {
 		return nil, err
 	}
-	if err = unix.Fchmod(int(management.Fd()), 0710); err != nil {
-		return nil, err
-	}
-	lock, err := os.OpenFile(filepath.Join(c.ManagementDirectory, "supervisor.lock"), os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0600)
-	if err != nil {
-		return nil, err
-	}
-	if err = unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
-		lock.Close()
-		return nil, prerequisite(err)
-	}
-	cleanupLock := true
-	defer func() {
-		if cleanupLock {
-			lock.Close()
-		}
-	}()
-	// P3's private spool is a sibling of supervisor metadata, never a module
-	// mount. Only this fixed child is writable by the authenticated runtime.
-	if err = prepareRuntimeDirectory(management, "uploads", c.RuntimeUID, c.RuntimeGID); err != nil {
-		return nil, err
-	}
-	if err = p.Preflight(ctx); err != nil {
-		return nil, prerequisite(err)
-	}
-	store, err := newStorage(c)
-	if err != nil {
-		return nil, err
-	}
-	j, err := openJournal(ctx, c.ManagementDirectory)
-	if err != nil {
-		store.quota.root.Close()
-		return nil, err
-	}
-	store.journal = j
-	if err = p.BindCreateJournal(j); err != nil {
-		j.db.Close()
-		store.quota.root.Close()
-		return nil, err
-	}
-	s := &Supervisor{config: c, platform: p, journal: j, storage: store, lockfile: lock, epochs: make(map[string]*runtimeEpoch), locks: make(map[string]*sync.Mutex), connections: make(chan struct{}, c.MaxConnections)}
-	// Never adopt an old runtime's authority. Unresolved submissions remain
-	// exclusively reserved and reconciled while unrelated epochs may register.
-	if err = s.reconcile(ctx, true); err != nil && !unresolvedCleanupOnly(err) {
-		j.db.Close()
-		store.quota.root.Close()
-		return nil, err
-	}
-	if st, e := os.Lstat(c.SocketPath); e == nil {
+	if st, err := os.Lstat(c.SocketPath); err == nil {
 		if st.Mode()&os.ModeSocket == 0 {
-			j.db.Close()
-			store.quota.root.Close()
-			return nil, invalid("control socket path occupied by non-socket")
+			return nil, invalid("control socket occupied by non-socket")
 		}
-		if e = os.Remove(c.SocketPath); e != nil {
-			j.db.Close()
-			store.quota.root.Close()
-			return nil, e
+		if err = os.Remove(c.SocketPath); err != nil {
+			return nil, err
 		}
-	} else if !errors.Is(e, os.ErrNotExist) {
-		j.db.Close()
-		store.quota.root.Close()
-		return nil, e
-	}
-	l, err := net.ListenUnix("unixpacket", &net.UnixAddr{Name: c.SocketPath, Net: "unixpacket"})
-	if err != nil {
-		j.db.Close()
-		store.quota.root.Close()
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	s.listener = l
+	listener, err := net.ListenUnix("unixpacket", &net.UnixAddr{Name: c.SocketPath, Net: "unixpacket"})
+	if err != nil {
+		return nil, err
+	}
+	s.listener = listener
 	if err = os.Chown(c.SocketPath, 0, int(c.RuntimeGID)); err == nil {
 		err = os.Chmod(c.SocketPath, 0660)
 	}
 	if err != nil {
-		l.Close()
-		j.db.Close()
-		store.quota.root.Close()
+		listener.Close()
 		return nil, err
 	}
-	cleanupLock = false
 	return s, nil
 }
 func (s *Supervisor) instanceLock(id string) *sync.Mutex {
@@ -216,7 +173,7 @@ func (s *Supervisor) handle(c *net.UnixConn) {
 	defer closeFiles(files)
 	var req controlRequest
 	resp := controlResponse{Version: controlVersion}
-	if err = strictJSON(data, &req); err == nil {
+	if err = decodeControlRequest(data, &req); err == nil {
 		err = validateRequest(req)
 	}
 	if err != nil {
@@ -228,9 +185,19 @@ func (s *Supervisor) handle(c *net.UnixConn) {
 	defer cancel()
 	var resultFiles []*os.File
 	if req.Operation == "register" {
-		if len(files) != 1 {
+		s.mu.Lock()
+		worker := s.config.Worker
+		draining := s.draining
+		s.mu.Unlock()
+		if len(files) != 1 || draining || !validUnit(worker) || int(cred.Pid) != worker.MainPID {
 			err = invalid("registration requires one runtime self-pidfd")
-		} else if err = pidfdPeer(files[0], cred); err == nil {
+		} else if err = s.verifyWorkerAdmission(ctx, worker); err == nil {
+			err = pidfdPeer(files[0], cred)
+			if err != nil {
+				resp.Error = controlError(err)
+				_ = sendPacket(c, s.config.MaxMessageBytes, resp, nil)
+				return
+			}
 			dup, e := unix.FcntlInt(files[0].Fd(), unix.F_DUPFD_CLOEXEC, 0)
 			if e != nil {
 				err = e
@@ -241,9 +208,9 @@ func (s *Supervisor) handle(c *net.UnixConn) {
 					f.Close()
 					err = e
 				} else {
-					// start identity is kernel fdinfo + boot identity, retained for diagnostics;
-					// liveness always uses the held pidfd, never a PID-number probe.
-					info, e := os.ReadFile(fmt.Sprintf("/proc/self/fdinfo/%d", f.Fd()))
+					// Persist the kernel-verified worker invocation, never a restorable
+					// descriptor number. Liveness uses the held pidfd exclusively.
+					info, e := json.Marshal(worker)
 					if e != nil {
 						f.Close()
 						err = e
@@ -255,7 +222,7 @@ func (s *Supervisor) handle(c *net.UnixConn) {
 								break
 							}
 						}
-						id := newID()
+						id := s.epochID
 						if err == nil {
 							err = s.journal.epoch(ctx, id, strings.TrimSpace(string(boot)), int(cred.Pid), string(info))
 						}
@@ -282,7 +249,12 @@ func (s *Supervisor) handle(c *net.UnixConn) {
 		resp.Error = controlError(err)
 	}
 	// A lost reply does not roll back creation. Durable claims remain owned.
-	_ = sendPacket(c, s.config.MaxMessageBytes, resp, resultFiles)
+	sendErr := sendPacket(c, s.config.MaxMessageBytes, resp, resultFiles)
+	if req.Operation == "create" && resp.Error == nil {
+		recordCtx, recordCancel := operationContext(context.Background(), s.config.OperationTimeout)
+		_ = s.journal.endpointTransfer(recordCtx, req.InstanceID, sendErr == nil)
+		recordCancel()
+	}
 }
 func (s *Supervisor) authenticate(id string, cred *unix.Ucred) error {
 	s.mu.Lock()
@@ -319,6 +291,9 @@ func (s *Supervisor) dispatch(ctx context.Context, r controlRequest, out *contro
 		return nil, nil
 	}
 	if r.Operation == "acquire" {
+		if r.Spec.Resources.ControlMessageMaxBytes > int64(s.config.MaxMessageBytes) {
+			return nil, invalid("instance control bound exceeds complete runtime packet bound")
+		}
 		lock := s.instanceLock(r.Spec.InstanceID)
 		lock.Lock()
 		defer lock.Unlock()
@@ -335,18 +310,9 @@ func (s *Supervisor) dispatch(ctx context.Context, r controlRequest, out *contro
 		if err != nil {
 			return nil, err
 		}
-		if err = s.storage.provision(ctx, l); err != nil {
-			_ = s.journal.state(ctx, l.Spec.InstanceID, "FAILED", "HOST_PREREQUISITE_FAILED")
-			cleanCtx, cancel := operationContext(context.Background(), s.config.OperationTimeout)
-			defer cancel()
-			return nil, errors.Join(prerequisite(err), s.cleanup(cleanCtx, l))
-		}
-		for _, kind := range []string{"scratch", "ipc", "persistent", "logs"} {
-			if err = s.journal.claim(ctx, l.Spec.InstanceID, kind, "ALLOCATED"); err != nil {
-				return nil, err
-			}
-		}
-		if err = s.journal.state(ctx, l.Spec.InstanceID, "ALLOCATED", ""); err != nil {
+		// Native preparation belongs to the platform Create transaction. Acquire
+		// commits claims only and cannot dispatch a service.
+		if err = s.journal.state(ctx, l.Spec.InstanceID, "PREPARING", ""); err != nil {
 			return nil, err
 		}
 		out.Lease = &l
@@ -370,13 +336,10 @@ func (s *Supervisor) dispatch(ctx context.Context, r controlRequest, out *contro
 	}
 	switch r.Operation {
 	case "create":
-		if state != "ALLOCATED" {
-			return nil, invalid("container creation is not in ALLOCATED state")
+		if state != "PREPARING" {
+			return nil, invalid("stage creation is not in PREPARING state")
 		}
-		if err = s.storage.socketDirectory(l, r.SocketDirectory); err != nil {
-			return nil, err
-		}
-		if err = s.journal.state(ctx, r.InstanceID, "CREATING", ""); err != nil {
+		if err = s.journal.state(ctx, r.InstanceID, "PREPARING", ""); err != nil {
 			return nil, err
 		}
 		if l.Spec.InitialEgress == EgressPublicInternet {
@@ -384,39 +347,55 @@ func (s *Supervisor) dispatch(ctx context.Context, r controlRequest, out *contro
 				return nil, s.abort(l, "JOURNAL_WRITE_FAILED", err)
 			}
 		}
-		container, e := s.platform.Create(ctx, l.Spec, l, r.Bootstrap, r.SocketDirectory)
+		process, e := s.platform.Create(ctx, l.Spec, l, r.Bootstrap)
 		if e != nil {
-			return nil, s.abort(l, "CONTAINER_CREATE_FAILED", e)
+			return nil, s.abort(l, "STAGE_CREATE_FAILED", e)
 		}
-		if container == nil || container.ID == "" || container.Stdout == nil || container.Stderr == nil {
-			if container != nil {
-				closeFiles([]*os.File{container.Stdout, container.Stderr})
-			}
-			return nil, s.abort(l, "CONTAINER_CREATE_FAILED", errors.New("platform returned incomplete container ownership"))
+		var transferred []*os.File
+		if process != nil {
+			transferred = []*os.File{process.Stdin, process.Stdout, process.Stderr, process.Listener, process.Endpoint}
 		}
-		if err = s.journal.container(ctx, l, container.ID); err != nil {
-			closeFiles([]*os.File{container.Stdout, container.Stderr})
-			return nil, s.abort(l, "JOURNAL_WRITE_FAILED", err)
+		if process == nil || !validUnit(process.Unit) {
+			closeFiles(transferred)
+			return nil, s.abort(l, "STAGE_CREATE_FAILED", errors.New("incomplete stage ownership"))
 		}
-		out.ContainerID = container.ID
-		return []*os.File{container.Stdout, container.Stderr}, nil
+		if err = ValidateCreateResponse(process, s.config.MaxMessageBytes); err == nil {
+			err = validateStageDescriptors(process)
+		}
+		if err != nil {
+			closeFiles(transferred)
+			return nil, s.abort(l, "STAGE_CREATE_FAILED", err)
+		}
+		record, e := s.journal.Unit(ctx, l.Ownership)
+		if e != nil || record.Unit != process.Unit {
+			closeFiles(transferred)
+			return nil, s.abort(l, "JOURNAL_WRITE_FAILED", errors.Join(e, errors.New("platform did not atomically record observed unit")))
+		}
+		if record.MountNamespace == nil || record.MountNamespace.Device == 0 || record.MountNamespace.Inode == 0 || record.MountNamespaceDisposition != NamespacePrivate {
+			closeFiles(transferred)
+			return nil, s.abort(l, "NATIVE_NAMESPACE_IDENTITY_MISSING", errors.New("stage admission requires captured private native mount namespace"))
+		}
+		out.Unit = &process.Unit
+		out.Init = &process.Init
+		out.EndpointIdentity = &process.EndpointIdentity
+		return transferred, nil
 	case "start":
 		if state != "CREATED" {
-			return nil, invalid("container is not in CREATED state")
+			return nil, invalid("stage is not in CREATED state")
 		}
 		if err = s.journal.state(ctx, r.InstanceID, "STARTING", ""); err != nil {
 			return nil, err
 		}
 		if err = s.platform.Start(ctx, l.Ownership); err != nil {
-			return nil, s.abort(l, "CONTAINER_START_FAILED", err)
+			return nil, s.abort(l, "STAGE_START_FAILED", err)
 		}
-		return nil, s.journal.state(ctx, r.InstanceID, "STARTED", "")
+		return nil, nil
 	case "wait":
 		observation, cancel := context.WithTimeout(ctx, s.config.OperationTimeout/2)
 		defer cancel()
 		exit, e := s.platform.Wait(observation, l.Ownership)
 		if errors.Is(e, context.DeadlineExceeded) || errors.Is(e, context.Canceled) {
-			return nil, &Error{Reason: "WAIT_PENDING", Message: "container has not exited within observation window"}
+			return nil, &Error{Reason: "WAIT_PENDING", Message: "unit has not exited within observation window"}
 		}
 		if e != nil {
 			return nil, e
@@ -426,42 +405,52 @@ func (s *Supervisor) dispatch(ctx context.Context, r controlRequest, out *contro
 	case "terminate":
 		return nil, s.platform.Terminate(ctx, l.Ownership)
 	case "egress":
-		if state != "STARTED" && !(state == "CREATED" && r.Egress == EgressNone) {
+		if state != "STARTING" && state != "READY" && !(state == "CREATED" && r.Egress == EgressNone) {
 			return nil, invalid("egress opening requires a started instance; prestart permits closure only")
 		}
 		if r.Egress == EgressPublicInternet && l.Spec.InitialEgress != EgressPublicInternet {
 			return nil, invalid("public egress cannot add an endpoint to an initially NONE instance")
 		}
+		roots, rootErr := s.journal.RootIntent(ctx, l.Ownership)
+		confirmed := rootErr == nil && roots.Confirmed
+		if r.Egress == EgressPublicInternet && !confirmed {
+			return nil, invalid("public egress requires durable root confirmation")
+		}
 		if err = s.journal.claim(ctx, r.InstanceID, "network", "POLICY_INTENT"); err != nil {
 			return nil, err
 		}
 		if err = s.platform.SetEgress(ctx, l.Ownership, r.Egress); err != nil {
+			return nil, s.abort(l, "EGRESS_ENFORCEMENT_FAILED", err)
+		}
+		if err = s.journal.claim(ctx, r.InstanceID, "network", "ALLOCATED"); err != nil {
 			return nil, err
 		}
-		return nil, s.journal.claim(ctx, r.InstanceID, "network", "ALLOCATED")
-	case "capture":
-		if state != "STARTED" {
-			return nil, invalid("socket capture requires started container")
+		if state == "STARTING" && confirmed {
+			return nil, s.journal.state(ctx, r.InstanceID, "READY", "")
 		}
-		f, e := s.storage.capture(l, r.SocketName)
-		if e != nil {
-			return nil, e
+		return nil, nil
+	case "confirm_guest_storage":
+		if state != "STARTING" {
+			return nil, invalid("root confirmation requires starting bridge")
 		}
-		return []*os.File{f}, nil
+		if err = s.platform.ConfirmGuestStorage(ctx, l.Ownership, *r.RootInitResult); err != nil {
+			return nil, s.abort(l, "ROOT_INITIALIZATION_FAILED", err)
+		}
+		return nil, nil
 	case "release":
 		return nil, s.cleanup(ctx, l)
 	}
 	return nil, invalid("invalid operation")
 }
 func (s *Supervisor) cleanup(ctx context.Context, l Lease) error {
-	// Platform cleanup must prove the container dead/removed before its mounts
-	// can be unlinked. A timeout/unknown outcome retains every storage claim.
+	if err := s.journal.state(ctx, l.Spec.InstanceID, "STOPPING", ""); err != nil {
+		return err
+	}
+	// Platform applies terminal recording, AddRef release, transport absence,
+	// native detach and actual quota reclamation before returning success.
 	err := cleanupStep(FailureCleanupPlatform, s.platform.Reconcile(ctx, l.Ownership))
 	if err == nil {
 		err = cleanupStep(FailureCleanupCreateGuard, s.journal.unresolvedCreates(ctx, l.Spec.InstanceID))
-	}
-	if err == nil {
-		err = s.storage.cleanup(ctx, l)
 	}
 	physicalFailure := err != nil
 	if err == nil {
@@ -485,13 +474,16 @@ func (s *Supervisor) cleanup(ctx context.Context, l Lease) error {
 func (s *Supervisor) abort(l Lease, reason string, cause error) error {
 	cleanup, cancel := operationContext(context.Background(), s.config.OperationTimeout)
 	defer cancel()
-	record := s.journal.state(cleanup, l.Spec.InstanceID, "FAILED", reason)
+	record := s.journal.state(cleanup, l.Spec.InstanceID, "CLEANUP_PENDING", reason)
 	return errors.Join(cause, record, s.cleanup(cleanup, l))
 }
 func (s *Supervisor) reconcile(ctx context.Context, all bool) error {
+	if err := s.journal.requireLease(); err != nil {
+		return err
+	}
 	// Loss of enforcement is terminal authority loss, not a warning. Revoke
 	// every epoch and clean it; do not silently run with weaker isolation.
-	enforcement := errors.Join(s.storage.quota.preflight(), s.platform.Preflight(ctx))
+	enforcement := s.platform.Preflight(ctx)
 	if enforcement != nil {
 		all = true
 	}
@@ -500,7 +492,7 @@ func (s *Supervisor) reconcile(ctx context.Context, all bool) error {
 	for id, e := range s.epochs {
 		fds := []unix.PollFd{{Fd: int32(e.pidfd.Fd()), Events: unix.POLLIN}}
 		_, err := unix.Poll(fds, 0)
-		if enforcement != nil || err != nil || fds[0].Revents != 0 {
+		if all || enforcement != nil || err != nil || fds[0].Revents != 0 {
 			e.dead = true
 		}
 		if e.dead {
@@ -564,10 +556,10 @@ func (s *Supervisor) reconcileLease(ctx context.Context, l Lease, orphan bool) e
 			return unresolvedErr
 		}
 		if unresolvedErr == nil {
-			if verifyErr := s.storage.verify(l); verifyErr == nil {
+			if verifyErr := s.platform.Preflight(ctx); verifyErr == nil {
 				return nil
 			} else {
-				failure = errors.Join(prerequisite(verifyErr), s.journal.state(ctx, l.Spec.InstanceID, "FAILED", "HOST_PREREQUISITE_FAILED"))
+				failure = errors.Join(prerequisite(verifyErr), s.journal.state(ctx, l.Spec.InstanceID, "CLEANUP_PENDING", "HOST_PREREQUISITE_FAILED"))
 			}
 		}
 	}
@@ -585,8 +577,120 @@ func (s *Supervisor) Close() error {
 	}
 	s.epochs = map[string]*runtimeEpoch{}
 	s.mu.Unlock()
-	return errors.Join(err, s.journal.db.Close(), s.storage.quota.root.Close(), s.lockfile.Close())
+	return err
 }
 
 // EpochPID is intentionally absent from the protocol: clients cannot nominate
 // another process or pass a short-lived sudo launcher as their lifetime owner.
+
+func (s *Supervisor) EpochID() string { return s.epochID }
+func (s *Supervisor) BindWorker(ctx context.Context, u UnitIdentity) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := s.verifyWorkerAdmission(ctx, u); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.config.Worker.Name != "" && s.config.Worker != u {
+		return errors.New("worker invocation cannot be replaced in one supervisor")
+	}
+	s.config.Worker = u
+	return nil
+}
+func (s *Supervisor) Drain(ctx context.Context) error {
+	s.mu.Lock()
+	s.draining = true
+	s.mu.Unlock()
+	return s.reconcile(ctx, true)
+}
+func (s *Supervisor) verifyWorkerAdmission(ctx context.Context, u UnitIdentity) error {
+	if !validUnit(u) {
+		return errors.New("incomplete observed worker invocation")
+	}
+	records, err := s.journal.UnitProvisions(ctx, u.Name)
+	if err != nil {
+		return err
+	}
+	var captured *NamespaceIdentity
+	for _, record := range records {
+		if record.State != "OBSERVED" {
+			continue
+		}
+		var properties ProvisionProperties
+		if err = gvxcontract.DecodeStrict(record.Observed.Attributes, 64<<10, 16, &properties); err != nil {
+			return err
+		}
+		if properties.Unit == nil || *properties.Unit != u {
+			continue
+		}
+		if properties.Exit != nil || properties.Absence != nil || properties.CgroupEmpty {
+			return errors.New("worker invocation already has terminal or absence evidence")
+		}
+		if properties.MountNamespace == nil {
+			continue
+		}
+		if properties.MountNamespaceDisposition != NamespacePrivate || properties.MountNamespace.Device == 0 || properties.MountNamespace.Inode == 0 {
+			return errors.New("worker lacks a captured private mount namespace")
+		}
+		if captured != nil && *captured != *properties.MountNamespace {
+			return errors.New("conflicting worker native mount namespace identities")
+		}
+		captured = properties.MountNamespace
+	}
+	if captured == nil {
+		return errors.New("worker admission requires durable native private namespace capture")
+	}
+	return verifyWorkerProcess(u)
+}
+
+func verifyWorkerProcess(u UnitIdentity) error {
+	if !validUnit(u) {
+		return errors.New("incomplete observed worker invocation")
+	}
+	boot, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(string(boot)) != u.BootID {
+		return errors.New("worker belongs to another boot")
+	}
+	raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", u.MainPID))
+	if err != nil {
+		return err
+	}
+	close := strings.LastIndexByte(string(raw), ')')
+	if close < 0 {
+		return errors.New("invalid worker stat")
+	}
+	fields := strings.Fields(string(raw[close+1:]))
+	if len(fields) < 20 {
+		return errors.New("short worker stat")
+	}
+	start, err := strconv.ParseUint(fields[19], 10, 64)
+	if err != nil || start != u.StartTime {
+		return errors.New("worker PID start identity mismatch")
+	}
+	cgroup, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", u.MainPID))
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(string(cgroup)) != "0::"+u.CgroupPath {
+		return errors.New("worker cgroup differs from observed invocation")
+	}
+	exe, err := os.Open(fmt.Sprintf("/proc/%d/exe", u.MainPID))
+	if err != nil {
+		return err
+	}
+	defer exe.Close()
+	h := sha256.New()
+	n, err := io.Copy(h, io.LimitReader(exe, 1<<30))
+	if err != nil {
+		return err
+	}
+	if n == 1<<30 || "sha256:"+hex.EncodeToString(h.Sum(nil)) != u.ExecutableDigest {
+		return errors.New("worker executable digest mismatch")
+	}
+	return nil
+}

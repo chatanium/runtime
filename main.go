@@ -1,7 +1,9 @@
 package main
 
 import (
-	_ "github.com/joho/godotenv/autoload"
+	"fmt"
+	"os"
+
 	"github.com/thirdscam/chatanium/cmd"
 	"github.com/thirdscam/chatanium/internal/portable/process"
 )
@@ -13,5 +15,6 @@ func main() {
 			os.Exit(1)
 		}
 		return
+	}
 	cmd.Execute()
 }

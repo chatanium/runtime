@@ -190,7 +190,6 @@ func (m *Manager) launch(ctx context.Context, spec ModuleSpec) (result *Instance
 	if err != nil {
 		return i, err
 	}
-	r := spec.Approval.ResourceLimits
 	l := m.config.Limits
 	declaration, err := m.options.Host.ImageManifest(startup, spec.ImageDigest)
 	if err != nil {
@@ -204,12 +203,8 @@ func (m *Manager) launch(ctx context.Context, spec ModuleSpec) (result *Instance
 	if err != nil {
 		return i, err
 	}
-	initialEgress := host.EgressNone
-	if predictedCore.EgressPolicy == wire.EgressPolicy_EGRESS_POLICY_PUBLIC_INTERNET {
-		initialEgress = host.EgressPublicInternet
-	}
-	hostSpec := host.LaunchSpec{ModuleID: string(spec.ModuleID), InstanceID: id, ImageDigest: spec.ImageDigest, Entrypoint: spec.Entrypoint, Args: spec.Args, UID: spec.UID, GID: spec.GID, ConfigRevision: spec.ConfigRevision, ApprovalRevision: spec.ApprovalRevision, Resources: host.ResourceLimits{NanoCPUs: int64(r.CpuMillicores) * 1000000, MemoryBytes: int64(r.MemoryBytes), Pids: int64(r.MaxPids), PersistentBytes: int64(r.PersistentBytes), ScratchBytes: int64(r.ScratchBytes), PersistentInodes: l.PersistentInodeLimit, ScratchInodes: l.ScratchInodeLimit, ControlMessageMaxBytes: int64(l.ControlMessageMaxBytes), LogBufferBytes: l.LogBufferBytes, LogFileMaxBytes: l.LogFileMaxBytes, LogRetainedFiles: l.LogRetainedFiles}}
-	hostSpec.InitialEgress = initialEgress
+	hostSpec := launchPolicy(m.config, spec, predictedCore.EgressPolicy)
+	hostSpec.InstanceID = id
 	lease, err := m.options.Host.Acquire(startup, hostSpec)
 	if err != nil {
 		return i, err
@@ -247,7 +242,14 @@ func (m *Manager) launch(ctx context.Context, spec ModuleSpec) (result *Instance
 	if startup.Err() != nil {
 		return i, startup.Err()
 	}
+	i.mu.Lock()
+	if i.lifetime.Err() != nil || startup.Err() != nil {
+		i.mu.Unlock()
+		return i, context.Canceled
+	}
 	factory := m.options.Host.NewRunnerTransport(lease)
+	i.factory = factory
+	i.mu.Unlock()
 	primary := &primaryTransport{}
 	clientConfig := &plugin.ClientConfig{
 		HandshakeConfig:     core.HandshakeConfig(),
@@ -263,7 +265,6 @@ func (m *Manager) launch(ctx context.Context, spec ModuleSpec) (result *Instance
 		SyncStdout:          io.Discard,
 		SyncStderr:          io.Discard,
 		PluginLogBufferSize: l.ControlMessageMaxBytes,
-		UnixSocketConfig:    &plugin.UnixSocketConfig{TempDir: lease.IPCPath, Group: strconv.FormatUint(uint64(lease.SocketGID), 10)},
 		UnixSocketConfig:    factory.SocketConfig(),
 		GRPCDialOptions: []grpc.DialOption{
 			grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(l.ControlMessageMaxBytes), grpc.MaxCallSendMsgSize(l.ControlMessageMaxBytes)),
@@ -272,7 +273,6 @@ func (m *Manager) launch(ctx context.Context, spec ModuleSpec) (result *Instance
 	}
 	client := plugin.NewClient(clientConfig)
 	i.mu.Lock()
-	i.factory = factory
 	i.plugin = client
 	i.primaryTransport = primary
 	i.connectDone = make(chan struct{})
@@ -368,7 +368,7 @@ func (m *Manager) launch(ctx context.Context, spec ModuleSpec) (result *Instance
 	i.state = Initializing
 	i.signalLocked()
 	i.mu.Unlock()
-	init := &wire.InitContext{ModuleId: string(spec.ModuleID), InstanceId: id, Grants: proto.Clone(actual).(*wire.Grants), PersistentDirectory: host.GuestPersistentPath, ScratchDirectory: host.GuestScratchPath}
+	init := &wire.InitContext{ModuleId: string(spec.ModuleID), InstanceId: id, Grants: proto.Clone(actual).(*wire.Grants), PersistentDirectory: host.DataMountpoint, ScratchDirectory: host.ScratchMountpoint}
 	if err = m.stage(startup, i, wire.Stage_STAGE_INIT, init); err != nil {
 		return i, err
 	}
@@ -635,22 +635,33 @@ func (m *Manager) stopInstance(i *Instance, caller context.Context) {
 		i.cancelDrain()
 	}
 	i.beginTerminalCleanup()
-	cleanup, cancel := context.WithTimeout(context.Background(), time.Duration(m.config.Limits.TerminationDeadline))
+	deadline := time.Now().Add(time.Duration(m.config.Limits.TerminationDeadline))
+	if caller != nil {
+		if limit, ok := caller.Deadline(); ok && limit.Before(deadline) {
+			deadline = limit
+		}
+	}
+	cleanup, cancel := context.WithDeadline(context.Background(), deadline)
 	defer cancel()
 	i.mu.Lock()
-	failed := i.failure != ""
+	failed, factory := i.failure != "", i.factory
 	i.mu.Unlock()
+	transportClosed := true
+	beginTransportClose := func() {
+		if factory != nil {
+			if err := factory.BeginCloseTransport(cleanup); err != nil {
+				cleanupErrors = append(cleanupErrors, cleanupPhaseError(CleanupTransport, err))
+				transportClosed = false
+			}
+		}
+	}
+	// A failed startup may be blocked inside go-plugin's scanner/mux mutex.
+	// Break physical I/O before waiting for launch or entering Client.Kill.
 	if failed {
+		beginTransportClose()
 		if err := m.options.Host.Terminate(cleanup, string(i.principal.InstanceID)); err != nil {
 			cleanupErrors = append(cleanupErrors, cleanupPhaseError(CleanupHostTerminate, err))
 		}
-	}
-	select {
-	case <-i.launchDone:
-	case <-cleanup.Done():
-		cleanupErrors = append(cleanupErrors, cleanupPhaseError(CleanupLaunchJoin, runtimeError(codes.Unavailable, "CLEANUP_INCOMPLETE")))
-		m.finishCleanup(i, errors.Join(cleanupErrors...))
-		return
 	}
 	i.mu.Lock()
 	laneDone := i.laneDone
@@ -673,6 +684,16 @@ func (m *Manager) stopInstance(i *Instance, caller context.Context) {
 			cleanupErrors = append(cleanupErrors, cleanupPhaseError(CleanupStopHook, err))
 		}
 	}
+	// Healthy STOP runs with transport alive, but no consumer join or Kill may
+	// begin until phase one has unblocked every transport producer.
+	beginTransportClose()
+	select {
+	case <-i.launchDone:
+	case <-cleanup.Done():
+		cleanupErrors = append(cleanupErrors, cleanupPhaseError(CleanupLaunchJoin, runtimeError(codes.Unavailable, "CLEANUP_INCOMPLETE")))
+		m.finishCleanup(i, errors.Join(cleanupErrors...))
+		return
+	}
 	if hooks != nil {
 		if err := hooks.Close(); err != nil {
 			cleanupErrors = append(cleanupErrors, cleanupPhaseError(CleanupHelperClose, err))
@@ -684,7 +705,7 @@ func (m *Manager) stopInstance(i *Instance, caller context.Context) {
 		cleanupErrors = append(cleanupErrors, cleanupPhaseError(CleanupHostTerminate, err))
 	}
 	i.mu.Lock()
-	client, factory, connectDone, primary := i.plugin, i.factory, i.connectDone, i.primaryTransport
+	client, connectDone, primary := i.plugin, i.connectDone, i.primaryTransport
 	if client != nil && i.killDone == nil {
 		i.killDone = make(chan struct{})
 		go func() { client.Kill(); close(i.killDone) }()
@@ -705,7 +726,6 @@ func (m *Manager) stopInstance(i *Instance, caller context.Context) {
 	if err := m.credentials.RevokeInstance(cleanup, i.principal); err != nil {
 		cleanupErrors = append(cleanupErrors, cleanupPhaseError(CleanupCredentials, err))
 	}
-	transportClosed := true
 	for _, pending := range []struct {
 		phase CleanupPhase
 		done  <-chan struct{}

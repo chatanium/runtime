@@ -7,61 +7,28 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"os"
 	"time"
 
 	discordbackend "github.com/thirdscam/chatanium/internal/backend/discord"
+	"github.com/thirdscam/chatanium/internal/bootstrap"
 	"github.com/thirdscam/chatanium/internal/host"
 	runtime "github.com/thirdscam/chatanium/internal/runtime"
 	"github.com/thirdscam/chatanium/internal/runtime/upload"
 	"github.com/thirdscam/chatanium/src/Backends/Discord/Guild"
 	"github.com/thirdscam/chatanium/src/Database"
-	"golang.org/x/sys/unix"
 )
 
-// StartOptions contains only explicit operator inputs; module execution is always
-// delegated to the independently authenticated supervisor.
+// StartOptions is the worker's explicit, non-secret run configuration.
 type StartOptions struct {
-	ConfigPath         string
-	SupervisorSocket   string
-	SupervisorUID      int64
-	SupervisorMaxBytes int
-	Duration           time.Duration
-	DevelopmentMode    bool
-	DevelopmentSocket  string
-	DevelopmentImages  []string
+	Duration            time.Duration
+	DevelopmentMode     bool
+	DevelopmentRevision string
+	DevelopmentSocket   string
+	DevelopmentImages   []string
 }
 
-func Start(ctx context.Context, options StartOptions) error {
-	if err := validateDevelopmentOptions(options); err != nil {
-		return err
-	}
-	if !canonicalPath(options.SupervisorSocket) || options.SupervisorUID < 0 || options.SupervisorUID > 1<<32-1 || options.SupervisorMaxBytes <= 0 || options.Duration < 0 {
-		return errors.New("invalid runtime arguments")
-	}
-	raw, err := readOperatorFile(options.ConfigPath)
-	if err != nil {
-		return err
-	}
-	config, err := runtime.DecodeConfig(raw)
-	if err != nil {
-		return errors.New("invalid operator configuration")
-	}
-	if err := applyDevelopmentImages(&config, options.DevelopmentImages); err != nil {
-		return err
-	}
-	if len(config.Modules) == 0 {
-		return errors.New("at least one installed module is required")
-	}
-	if int64(config.Defaults.DrainDeadline) > int64(^uint64(0)>>1)-int64(config.Limits.TerminationDeadline) {
-		return errors.New("combined shutdown deadline overflows")
-	}
-	if options.Duration > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, options.Duration)
-		defer cancel()
-	}
-	return serve(ctx, config, host.ClientConfig{SocketPath: options.SupervisorSocket, SupervisorUID: uint32(options.SupervisorUID), MaxMessageBytes: options.SupervisorMaxBytes, OperationTimeout: time.Duration(config.Limits.DockerAPIDeadline)}, options)
+func workerOptions(options bootstrap.RunOptions) StartOptions {
+	return StartOptions{Duration: options.Duration, DevelopmentMode: options.DevelopmentMode, DevelopmentRevision: options.DevelopmentRevision, DevelopmentSocket: options.DevelopmentSocket, DevelopmentImages: append([]string(nil), options.DevelopmentImages...)}
 }
 
 type observation struct {
@@ -70,10 +37,6 @@ type observation struct {
 	Voice           bool                        `json:"voice"`
 	StopFailure     *stopFailureObservation     `json:"stop_failure,omitempty"`
 	DevelopmentStop *developmentStopObservation `json:"development_stop,omitempty"`
-}
-
-func observe(phase string, n int) error {
-	return emitObservation(os.Stdout, observation{Phase: phase, Modules: n, Voice: voiceEnabled})
 }
 
 func emitObservation(output io.Writer, value observation) error {
@@ -102,7 +65,7 @@ func reconcileHost(ctx context.Context, supervisor interface{ Reconcile(context.
 
 // serve has no executable fallback: every module launch goes through the real
 // authenticated supervisor client and Manager's sandbox RunnerFunc.
-func serve(ctx context.Context, config runtime.Config, clientConfig host.ClientConfig, options StartOptions) (result error) {
+func serve(ctx context.Context, config runtime.Config, clientConfig host.ClientConfig, options StartOptions, control *workerRun) (result error) {
 	startup, cancel := context.WithTimeout(ctx, time.Duration(config.Defaults.StartupDeadline))
 	defer cancel()
 	supervisor, err := host.Dial(startup, clientConfig)
@@ -110,10 +73,10 @@ func serve(ctx context.Context, config runtime.Config, clientConfig host.ClientC
 		return errors.New("host supervisor registration failed")
 	}
 	defer supervisor.Close()
-	if err = reconcileHost(startup, supervisor, os.Stdout, len(config.Modules)); err != nil {
+	if err = reconcileHost(startup, supervisor, control.observations, len(config.Modules)); err != nil {
 		return err
 	}
-	files, err := upload.New(startup, upload.Config{ManagementDirectory: config.Host.ManagementDirectory, Limits: config.Limits, ModuleMountRoots: []string{config.Host.StorageRoot, config.Host.IPCRoot}})
+	files, err := upload.New(startup, upload.Config{ManagementDirectory: config.Host.ManagementDirectory, Limits: config.Limits, ModuleMountRoots: config.Host.ModuleMountRoots()})
 	if err != nil {
 		return errors.New("upload store initialization failed")
 	}
@@ -147,7 +110,11 @@ func serve(ctx context.Context, config runtime.Config, clientConfig host.ClientC
 			for _, spec := range config.Modules {
 				go func(id runtime.ModuleID) {
 					bounded, cancel := context.WithTimeout(context.Background(), time.Duration(config.Defaults.DrainDeadline)+time.Duration(config.Limits.TerminationDeadline))
-					defer cancel()
+					defer func() { cancel() }()
+					if deadline := control.drainDeadline(); !deadline.IsZero() {
+						cancel()
+						bounded, cancel = context.WithDeadline(context.Background(), deadline)
+					}
 					err := manager.Stop(bounded, id)
 					var snapshot *runtime.InstanceSnapshot
 					if instance, ok := manager.Instance(id); ok {
@@ -164,7 +131,7 @@ func serve(ctx context.Context, config runtime.Config, clientConfig host.ClientC
 				}
 				if failure := stopped.failure; failure != nil {
 					failures = append(failures, errors.New("module stop or terminal failure"))
-					if json.NewEncoder(os.Stdout).Encode(observation{Phase: "STOP_FAILED", Modules: len(config.Modules), Voice: voiceEnabled, StopFailure: failure}) != nil {
+					if emitObservation(control.observations, observation{Phase: "STOP_FAILED", Modules: len(config.Modules), Voice: voiceEnabled, StopFailure: failure}) != nil {
 						failures = append(failures, errors.New("runtime observation output failed"))
 						resourcesClean = false
 					}
@@ -192,14 +159,15 @@ func serve(ctx context.Context, config runtime.Config, clientConfig host.ClientC
 			resourcesClean = false
 		}
 		if len(failures) == 0 && manager != nil {
-			if e := observe("STOPPED", len(config.Modules)); e != nil {
+			if e := emitObservation(control.observations, observation{Phase: "STOPPED", Modules: len(config.Modules), Voice: voiceEnabled}); e != nil {
 				failures = append(failures, e)
 				resourcesClean = false
 			}
 		}
-		if err := emitDevelopmentStopped(os.Stdout, manager, config.Modules, moduleStops, resourcesClean); err != nil {
+		if err := emitDevelopmentStopped(control.observations, manager, config.Modules, moduleStops, resourcesClean); err != nil {
 			failures = append(failures, err)
 		}
+		control.recordCleanup(manager, config.Modules, failures)
 		result = errors.Join(append([]error{result}, failures...)...)
 	}()
 	var registrations []runtime.BackendRegistration
@@ -212,7 +180,7 @@ func serve(ctx context.Context, config runtime.Config, clientConfig host.ClientC
 		if strictJSON(c.Config, &discordConfig) != nil {
 			return errors.New("invalid Discord operator configuration")
 		}
-		backend, err = newDiscordBackend(life, config, c, &discordConfig, files, func(error) {
+		backend, err = newDiscordBackend(life, config, c, &discordConfig, files, control.secrets, func(error) {
 			select {
 			case backendErrors <- struct{}{}:
 			default:
@@ -258,7 +226,10 @@ func serve(ctx context.Context, config runtime.Config, clientConfig host.ClientC
 	if development != nil {
 		developmentDone = development.done
 	}
-	if err = emitObservation(os.Stdout, startupObservation); err != nil {
+	if err = control.ready(); err != nil {
+		return err
+	}
+	if err = emitObservation(control.observations, startupObservation); err != nil {
 		return err
 	}
 	developmentReady = options.DevelopmentMode
@@ -285,7 +256,7 @@ func serve(ctx context.Context, config runtime.Config, clientConfig host.ClientC
 			return errors.New("development control listener stopped")
 		case <-backendErrors:
 			// Report only an allowlisted phase, never raw remote errors or event data.
-			if e := observe("BACKEND_ERROR", len(config.Modules)); e != nil {
+			if e := emitObservation(control.observations, observation{Phase: "BACKEND_ERROR", Modules: len(config.Modules), Voice: voiceEnabled}); e != nil {
 				developmentReady = false
 				return e
 			}
@@ -304,27 +275,4 @@ func serve(ctx context.Context, config runtime.Config, clientConfig host.ClientC
 			}
 		}
 	}
-}
-
-const operatorMaxBytes = 16 << 20
-
-func readOperatorFile(path string) ([]byte, error) {
-	if !canonicalPath(path) {
-		return nil, errors.New("canonical absolute configuration path required")
-	}
-	fd, err := unix.Openat2(unix.AT_FDCWD, path, &unix.OpenHow{Flags: unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NONBLOCK, Resolve: unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS})
-	if err != nil {
-		return nil, errors.New("configuration cannot be opened without symlinks")
-	}
-	f := os.NewFile(uintptr(fd), "operator-configuration")
-	defer f.Close()
-	var stat unix.Stat_t
-	if unix.Fstat(fd, &stat) != nil || stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Mode&0022 != 0 || (stat.Uid != 0 && stat.Uid != uint32(os.Geteuid())) || stat.Size <= 0 || stat.Size > operatorMaxBytes {
-		return nil, errors.New("configuration must be a bounded operator-owned non-writable regular file")
-	}
-	raw, err := io.ReadAll(io.LimitReader(f, operatorMaxBytes+1))
-	if err != nil || len(raw) > operatorMaxBytes {
-		return nil, errors.New("configuration read failed")
-	}
-	return raw, nil
 }

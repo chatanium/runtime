@@ -64,6 +64,15 @@ def write_json(path, value):
     Path(path).write_text(json.dumps(value, indent=2, sort_keys=True) + '\n')
 
 
+def canonical_json(value):
+    # Match encoding/json's recursive lexical map-key order and string escaping.
+    text = json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
+    for character, escaped in [('&', r'\u0026'), ('<', r'\u003c'), ('>', r'\u003e'),
+                               ('\u2028', r'\u2028'), ('\u2029', r'\u2029')]:
+        text = text.replace(character, escaped)
+    return text.encode()
+
+
 def elf_closure(executables, destination, exclude_system=False):
     """Resolve all DT_NEEDED recursively via the builder's real loader.
 

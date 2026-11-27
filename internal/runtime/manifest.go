@@ -90,3 +90,50 @@ func validateManifestRequests(required, optional []*wire.CapabilityRequest, back
 	}
 	return nil
 }
+
+// ValidatePreparedApproval checks a non-executing declaration against the
+// installation's finite profiles and explicit grant. Backend-specific adapter
+// selectors/support are checked again by the composed Manager before launch;
+// this function never constructs an adapter or grants runtime authority.
+func ValidatePreparedApproval(config Config, spec ModuleSpec, declaration []byte) error {
+	manifest, err := preparedApprovalManifest(config, spec, declaration)
+	if err != nil {
+		return err
+	}
+	_, err = negotiateCore(manifest, spec.Approval)
+	return err
+}
+
+func preparedApprovalManifest(config Config, spec ModuleSpec, declaration []byte) (*wire.ModuleManifest, error) {
+	if err := config.Validate(); err != nil {
+		return nil, err
+	}
+	if err := config.validateSpec(spec); err != nil {
+		return nil, err
+	}
+	manager := &Manager{config: config}
+	manifest, err := manager.parseImageManifest(declaration)
+	if err != nil {
+		return nil, err
+	}
+	for _, grant := range spec.Approval.Backends {
+		configured, ok := config.Backends[grant.BackendId]
+		if !ok || configured.Major != grant.ProtocolMajor {
+			return nil, invalidConfig()
+		}
+	}
+	for _, requirement := range manifest.BackendRequirements {
+		configured, present := config.Backends[requirement.BackendId]
+		approved := backendGrant(spec.Approval, requirement.BackendId)
+		if !present || configured.Major != requirement.ProtocolMajor || approved == nil || approved.ProtocolMajor != requirement.ProtocolMajor {
+			if requirement.Required || len(requirement.RequiredCapabilities) != 0 {
+				return nil, runtimeError(codes.FailedPrecondition, "PROTOCOL_INCOMPATIBLE")
+			}
+			continue
+		}
+		if _, err := negotiateCapabilities(requirement.RequiredCapabilities, requirement.OptionalCapabilities, approved.Capabilities, func(name string) bool { return capability(approved.Capabilities, name) != nil }); err != nil {
+			return nil, err
+		}
+	}
+	return manifest, nil
+}

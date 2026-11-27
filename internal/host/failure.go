@@ -16,6 +16,8 @@ const (
 	PhaseCleanup   FailurePhase = "CLEANUP"
 )
 const (
+	FailureBackingExists          FailureReason = "BACKING_CREATE_REJECTED_EXISTS"
+	FailureOutcomeUnknown         FailureReason = "UNIT_OUTCOME_UNKNOWN"
 	FailureBootstrapFormat        FailureReason = "BOOTSTRAP_FORMAT_INVALID"
 	FailureBootstrapProtocol      FailureReason = "BOOTSTRAP_PROTOCOL_INVALID"
 	FailureBootstrapNetwork       FailureReason = "BOOTSTRAP_NETWORK_INVALID"
@@ -29,15 +31,15 @@ const (
 	FailureAttachFrame            FailureReason = "ATTACH_FRAME_INVALID"
 	FailureAttachEOF              FailureReason = "ATTACH_EOF_WHILE_RUNNING"
 	FailureLogSink                FailureReason = "LOG_SINK_IO_FAILED"
-	FailureInspect                FailureReason = "CONTAINER_INSPECT_FAILED"
-	FailureStartAPI               FailureReason = "CONTAINER_START_API_FAILED"
-	FailureNotRunning             FailureReason = "CONTAINER_NOT_RUNNING"
-	FailureIsolation              FailureReason = "CONTAINER_ISOLATION_MISMATCH"
-	FailureIdentity               FailureReason = "CONTAINER_IDENTITY_MISMATCH"
-	FailureImage                  FailureReason = "CONTAINER_IMAGE_PROCESS_MISMATCH"
-	FailureDNS                    FailureReason = "CONTAINER_RESOLVER_MISMATCH"
-	FailureMount                  FailureReason = "CONTAINER_MOUNT_MISMATCH"
-	FailureNetwork                FailureReason = "CONTAINER_NETWORK_TOPOLOGY_MISMATCH"
+	FailureInspect                FailureReason = "UNIT_INSPECT_FAILED"
+	FailureStartAPI               FailureReason = "UNIT_START_API_FAILED"
+	FailureNotRunning             FailureReason = "UNIT_NOT_RUNNING"
+	FailureIsolation              FailureReason = "UNIT_ISOLATION_MISMATCH"
+	FailureIdentity               FailureReason = "UNIT_IDENTITY_MISMATCH"
+	FailureImage                  FailureReason = "UNIT_IMAGE_PROCESS_MISMATCH"
+	FailureDNS                    FailureReason = "UNIT_RESOLVER_MISMATCH"
+	FailureMount                  FailureReason = "UNIT_MOUNT_MISMATCH"
+	FailureNetwork                FailureReason = "UNIT_NETWORK_TOPOLOGY_MISMATCH"
 	FailureCgroupMembership       FailureReason = "CGROUP_MEMBERSHIP_UNAVAILABLE"
 	FailureCgroupMemoryRead       FailureReason = "CGROUP_MEMORY_READ_FAILED"
 	FailureCgroupMemory           FailureReason = "CGROUP_MEMORY_LIMIT_MISMATCH"
@@ -68,6 +70,10 @@ func validFailurePhase(p FailurePhase) bool {
 }
 func validFailureReason(r FailureReason) bool {
 	switch r {
+	case FailureBackingExists:
+		return true
+	case FailureOutcomeUnknown:
+		return true
 	case FailureCleanupPlatform, FailureCleanupCreateGuard, FailureCleanupScratch, FailureCleanupIPC, FailureCleanupLogs, FailureCleanupSync, FailureCleanupBarrier, FailureCleanupQuotaRead, FailureCleanupQuotaReferences, FailureCleanupJournal:
 		return true
 	case FailureBootstrapFormat, FailureBootstrapProtocol, FailureBootstrapNetwork, FailureBootstrapMux, FailureBootstrapTLS, FailureBootstrapSocket, FailureBootstrapLimit, FailureBootstrapEOF, FailureBootstrapForward, FailureAttachRead, FailureAttachFrame, FailureAttachEOF, FailureLogSink, FailureInspect, FailureStartAPI, FailureNotRunning, FailureIsolation, FailureIdentity, FailureImage, FailureDNS, FailureMount, FailureNetwork, FailureCgroupMembership, FailureCgroupMemoryRead, FailureCgroupMemory, FailureCgroupSwapRead, FailureCgroupSwap, FailureCgroupPidsRead, FailureCgroupPids, FailureCgroupCPURead, FailureCgroupCPU:
@@ -92,26 +98,4 @@ func failureReason(err error, fallback FailureReason) FailureReason {
 		return f.reason
 	}
 	return fallback
-}
-
-func (j *journal) RecordFailure(ctx context.Context, o Ownership, phase FailurePhase, reason FailureReason) error {
-	return j.state(ctx, o.InstanceID, "FAILED", string(phase)+":"+string(reason))
-func (p *DockerPlatform) recordFailure(o Ownership, phase FailurePhase, err error, fallback FailureReason) error {
-	if err == nil {
-		return nil
-	}
-	reason := failureReason(err, fallback)
-	diagnostic := err
-	if _, typed := err.(*sandboxFailure); !typed {
-		diagnostic = classifiedFailure(reason, err)
-	}
-	if p.creates == nil {
-		return errors.Join(diagnostic, errors.New("durable failure journal is not bound"))
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), p.cfg.APIDeadline)
-	defer cancel()
-	if recordErr := p.creates.RecordFailure(ctx, o, phase, reason); recordErr != nil {
-		return errors.Join(diagnostic, recordErr)
-	}
-	return diagnostic
 }

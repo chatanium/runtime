@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/thirdscam/chatanium/internal/host"
 	wire "github.com/thirdscam/chatanium/proto/core-v2"
 	core "github.com/thirdscam/chatanium/shared/core-v2"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -35,6 +36,10 @@ func (d *Duration) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
+func (d Duration) MarshalJSON() ([]byte, error) {
+	return json.Marshal(time.Duration(d).String())
+}
+
 type Defaults struct {
 	StartupDeadline  Duration `json:"startup_deadline"`
 	DrainDeadline    Duration `json:"drain_deadline"`
@@ -43,7 +48,7 @@ type Defaults struct {
 }
 type Limits struct {
 	TerminationDeadline       Duration `json:"termination_deadline"`
-	DockerAPIDeadline         Duration `json:"docker_api_deadline"`
+	HostOperationDeadline     Duration `json:"host_operation_deadline"`
 	HookRPCDeadline           Duration `json:"hook_rpc_deadline"`
 	ReadinessPollInterval     Duration `json:"readiness_poll_interval"`
 	ControlMessageMaxBytes    int      `json:"control_message_max_bytes"`
@@ -63,28 +68,32 @@ type Limits struct {
 	UploadDeadline            Duration `json:"upload_deadline"`
 }
 type NetworkConfig struct {
-	FirewallBackend        string   `json:"firewall_backend"`
-	IPv4                   bool     `json:"ipv4"`
-	IPv6                   bool     `json:"ipv6"`
-	Resolvers              []string `json:"resolvers"`
-	HostPublicAddresses    []string `json:"host_public_addresses"`
-	InternalPrefixes       []string `json:"internal_prefixes"`
-	InfrastructurePrefixes []string `json:"infrastructure_prefixes"`
-	MetadataDestinations   []string `json:"metadata_destinations"`
+	Profile                host.NetworkProfile `json:"profile"`
+	FirewallBackend        string              `json:"firewall_backend"`
+	IPv4Pool               string              `json:"ipv4_pool"`
+	IPv6Pool               string              `json:"ipv6_pool"`
+	InventoryRevision      string              `json:"inventory_revision"`
+	Uplink4                string              `json:"uplink4"`
+	Uplink6                string              `json:"uplink6"`
+	Source4                string              `json:"source4"`
+	Source6                string              `json:"source6"`
+	IPv4                   bool                `json:"ipv4"`
+	IPv6                   bool                `json:"ipv6"`
+	Resolvers              []string            `json:"resolvers"`
+	HostPublicAddresses    []string            `json:"host_public_addresses"`
+	InternalPrefixes       []string            `json:"internal_prefixes"`
+	InfrastructurePrefixes []string            `json:"infrastructure_prefixes"`
+	MetadataDestinations   []string            `json:"metadata_destinations"`
 }
 type HostConfig struct {
 	Format                string        `json:"format,omitempty"`
-	DockerEndpoint      string        `json:"docker_endpoint"`
-	DockerEngineVersion string        `json:"docker_engine_version"`
-	RunscRuntimeName    string        `json:"runsc_runtime_name"`
-	RunscVersion        string        `json:"runsc_version"`
-	RunscSHA256         string        `json:"runsc_sha256"`
-	ManagementDirectory string        `json:"management_directory"`
-	StorageRoot         string        `json:"storage_root"`
-	IPCRoot             string        `json:"ipc_root"`
-	QuotaBackend        string        `json:"quota_backend"`
-	Network             NetworkConfig `json:"network"`
+	RuntimeInstallationID string        `json:"runtime_installation_id"`
+	BundleDigest          string        `json:"bundle_digest"`
+	ManagementDirectory   string        `json:"management_directory"`
+	StorageRoot           string        `json:"storage_root"`
+	IPCRoot               string        `json:"ipc_root"`
 	QuotaBackend          string        `json:"quota_backend,omitempty"`
+	Network               NetworkConfig `json:"network"`
 }
 type BackendConfig struct {
 	Major         uint32            `json:"major"`
@@ -196,10 +205,11 @@ func (c *Config) applyDefaults() {
 }
 
 var imagePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9.:-]*/[a-zA-Z0-9][a-zA-Z0-9._/-]*@sha256:[a-f0-9]{64}$`)
-var shaPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
-var dockerVersionPattern = regexp.MustCompile(`^[0-9]+[.][0-9]+[.][0-9]+$`)
-var runscVersionPattern = regexp.MustCompile(`^release-[0-9]{8}[.][0-9]+$`)
-var runtimeNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
+var recordImagePattern = regexp.MustCompile(`^record:sha256:[a-f0-9]{64}$`)
+var bundleDigestPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
+var interfacePattern = regexp.MustCompile(`^[a-zA-Z0-9_.-]{1,15}$`)
+var ulaNetwork = netip.MustParsePrefix("fc00::/7")
+var publicIPv6Network = netip.MustParsePrefix("2000::/3")
 
 func cleanAbsolute(s string) bool {
 	return s != "/" && filepath.IsAbs(s) && filepath.Clean(s) == s && !strings.ContainsRune(s, 0)
@@ -208,7 +218,6 @@ func (c Config) Validate() error {
 	l := c.Limits
 	h := c.Host
 	d := c.Defaults
-	if c.SchemaVersion != 2 || c.Backends == nil || l.TerminationDeadline <= 0 || l.DockerAPIDeadline <= 0 || l.HookRPCDeadline <= 0 || l.ReadinessPollInterval <= 0 || l.CredentialRefMaxTTL <= 0 || l.ControlMessageMaxBytes <= 0 || l.ConfigMaxBytes <= 0 || l.ControlRPCsPerInstance <= 0 || l.CredentialRefsPerInstance <= 0 || l.PersistentInodeLimit <= 0 || l.ScratchInodeLimit <= 0 || l.LogBufferBytes <= 0 || l.LogFileMaxBytes <= 0 || l.LogRetainedFiles <= 0 || l.UploadRecordsPerInstance <= 0 || l.UploadRecordsPerHost <= 0 {
 	if c.SchemaVersion != 2 || c.Backends == nil || l.TerminationDeadline <= 0 || l.HostOperationDeadline <= 0 || l.HookRPCDeadline <= 0 || l.ReadinessPollInterval <= 0 || l.CredentialRefMaxTTL <= 0 || l.ControlMessageMaxBytes <= 0 || l.ConfigMaxBytes <= 0 || l.ControlRPCsPerInstance <= 0 || l.CredentialRefsPerInstance <= 0 || l.LogBufferBytes <= 0 || l.LogFileMaxBytes <= 0 || l.LogRetainedFiles <= 0 || l.UploadRecordsPerInstance <= 0 || l.UploadRecordsPerHost <= 0 {
 		return invalidConfig()
 	}
@@ -240,13 +249,15 @@ func (c Config) Validate() error {
 	if protowire.SizeTag(1)+protowire.SizeBytes(uploadMetadataBody) > l.ControlMessageMaxBytes {
 		return invalidConfig()
 	}
-	// Actual collector workspaces, go-plugin's scanner and Moby's reader must
-	// fit simultaneously, before even a one-byte output slab can be admitted.
+	// Collector workspaces, go-plugin's scanner and framed DATA buffers must
+	// fit simultaneously before an output slab can be admitted.
 	if l.LogBufferBytes <= 3*int64(l.ControlMessageMaxBytes)+65536+4096+256 {
 		return invalidConfig()
 	}
-	if !strings.HasPrefix(h.DockerEndpoint, "unix://") || !cleanAbsolute(strings.TrimPrefix(h.DockerEndpoint, "unix://")) || !dockerVersionPattern.MatchString(h.DockerEngineVersion) || !runtimeNamePattern.MatchString(h.RunscRuntimeName) || !runscVersionPattern.MatchString(h.RunscVersion) || !shaPattern.MatchString(h.RunscSHA256) || h.QuotaBackend != "xfs-project" {
 	if h.RuntimeInstallationID == "" || strings.TrimSpace(h.RuntimeInstallationID) != h.RuntimeInstallationID || strings.ContainsAny(h.RuntimeInstallationID, "/\x00") || !bundleDigestPattern.MatchString(h.BundleDigest) || h.Format == PortableFormat && strings.ContainsAny(h.RuntimeInstallationID, "\\\r\n") {
+		return invalidConfig()
+	}
+	if h.ManagementDirectory != h.AppDirectory() {
 		return invalidConfig()
 	}
 	paths := []string{h.ManagementDirectory, h.StorageRoot, h.IPCRoot}
@@ -263,26 +274,56 @@ func (c Config) Validate() error {
 		}
 	}
 	n := h.Network
-	if n.FirewallBackend != "iptables" || !n.IPv4 || !n.IPv6 || len(n.Resolvers) == 0 || n.HostPublicAddresses == nil || n.InternalPrefixes == nil || n.InfrastructurePrefixes == nil || n.MetadataDestinations == nil {
-		return invalidConfig()
-	}
-	for _, addresses := range [][]string{n.Resolvers, n.HostPublicAddresses} {
-		for _, s := range addresses {
-			a, e := netip.ParseAddr(s)
-			if e != nil || !a.IsGlobalUnicast() || a.IsPrivate() || a.IsLoopback() || a.IsLinkLocalUnicast() {
 	if n.Profile == host.NetworkNone || h.Format == PortableFormat {
 		if h.Format == PortableFormat && n.Profile != host.NetworkNone && n.Profile != host.NetworkPublicV4 {
 			return invalidConfig()
 		}
+		if n.IPv4 || n.IPv6 || n.FirewallBackend != "" || n.IPv4Pool != "" || n.IPv6Pool != "" || n.InventoryRevision != "" || n.Uplink4 != "" || n.Uplink6 != "" || n.Source4 != "" || n.Source6 != "" || len(n.Resolvers)+len(n.HostPublicAddresses)+len(n.InternalPrefixes)+len(n.InfrastructurePrefixes)+len(n.MetadataDestinations) != 0 {
+			return invalidConfig()
+		}
+	} else {
+		if (n.Profile != host.NetworkPublicV4 && n.Profile != host.NetworkPublicDual) || (n.Profile == host.NetworkPublicDual) != n.IPv6 {
+			return invalidConfig()
+		}
+		if n.FirewallBackend != "iptables" || !n.IPv4 || len(n.Resolvers) == 0 || n.HostPublicAddresses == nil || n.InternalPrefixes == nil || n.InfrastructurePrefixes == nil || n.MetadataDestinations == nil {
+			return invalidConfig()
+		}
+		pool4, poolErr := netip.ParsePrefix(n.IPv4Pool)
+		source4, sourceErr := netip.ParseAddr(n.Source4)
+		if poolErr != nil || !pool4.Addr().Is4() || pool4 != pool4.Masked() || pool4.Bits() < 8 || pool4.Bits() > 30 || n.InventoryRevision == "" || !interfacePattern.MatchString(n.Uplink4) || sourceErr != nil || !source4.Is4() || !source4.IsGlobalUnicast() || len(n.HostPublicAddresses) == 0 || len(n.MetadataDestinations) == 0 {
+			return invalidConfig()
+		}
+		if n.IPv6 {
+			pool6, err := netip.ParsePrefix(n.IPv6Pool)
+			source6, sourceErr := netip.ParseAddr(n.Source6)
+			if err != nil || !pool6.Addr().Is6() || pool6 != pool6.Masked() || pool6.Bits() < 48 || pool6.Bits() > 126 || !ulaNetwork.Contains(pool6.Addr()) || !interfacePattern.MatchString(n.Uplink6) || sourceErr != nil || !publicIPv6Network.Contains(source6) {
 				return invalidConfig()
 			}
+		} else if n.IPv6Pool != "" || n.Uplink6 != "" || n.Source6 != "" {
+			return invalidConfig()
 		}
-	}
-	for _, ss := range [][]string{n.InternalPrefixes, n.InfrastructurePrefixes, n.MetadataDestinations} {
-		for _, s := range ss {
-			if _, e := netip.ParsePrefix(s); e != nil {
-				if _, e = netip.ParseAddr(s); e != nil {
+		resolver4, resolver6 := false, false
+		for group, addresses := range [][]string{n.Resolvers, n.HostPublicAddresses} {
+			for _, s := range addresses {
+				a, e := netip.ParseAddr(s)
+				if e != nil || a.Is4In6() || !a.IsGlobalUnicast() || a.IsPrivate() || a.IsLoopback() || a.IsLinkLocalUnicast() || (!n.IPv6 && a.Is6()) {
 					return invalidConfig()
+				}
+				if group == 0 {
+					resolver4 = resolver4 || a.Is4()
+					resolver6 = resolver6 || a.Is6()
+				}
+			}
+		}
+		if !resolver4 || (n.IPv6 && !resolver6) {
+			return invalidConfig()
+		}
+		for _, ss := range [][]string{n.InternalPrefixes, n.InfrastructurePrefixes, n.MetadataDestinations} {
+			for _, s := range ss {
+				if _, e := netip.ParsePrefix(s); e != nil {
+					if _, e = netip.ParseAddr(s); e != nil {
+						return invalidConfig()
+					}
 				}
 			}
 		}
@@ -315,7 +356,6 @@ func (c Config) Validate() error {
 	return nil
 }
 func (c Config) validateSpec(s ModuleSpec) error {
-	if strings.TrimSpace(string(s.ModuleID)) == "" || !imagePattern.MatchString(s.ImageDigest) || s.UID == 0 || s.GID == 0 || len(s.Entrypoint) == 0 || !cleanAbsolute(s.Entrypoint[0]) || s.Approval == nil {
 	imageOK := imagePattern.MatchString(s.ImageDigest) || recordImagePattern.MatchString(s.ImageDigest)
 	pathOK := false
 	if len(s.Entrypoint) > 0 {
@@ -330,6 +370,9 @@ func (c Config) validateSpec(s ModuleSpec) error {
 		return invalidConfig()
 	}
 	if strings.TrimSpace(string(s.ModuleID)) == "" || !imageOK || s.UID == 0 || s.GID == 0 || !pathOK || s.Approval == nil {
+		return invalidConfig()
+	}
+	if c.Host.Network.Profile == host.NetworkNone && s.Approval.EgressPolicy == wire.EgressPolicy_EGRESS_POLICY_PUBLIC_INTERNET {
 		return invalidConfig()
 	}
 	for _, arguments := range [][]string{s.Entrypoint, s.Args} {

@@ -5,14 +5,19 @@ package host
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 )
 
-func validCreateKind(kind CreateKind) bool { return kind == CreateContainer || kind == CreateNetwork }
+func validCreateKind(kind CreateKind) bool { return kind == CreateService || kind == CreateNetwork }
 
-func (j *journal) creationOwner(ctx context.Context, o Ownership) error {
+func (j *Store) creationOwner(ctx context.Context, o Ownership) error {
+	if err := j.requireLease(); err != nil {
+		return err
+	}
+	if o.RuntimeInstallationID != j.productID {
+		return errors.New("product installation ownership mismatch")
+	}
 	var count int
 	err := j.db.QueryRowContext(ctx, `SELECT count(*) FROM instances i JOIN installations p ON p.module_id=i.module_id WHERE i.id=? AND i.epoch=? AND p.storage_key=?`, o.InstanceID, o.EpochID, o.InstallationID).Scan(&count)
 	if err != nil {
@@ -23,7 +28,10 @@ func (j *journal) creationOwner(ctx context.Context, o Ownership) error {
 	}
 	return nil
 }
-func (j *journal) SubmitCreate(ctx context.Context, o Ownership, kind CreateKind, identity string) error {
+func (j *Store) SubmitCreate(ctx context.Context, o Ownership, kind CreateKind, identity string) error {
+	if err := j.requireLease(); err != nil {
+		return err
+	}
 	if !validCreateKind(kind) || identity == "" {
 		return invalid("invalid create submission identity")
 	}
@@ -46,7 +54,7 @@ func (j *journal) SubmitCreate(ctx context.Context, o Ownership, kind CreateKind
 	}
 	return nil
 }
-func (j *journal) LookupCreate(ctx context.Context, o Ownership, kind CreateKind) (CreateRecord, bool, error) {
+func (j *Store) LookupCreate(ctx context.Context, o Ownership, kind CreateKind) (CreateRecord, bool, error) {
 	if !validCreateKind(kind) {
 		return CreateRecord{}, false, invalid("invalid create submission kind")
 	}
@@ -66,7 +74,17 @@ func (j *journal) LookupCreate(ctx context.Context, o Ownership, kind CreateKind
 	}
 	return record, true, nil
 }
-func (j *journal) ObserveCreated(ctx context.Context, o Ownership, kind CreateKind, identity, id string) error {
+func (j *Store) ObserveCreated(ctx context.Context, o Ownership, kind CreateKind, identity, id string) error {
+	if kind == CreateService {
+		observation, err := j.Unit(ctx, o)
+		if err != nil {
+			return errors.Join(errors.New("service resolution requires durable native observation"), err)
+		}
+		if identity != observation.Unit.Name || id != unitObjectID(observation.Unit) {
+			return errors.New("service resolution identity mismatch")
+		}
+		return j.RecordUnit(ctx, o, observation)
+	}
 	if id == "" {
 		return errors.New("created object identity is missing")
 	}
@@ -97,7 +115,7 @@ func (j *journal) ObserveCreated(ctx context.Context, o Ownership, kind CreateKi
 // RejectCreate is a trusted-platform transition, not an operator force reset.
 // Evidence must fence this exact dispatched request's completion. Cleanup still
 // verifies ownership and absence, including any object left by failed rollback.
-func (j *journal) RejectCreate(ctx context.Context, o Ownership, kind CreateKind, identity, evidence string) error {
+func (j *Store) RejectCreate(ctx context.Context, o Ownership, kind CreateKind, identity, evidence string) error {
 	if evidence == "" {
 		return errors.New("completed create rejection evidence is missing")
 	}
@@ -124,7 +142,7 @@ func (j *journal) RejectCreate(ctx context.Context, o Ownership, kind CreateKind
 
 func requireCreateResolved(ctx context.Context, j CreateJournal, o Ownership, kind CreateKind, identity string) error {
 	if j == nil {
-		return prerequisite(errors.New("durable Docker create journal is not bound"))
+		return prerequisite(errors.New("durable create journal is not bound"))
 	}
 	record, found, err := j.LookupCreate(ctx, o, kind)
 	if err != nil {
@@ -141,7 +159,7 @@ func requireCreateResolved(ctx context.Context, j CreateJournal, o Ownership, ki
 	}
 	return nil
 }
-func (j *journal) unresolvedCreates(ctx context.Context, id string) error {
+func (j *Store) unresolvedCreates(ctx context.Context, id string) error {
 	var count int
 	if err := j.db.QueryRowContext(ctx, `SELECT count(*) FROM create_submissions WHERE instance=? AND state='SUBMITTED'`, id).Scan(&count); err != nil {
 		return err
@@ -176,91 +194,12 @@ func unresolvedCleanupOnly(err error) bool {
 	return allowed(err)
 }
 
-// Backfill only pre-ledger states whose old dispatch path could have submitted
-// a create. ALLOCATING/ALLOCATED preflight failures are not fabricated requests.
-func (j *journal) initializeCreateJournal(ctx context.Context) error {
-	tx, err := j.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	var initialized int
-	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM metadata WHERE key='create_journal_v1'").Scan(&initialized); err != nil {
-		return err
-	}
-	if initialized != 0 {
-		return nil
-	}
-	rows, err := tx.QueryContext(ctx, `SELECT lease FROM instances WHERE cleanup!='COMPLETE' AND (state IN ('CREATING','CREATED','STARTING','STARTED') OR (state='FAILED' AND reason IN ('CONTAINER_CREATE_FAILED','CONTAINER_START_FAILED','JOURNAL_WRITE_FAILED')))`)
-	if err != nil {
-		return err
-	}
-	var leases []Lease
-	for rows.Next() {
-		var raw string
-		if err = rows.Scan(&raw); err != nil {
-			rows.Close()
-			return err
-		}
-		var l Lease
-		if err = json.Unmarshal([]byte(raw), &l); err != nil {
-			rows.Close()
-			return err
-		}
-		leases = append(leases, l)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return err
-	}
-	for _, l := range leases {
-		// A legacy ID is only a lookup hint until current ownership labels match.
-		if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO create_submissions(instance,kind,identity,state,object_id) VALUES(?,?,?,'SUBMITTED',?)`, l.Spec.InstanceID, CreateContainer, containerName(l.Ownership), l.Ownership.ContainerID); err != nil {
-			return err
-		}
-		if l.Spec.InitialEgress == EgressPublicInternet {
-			if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO create_submissions(instance,kind,identity,state,object_id) VALUES(?,?,?,'SUBMITTED','')`, l.Spec.InstanceID, CreateNetwork, containerName(l.Ownership)+"-net"); err != nil {
-				return err
-			}
-		}
-	}
-	if _, err = tx.ExecContext(ctx, "INSERT INTO metadata(key,value) VALUES('create_journal_v1','1')"); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-// SQLite cannot widen the original CHECK constraint in place. Rebuild only this
-// ledger in one transaction; neither old submissions nor ownership claims change.
-func (j *journal) initializeCreateRejections(ctx context.Context) error {
-	tx, err := j.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
 func (j *Store) RecordFailure(ctx context.Context, o Ownership, phase FailurePhase, reason FailureReason) error {
 	if !validFailurePhase(phase) || !validFailureReason(reason) {
 		return invalid("invalid sandbox failure diagnostic code")
 	}
-	defer tx.Rollback()
-	var initialized int
-	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM metadata WHERE key='create_journal_v2'").Scan(&initialized); err != nil {
 	if err := j.creationOwner(ctx, o); err != nil {
 		return err
 	}
-	if initialized != 0 {
-		return nil
-	}
-	for _, statement := range []string{
-		`CREATE TABLE create_submissions_v2(instance TEXT NOT NULL REFERENCES instances(id),kind TEXT NOT NULL CHECK(kind IN ('container','network')),identity TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('SUBMITTED','OBSERVED','REJECTED')),object_id TEXT NOT NULL,rejection TEXT NOT NULL DEFAULT '',CHECK(state!='REJECTED' OR (object_id='' AND rejection!='')),PRIMARY KEY(instance,kind),UNIQUE(kind,identity))`,
-		`INSERT INTO create_submissions_v2(instance,kind,identity,state,object_id) SELECT instance,kind,identity,state,object_id FROM create_submissions`,
-		`DROP TABLE create_submissions`,
-		`ALTER TABLE create_submissions_v2 RENAME TO create_submissions`,
-		`INSERT INTO metadata(key,value) VALUES('create_journal_v2','1')`,
-	} {
-		if _, err = tx.ExecContext(ctx, statement); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
 	return j.state(ctx, o.InstanceID, "CLEANUP_PENDING", string(phase)+":"+string(reason))
 }

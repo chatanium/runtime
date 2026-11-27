@@ -8,14 +8,49 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/thirdscam/chatanium/internal/gvxcontract"
 )
 
 type EgressPolicy string
 
 const (
 	EgressNone           EgressPolicy = "NONE"
-	EgressPublicInternet EgressPolicy = "PUBLIC_INTERNET"
+	EgressPublicInternet EgressPolicy = "PUBLIC"
 )
+
+type NetworkProfile string
+
+const (
+	NetworkNone       NetworkProfile = "NONE"
+	NetworkPublicV4   NetworkProfile = "PUBLIC-v4"
+	NetworkPublicDual NetworkProfile = "PUBLIC-dual"
+	DataMountpoint                   = "/var/lib/flexmodule/data"
+	ScratchMountpoint                = "/var/lib/flexmodule/scratch"
+)
+
+type UnitIdentity struct {
+	Name                string `json:"name"`
+	InvocationID        string `json:"invocation_id"`
+	BootID              string `json:"boot_id"`
+	CgroupPath          string `json:"cgroup_path"`
+	Generation          string `json:"generation"`
+	ExecutableDigest    string `json:"executable_digest"`
+	ResourceFingerprint string `json:"resource_fingerprint"`
+	MainPID             int    `json:"main_pid"`
+	StartTime           uint64 `json:"start_time"`
+}
+type EndpointIdentity struct {
+	Directory    string `json:"directory"`
+	Path         string `json:"path"`
+	DirectoryDev uint64 `json:"directory_dev"`
+	DirectoryIno uint64 `json:"directory_ino"`
+	SocketDev    uint64 `json:"socket_dev"`
+	SocketIno    uint64 `json:"socket_ino"`
+	UID          uint32 `json:"uid"`
+	GID          uint32 `json:"gid"`
+	Mode         uint32 `json:"mode"`
+}
 
 type ResourceLimits struct {
 	NanoCPUs               int64 `json:"nano_cpus"`
@@ -46,40 +81,51 @@ type LaunchSpec struct {
 }
 
 type Ownership struct {
-	InstallationID string `json:"installation_id"`
-	EpochID        string `json:"epoch_id"`
-	InstanceID     string `json:"instance_id"`
-	ContainerID    string `json:"container_id"`
+	RuntimeInstallationID string       `json:"runtime_installation_id"`
+	InstallationID        string       `json:"installation_id"`
+	EpochID               string       `json:"epoch_id"`
+	InstanceID            string       `json:"instance_id"`
+	Unit                  UnitIdentity `json:"unit"`
 }
 
 type Lease struct {
-	Ownership         Ownership  `json:"ownership"`
-	Spec              LaunchSpec `json:"spec"`
-	PersistentPath    string     `json:"persistent_path"`
-	ScratchPath       string     `json:"scratch_path"`
-	IPCPath           string     `json:"ipc_path"`
-	LogPath           string     `json:"log_path"`
-	PersistentProject uint32     `json:"persistent_project"`
-	ScratchProject    uint32     `json:"scratch_project"`
-	SocketGID         uint32     `json:"socket_gid"`
+	Ownership             Ownership      `json:"ownership"`
+	Spec                  LaunchSpec     `json:"spec"`
+	PersistentPath        string         `json:"persistent_path"`
+	ScratchPath           string         `json:"scratch_path"`
+	IPCPath               string         `json:"ipc_path"`
+	LogPath               string         `json:"log_path"`
+	BootstrapPath         string         `json:"bootstrap_path"`
+	PersistentProject     uint32         `json:"persistent_project"`
+	ScratchProject        uint32         `json:"scratch_project"`
+	SocketGID             uint32         `json:"socket_gid"`
+	ImageRecordID         string         `json:"image_record_id"`
+	CacheGenerationID     string         `json:"cache_generation_id"`
+	NetworkGeneration     string         `json:"network_generation"`
+	Topology              NetworkProfile `json:"topology"`
+	SandboxUID            uint32         `json:"sandbox_uid"`
+	SandboxGID            uint32         `json:"sandbox_gid"`
+	StartupDeadlineBootNS int64          `json:"startup_deadline_boot_ns"`
 }
 
-type Container struct {
-	ID     string
-	Stdout *os.File
-	Stderr *os.File
+type StageProcess struct {
+	Unit                                      UnitIdentity
+	Init                                      gvxcontract.BridgeInit
+	EndpointIdentity                          EndpointIdentity
+	Stdin, Stdout, Stderr, Listener, Endpoint *os.File
 }
 
-type Exit struct {
-	Code      int64 `json:"code"`
-	OOMKilled bool  `json:"oom_killed"`
+type ProcessExit struct {
+	Kind      string `json:"kind"`
+	Value     uint32 `json:"value"`
+	OOMKilled bool   `json:"oom_killed"`
 }
 
 type CreateKind string
 
 const (
-	CreateContainer CreateKind = "container"
-	CreateNetwork   CreateKind = "network"
+	CreateService CreateKind = "service"
+	CreateNetwork CreateKind = "network"
 )
 
 type CreateState string
@@ -97,10 +143,8 @@ type CreateRecord struct {
 	Rejection string
 }
 
-// CreateJournal commits the submission before Docker dispatch. A successful
-// response or an exact ownership-checked observation must be durable before
-// deleting the created object. Only an authoritative completed negative response
-// may reject a submission; absence, deadlines and transport errors never do.
+// CreateJournal commits submissions before dispatch. Uncertain outcomes retain
+// claims until an authoritative rejection or boot-fenced settlement is durable.
 type CreateJournal interface {
 	SubmitCreate(context.Context, Ownership, CreateKind, string) error
 	ObserveCreated(context.Context, Ownership, CreateKind, string, string) error
@@ -109,40 +153,46 @@ type CreateJournal interface {
 	RecordFailure(context.Context, Ownership, FailurePhase, FailureReason) error
 }
 
-// Platform implementations must retain ownership after any uncertain remote
-// outcome. Terminate/Reconcile prove all labeled resources absent before success.
-// Create attaches bounded stdout/stderr before Start; returned files are owned
-// by the caller. The final Create argument is the approved host socket directory.
+// Platform retains ownership after uncertain outcomes and proves cleanup before
+// returning success. Create returns five caller-owned transfer descriptors.
 type Platform interface {
 	BindCreateJournal(CreateJournal) error
 	Preflight(context.Context) error
 	ImageManifest(context.Context, string, int64) ([]byte, error)
-	Create(context.Context, LaunchSpec, Lease, []string, string) (*Container, error)
+	Create(context.Context, LaunchSpec, Lease, []string) (*StageProcess, error)
 	Start(context.Context, Ownership) error
-	Wait(context.Context, Ownership) (Exit, error)
+	ConfirmGuestStorage(context.Context, Ownership, gvxcontract.RootInitResult) error
+	Wait(context.Context, Ownership) (ProcessExit, error)
 	Terminate(context.Context, Ownership) error
 	SetEgress(context.Context, Ownership, EgressPolicy) error
 	Reconcile(context.Context, Ownership) error
 }
 
 type ClientConfig struct {
-	SocketPath       string
-	SupervisorUID    uint32
-	MaxMessageBytes  int
-	OperationTimeout time.Duration
+	SocketPath       string        `json:"socket_path"`
+	SupervisorUID    uint32        `json:"supervisor_uid"`
+	MaxMessageBytes  int           `json:"max_message_bytes"`
+	OperationTimeout time.Duration `json:"operation_timeout"`
 }
 
 type SupervisorConfig struct {
-	SocketPath          string        `json:"socket_path"`
-	RuntimeUID          uint32        `json:"runtime_uid"`
-	RuntimeGID          uint32        `json:"runtime_gid"`
-	ManagementDirectory string        `json:"management_directory"`
-	StorageRoot         string        `json:"storage_root"`
-	IPCRoot             string        `json:"ipc_root"`
-	MaxMessageBytes     int           `json:"max_message_bytes"`
-	OperationTimeout    time.Duration `json:"operation_timeout"`
-	ReconcileInterval   time.Duration `json:"reconcile_interval"`
-	MaxConnections      int           `json:"max_connections"`
+	SocketPath            string          `json:"socket_path"`
+	RuntimeUID            uint32          `json:"runtime_uid"`
+	RuntimeGID            uint32          `json:"runtime_gid"`
+	ManagementDirectory   string          `json:"management_directory"`
+	StorageRoot           string          `json:"storage_root"`
+	IPCRoot               string          `json:"ipc_root"`
+	MaxMessageBytes       int             `json:"max_message_bytes"`
+	OperationTimeout      time.Duration   `json:"operation_timeout"`
+	ReconcileInterval     time.Duration   `json:"reconcile_interval"`
+	MaxConnections        int             `json:"max_connections"`
+	RuntimeInstallationID string          `json:"runtime_installation_id"`
+	App                   NumericIdentity `json:"app"`
+	Sandbox               NumericIdentity `json:"sandbox"`
+	Preparer              NumericIdentity `json:"preparer"`
+	Worker                UnitIdentity    `json:"worker"`
+	PublicProfile         NetworkProfile  `json:"public_profile"`
+	StartupTimeout        time.Duration   `json:"startup_timeout"`
 }
 
 type Error struct {
@@ -154,8 +204,8 @@ func (e *Error) Error() string               { return e.Reason + ": " + e.Messag
 func failure(reason string, err error) error { return &Error{Reason: reason, Message: err.Error()} }
 
 var ErrCleanupIncomplete = errors.New("host cleanup incomplete")
-var ErrCreateUnresolved = errors.New("submitted Docker create remains unresolved")
-var ErrCreateAlreadySubmitted = errors.New("Docker create was already submitted")
+var ErrCreateUnresolved = errors.New("submitted create remains unresolved")
+var ErrCreateAlreadySubmitted = errors.New("create was already submitted")
 
 func prerequisite(err error) error { return failure("HOST_PREREQUISITE_FAILED", err) }
 func invalid(s string) error       { return failure("INVALID_CONFIGURATION", fmt.Errorf("%s", s)) }

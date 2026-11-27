@@ -11,7 +11,7 @@ import (
 
 func validateDevelopmentOptions(options StartOptions) error {
 	if !options.DevelopmentMode {
-		if options.DevelopmentSocket != "" || len(options.DevelopmentImages) != 0 {
+		if options.DevelopmentRevision != "" || options.DevelopmentSocket != "" || len(options.DevelopmentImages) != 0 {
 			return errors.New("development options require explicit development mode")
 		}
 		return nil

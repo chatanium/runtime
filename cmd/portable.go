@@ -134,14 +134,20 @@ func digestApproval(cmd *cobra.Command, stdin *bufio.Reader) install.Confirm {
 	}
 }
 
+func printJSON(cmd *cobra.Command, value any) error {
+	return json.NewEncoder(cmd.OutOrStdout()).Encode(value)
+}
 
 func manifestResult(cmd *cobra.Command, m install.Manifest, err error) error {
 	if err != nil {
 		return err
 	}
 	return printJSON(cmd, struct {
+		State      string `json:"state"`
 		PlanDigest string `json:"plan_digest"`
 		ConfigPlan string `json:"config_plan_digest,omitempty"`
+		Revision   string `json:"configuration_revision,omitempty"`
+		Modules    int    `json:"modules"`
 	}{m.State, m.PlanDigest, m.ConfigPlanDigest, m.Revision, len(m.Modules)})
 }
 
@@ -166,6 +172,9 @@ func prepareImageCommand() *cobra.Command {
 			return err
 		}
 		return printJSON(cmd, struct {
+			ID           string `json:"id"`
+			State        string `json:"state"`
+			Digest       string `json:"digest"`
 			SourceDigest string `json:"source_digest"`
 		}{g.ID, "PREPARED", g.Digest, g.SourceDigest})
 	})

@@ -14,14 +14,13 @@ DEV_RUNTIME_USER ?=
 LEGACY_RUNTIME ?=
 export GOOS GOARCH CGO_ENABLED GO_TOOLCHAIN BUF_VERSION PROTOC_GEN_GO_VERSION PROTOC_GEN_GO_GRPC_VERSION
 export BUILD_JOBS MODULE DISABLE_VOICE MODULE_IMAGE MUSIC_IMAGE PLAYER_IMAGE DEV_MODE DEV_SOCKET DEV_RUNTIME_USER LEGACY_RUNTIME
-export CONFIG SUPERVISOR_SOCKET SUPERVISOR_UID SUPERVISOR_MAX_BYTES CHECK_DEADLINE TEST_TIMEOUT OBSERVE RUNTIME
+export CONFIG INSTALLATION_ID TRUSTED_GH CHECK_DEADLINE TEST_TIMEOUT OBSERVE RUNTIME
 export INTEGRATION POLICY_PLAN POLICY_RUNNER EVIDENCE
 
 # Only fixed host/integration outputs are catalogued. Module sources and output
 # paths are discovered and validated by tools/common.sh.
-RUNTIME_TARGETS := .:.:bin/chatanium .:./cmd/flexmodule-supervisor:bin/flexmodule-supervisor
-BUILD_OUTPUTS := bin/chatanium bin/flexmodule-supervisor \
-	bin/flexmodule-integration bin/flexmodule-runtime-return-holder
+BUILD_OUTPUTS := bin/chatanium bin/chatanium-worker bin/gvx-stage bin/gvx-guest-bridge bin/gvx-preparer \
+	bin/flexmodule-integration
 
 # Explicit ownership covers only current v2 generated outputs. The completed
 # cutover removed legacy schemas, generated files and wrappers.
@@ -33,7 +32,6 @@ GENERATED_EXPECTED_FILES := core-v2/core.pb.go core-v2/core_grpc.pb.go \
 GENERATED_FILES := $(GENERATED_EXPECTED_FILES)
 export GENERATED_FILES GENERATED_EXPECTED_FILES BUILD_OUTPUTS
 
-MAKE_COMMAND_TARGETS := tools prepare-sdk build build-runtime build-module build-native build-integration buf buf-check clean run \
 MAKE_COMMAND_TARGETS := tools prepare-sdk build build-runtime build-dev-worker build-module build-native build-integration buf buf-check clean run run-legacy-dev \
 	sqlc serve new_module list-module image-module image-media check-offline check-sandbox check-sandbox-policy smoke-discord smoke-voice
 .PHONY: $(MAKE_COMMAND_TARGETS)
@@ -64,17 +62,18 @@ tools:
 prepare-sdk:
 	@bash -euo pipefail -c 'source tools/common.sh; use_go; run python3 tools/sdk.py --go "$$GO_BINARY"'
 
-# Full native voice runtime by default; static runtime is an explicit opt-out.
 # Cross-build the portable-v2 launcher and its matching host/guest payload.
 build-runtime:
+	@bash tools/build/runtime.sh
+
 # The v1 watcher can replace only the worker of an explicitly selected legacy installation.
+build-dev-worker:
 	@test -n "$$LEGACY_RUNTIME" || { echo 'Use build-runtime for portable-v2; a v1 worker build requires LEGACY_RUNTIME' >&2; exit 1; }
 	@test "$$GOOS/$$GOARCH" = linux/amd64 || { echo 'The v1 worker archive supports Linux amd64 only' >&2; exit 1; }
 	@if [ "$$DISABLE_VOICE" = 1 ]; then \
-		CGO_ENABLED=0 bash tools/build.sh build $(RUNTIME_TARGETS); \
+		GOAMD64=v2 GOENV=off CGO_ENABLED=0 bash tools/build.sh build .:./cmd/chatanium-worker:bin/chatanium-worker; \
 	else \
-		CGO_ENABLED=1 bash tools/build/voice.sh && \
-		CGO_ENABLED=0 bash tools/build.sh build .:./cmd/flexmodule-supervisor:bin/flexmodule-supervisor; \
+		bash tools/build/voice.sh voice; \
 	fi
 
 # Build every direct, non-symlink v2 module, without a per-module target catalog.
@@ -91,10 +90,9 @@ list-module:
 		if [[ -n "$$discovered" ]]; then mapfile -t directories <<< "$$discovered"; fi; \
 		exec python3 tools/list-modules.py "$${directories[@]}"'
 
-# Permanent ordinary/no-voice harness and same-package runtime return holder.
+# Permanent ordinary/no-voice integration caller; no runtime execution.
 build-integration:
 	@CGO_ENABLED=0 bash tools/build.sh build .:./tests/integration:bin/flexmodule-integration
-	@CGO_ENABLED=0 bash tools/build.sh test-binary .:./internal/app:bin/flexmodule-runtime-return-holder
 
 # Native C++/ABI/loader/license gate only; independent of unfinished app Go.
 build-native:
@@ -141,12 +139,6 @@ clean:
 # Start only a portable output built for this Linux host, not an old bin/chatanium.
 PORTABLE_LOCAL := .tools/release/portable/linux-$(HOST_GOARCH)/chatanium-linux-$(HOST_GOARCH)
 run:
-	@python3 tools/dev/watch.py --config "$(CONFIG)" --socket "$(DEV_SOCKET)" \
-		--supervisor-socket "$(SUPERVISOR_SOCKET)" --supervisor-uid "$(SUPERVISOR_UID)" \
-		--supervisor-max-bytes "$(SUPERVISOR_MAX_BYTES)"
-run: build-runtime
-	@./bin/chatanium start --config "$(CONFIG)" --supervisor-socket "$(SUPERVISOR_SOCKET)" \
-		--supervisor-uid "$(SUPERVISOR_UID)" --supervisor-max-bytes "$(SUPERVISOR_MAX_BYTES)"
 	@test "$$DEV_MODE" = 0 || { echo 'Portable-v2 development: build-runtime, then use update after stopping. For v1 hot-swap use run-legacy-dev.' >&2; exit 1; }
 	@test -z "$$CONFIG" || { echo 'Portable-v2 serve uses the reviewed installation configuration, not CONFIG' >&2; exit 1; }
 	@test -x "$(PORTABLE_LOCAL)" || { echo 'Run build-runtime for the local portable-v2 launcher first' >&2; exit 1; }
@@ -163,5 +155,5 @@ sqlc:
 
 serve: run
 
-new_module: build-runtime
-	@./bin/chatanium new
+new_module:
+	@/usr/local/bin/chatanium new

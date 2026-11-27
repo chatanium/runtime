@@ -24,12 +24,20 @@ func cleanupStep(reason FailureReason, err error) error {
 	return classifiedFailure(reason, err)
 }
 
-// Reuse the existing bounded first-failure journal. Cleanup diagnostics fill
-// only an empty reason; an earlier startup/runtime failure remains authoritative.
-func (j *journal) recordCleanupFailure(ctx context.Context, o Ownership, err error) error {
+// Cleanup diagnostics survive independently of the original runtime failure.
+func (j *Store) recordCleanupFailure(ctx context.Context, o Ownership, err error) error {
 	reason := failureReason(err, "")
 	if !validCleanupReason(reason) {
 		return errors.New("cleanup failure lacks a registered step")
 	}
-	return j.RecordFailure(ctx, o, PhaseCleanup, reason)
+	recordErr := j.recordCleanupCode(ctx, o.InstanceID, reason)
+	return errors.Join(recordErr, j.RecordFailure(ctx, o, PhaseCleanup, reason))
+}
+
+func (s *Store) recordCleanupCode(ctx context.Context, id string, reason FailureReason) error {
+	if !validCleanupReason(reason) {
+		return errors.New("unregistered cleanup failure code")
+	}
+	_, err := s.db.ExecContext(ctx, "UPDATE instances SET cleanup_errors=CASE WHEN instr(','||cleanup_errors||',',','||?||',')!=0 THEN cleanup_errors WHEN cleanup_errors='' THEN ? ELSE cleanup_errors||','||? END WHERE id=?", string(reason), string(reason), string(reason), id)
+	return err
 }

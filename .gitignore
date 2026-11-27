@@ -13,6 +13,9 @@ __debug_bin
 /.*
 !/.gitignore
 !/.go-version
+!/.github/
+!/.github/**
+/internal/releasepayload/assets/
 /plugin-impl-example
 __pycache__/
 *.py[cod]

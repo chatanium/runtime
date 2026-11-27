@@ -6,9 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -61,21 +59,15 @@ type discordOperatorConfig struct {
 	Voice json.RawMessage `json:"voice"`
 }
 
-var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-
-func hostSecret(source string) (string, error) {
-	if !strings.HasPrefix(source, "env:") || !envName.MatchString(strings.TrimPrefix(source, "env:")) {
-		return "", errors.New("secret source must be an explicit environment binding")
-	}
-	value, ok := os.LookupEnv(strings.TrimPrefix(source, "env:"))
+func hostSecret(secrets map[string]string, name string) (string, error) {
+	value, ok := secrets[name]
 	if !ok || value == "" || strings.ContainsAny(value, "\r\n\x00") {
 		return "", errors.New("required host secret binding unavailable")
 	}
 	return value, nil
 }
 
-func newDiscordBackend(ctx context.Context, config runtime.Config, backend runtime.BackendConfig, c *discordOperatorConfig, files *upload.UploadStore, onError func(error)) (*discordbackend.Backend, error) {
-	if !isolatedHostDirectory(c.OwnershipDirectory, config.Host.StorageRoot, config.Host.IPCRoot) {
+func newDiscordBackend(ctx context.Context, config runtime.Config, backend runtime.BackendConfig, c *discordOperatorConfig, files *upload.UploadStore, secretsInput map[string]string, onError func(error)) (*discordbackend.Backend, error) {
 	portable := config.Host.Format == runtime.PortableFormat
 	if portable {
 		if c.OwnershipDirectory != filepath.Join(config.Host.ManagementDirectory, "discord") || process.CheckPrivateDir(c.OwnershipDirectory) != nil {
@@ -87,7 +79,7 @@ func newDiscordBackend(ctx context.Context, config runtime.Config, backend runti
 	if len(backend.SecretSources) != len(c.ProvisionedSecrets)+1 {
 		return nil, errors.New("unexpected Discord secret bindings")
 	}
-	token, err := hostSecret(backend.SecretSources["bot_token"])
+	token, err := hostSecret(secretsInput, "discord:bot_token")
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +93,7 @@ func newDiscordBackend(ctx context.Context, config runtime.Config, backend runti
 		if id == "bot_token" {
 			return nil, errors.New("bot credential cannot be provisioned to modules")
 		}
-		value, e := hostSecret(backend.SecretSources[id])
+		value, e := hostSecret(secretsInput, "discord:"+id)
 		if e != nil {
 			return nil, e
 		}

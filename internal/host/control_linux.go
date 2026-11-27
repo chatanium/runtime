@@ -14,46 +14,38 @@ import (
 	"strings"
 	"time"
 
+	"github.com/thirdscam/chatanium/internal/gvxcontract"
 	"golang.org/x/sys/unix"
 )
 
-const controlVersion = 1
+const controlVersion = gvxcontract.RuntimeControlVersion
 
-// The operation set is deliberately closed: there is no exec, SQL, arbitrary
-// path, mount, firewall-expression, or Docker forwarding operation.
+// The operation set never accepts paths, commands or native ownership.
 type controlRequest struct {
-	Version         int          `json:"version"`
-	Operation       string       `json:"operation"`
-	EpochID         string       `json:"epoch_id,omitempty"`
-	InstanceID      string       `json:"instance_id,omitempty"`
-	Spec            *LaunchSpec  `json:"spec,omitempty"`
-	Bootstrap       []string     `json:"bootstrap,omitempty"`
-	SocketDirectory string       `json:"socket_directory,omitempty"`
-	SocketName      string       `json:"socket_name,omitempty"`
-	Egress          EgressPolicy `json:"egress,omitempty"`
-	ImageDigest     string       `json:"image_digest,omitempty"`
+	Version        int                         `json:"version"`
+	Operation      string                      `json:"operation"`
+	EpochID        string                      `json:"epoch_id,omitempty"`
+	InstanceID     string                      `json:"instance_id,omitempty"`
+	Spec           *LaunchSpec                 `json:"spec,omitempty"`
+	Bootstrap      []string                    `json:"bootstrap,omitempty"`
+	RootInitResult *gvxcontract.RootInitResult `json:"root_init_result,omitempty"`
+	Egress         EgressPolicy                `json:"egress,omitempty"`
+	ImageDigest    string                      `json:"image_digest,omitempty"`
 }
 type controlResponse struct {
-	Version     int             `json:"version"`
-	EpochID     string          `json:"epoch_id,omitempty"`
-	Lease       *Lease          `json:"lease,omitempty"`
-	ContainerID string          `json:"container_id,omitempty"`
-	Exit        *Exit           `json:"exit,omitempty"`
-	Error       *Error          `json:"error,omitempty"`
-	Manifest    json.RawMessage `json:"manifest,omitempty"`
+	Version          int                     `json:"version"`
+	EpochID          string                  `json:"epoch_id,omitempty"`
+	Lease            *Lease                  `json:"lease,omitempty"`
+	Unit             *UnitIdentity           `json:"unit,omitempty"`
+	Init             *gvxcontract.BridgeInit `json:"init,omitempty"`
+	EndpointIdentity *EndpointIdentity       `json:"endpoint_identity,omitempty"`
+	Exit             *ProcessExit            `json:"exit,omitempty"`
+	Error            *Error                  `json:"error,omitempty"`
+	Manifest         json.RawMessage         `json:"manifest,omitempty"`
 }
 
 func strictJSON(data []byte, to any) error {
-	d := json.NewDecoder(bytes.NewReader(data))
-	d.DisallowUnknownFields()
-	if err := d.Decode(to); err != nil {
-		return err
-	}
-	var rest any
-	if err := d.Decode(&rest); err != io.EOF {
-		return errors.New("trailing JSON value")
-	}
-	return nil
+	return gvxcontract.DecodeStrict(data, len(data), 32, to)
 }
 func peerIdentity(c *net.UnixConn) (*unix.Ucred, error) {
 	raw, err := c.SyscallConn()
@@ -77,15 +69,22 @@ func closeFiles(files []*os.File) {
 }
 func receivePacket(c *net.UnixConn, max int) ([]byte, []*os.File, error) {
 	data := make([]byte, max)
-	oob := make([]byte, unix.CmsgSpace(4*3))
+	oob := make([]byte, unix.CmsgSpace(4*6))
 	n, on, flags, _, err := c.ReadMsgUnix(data, oob)
 	if err != nil {
 		return nil, nil, err
 	}
 	var files []*os.File
 	messages, err := unix.ParseSocketControlMessage(oob[:on])
-	if err == nil {
+	if len(messages) > 1 {
+		err = errors.New("extra ancillary records")
+	}
+	{
 		for _, m := range messages {
+			if m.Header.Level != unix.SOL_SOCKET || m.Header.Type != unix.SCM_RIGHTS {
+				err = errors.New("unexpected ancillary record")
+				continue
+			}
 			fds, e := unix.ParseUnixRights(&m)
 			if e != nil {
 				err = errors.Join(err, e)
@@ -158,14 +157,14 @@ func manifestPacketLimit(max int) (int, error) {
 // joins containing unrelated enforcement, storage, or transport failures.
 func reconciliationError(err error) error {
 	if unresolvedCleanupOnly(err) {
-		return &Error{Reason: "HOST_RECONCILIATION_PENDING", Message: "only unresolved Docker creates remain; affected installations stay reserved while unrelated installations may run"}
+		return &Error{Reason: "HOST_RECONCILIATION_PENDING", Message: "unresolved submissions remain reserved"}
 	}
 	return err
 }
 
 func controlError(err error) *Error {
 	if errors.Is(err, ErrCreateUnresolved) {
-		return &Error{Reason: "CREATE_OUTCOME_UNRESOLVED", Message: "submitted Docker create may still complete; resources remain reserved without automatic resubmission or release"}
+		return &Error{Reason: "CREATE_OUTCOME_UNRESOLVED", Message: "submitted create remains reserved without automatic resubmission"}
 	}
 	var e *Error
 	if errors.As(err, &e) {
@@ -176,48 +175,120 @@ func controlError(err error) *Error {
 	}
 	return &Error{Reason: "HOST_OPERATION_FAILED", Message: "trusted host operation failed"}
 }
-func validateSpec(s LaunchSpec) error {
-	if s.ModuleID == "" || !safeID(s.InstanceID) || s.UID == 0 || s.GID == 0 {
 func validateSpec(s LaunchSpec) error { return validateLaunchSpec(s, true) }
-		return invalid("initial egress topology must be explicit NONE or PUBLIC_INTERNET")
 func operationContext(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(parent, timeout)
 }
 func validateRequest(r controlRequest) error {
 	if r.Version != controlVersion {
-		return invalid("unsupported supervisor protocol")
+		return invalid("unsupported runtime control version")
 	}
-	switch r.Operation {
-	case "register":
-		if r.EpochID != "" || r.InstanceID != "" || r.Spec != nil {
-			return invalid("invalid register fields")
+	allowed := map[string]map[string]bool{
+		"register":              {},
+		"acquire":               {"epoch_id": true, "spec": true},
+		"image_manifest":        {"epoch_id": true, "image_digest": true},
+		"create":                {"epoch_id": true, "instance_id": true, "bootstrap": true},
+		"start":                 {"epoch_id": true, "instance_id": true},
+		"confirm_guest_storage": {"epoch_id": true, "instance_id": true, "root_init_result": true},
+		"wait":                  {"epoch_id": true, "instance_id": true},
+		"egress":                {"epoch_id": true, "instance_id": true, "egress": true},
+		"terminate":             {"epoch_id": true, "instance_id": true},
+		"release":               {"epoch_id": true, "instance_id": true},
+		"reconcile":             {"epoch_id": true},
+	}
+	fields, ok := allowed[r.Operation]
+	if !ok {
+		return invalid("unknown runtime operation")
+	}
+	raw, err := json.Marshal(r)
+	if err != nil {
+		return err
+	}
+	var present map[string]json.RawMessage
+	if err = json.Unmarshal(raw, &present); err != nil {
+		return err
+	}
+	for k := range present {
+		if k != "version" && k != "operation" && !fields[k] {
+			return invalid("field is not allowed for operation")
 		}
-	case "acquire":
-		if r.Spec == nil {
-			return invalid("missing launch spec")
-		}
-		if err := validateSpec(*r.Spec); err != nil {
-			return err
-		}
-	case "create", "start", "wait", "terminate", "egress", "release", "capture":
-		if !safeID(r.InstanceID) {
-			return invalid("invalid instance ID")
-		}
-	case "reconcile":
-	case "image_manifest":
-		if err := validateImageDigest(r.ImageDigest); err != nil {
-			return err
-		}
-	default:
-		return invalid("unknown supervisor operation")
 	}
 	if r.Operation != "register" && !safeID(r.EpochID) {
 		return invalid("invalid runtime epoch")
 	}
-	if r.Operation == "egress" && r.Egress != EgressNone && r.Egress != EgressPublicInternet {
-		return invalid("invalid egress policy")
+	if fields["instance_id"] && !safeID(r.InstanceID) {
+		return invalid("invalid instance ID")
+	}
+	switch r.Operation {
+	case "acquire":
+		if r.Spec == nil {
+			return invalid("missing launch spec")
+		}
+		return validateSpec(*r.Spec)
+	case "image_manifest":
+		return validateImageDigest(r.ImageDigest)
+	case "confirm_guest_storage":
+		if r.RootInitResult == nil {
+			return invalid("missing root confirmation")
+		}
+	case "egress":
+		if r.Egress != EgressNone && r.Egress != EgressPublicInternet {
+			return invalid("invalid egress")
+		}
 	}
 	return nil
+}
+
+// ValidateCreateResponse is called before any native service submission and
+// again before transfer; the whole envelope includes base64 INIT roots.
+func ValidateCreateResponse(p *StageProcess, max int) error {
+	if p == nil {
+		return errors.New("missing stage response")
+	}
+	raw, err := marshalControl(controlResponse{Version: controlVersion, Unit: &p.Unit, Init: &p.Init, EndpointIdentity: &p.EndpointIdentity})
+	if err != nil {
+		return err
+	}
+	if max <= 0 || len(raw) > max {
+		return errors.New("complete Create response exceeds packet bound")
+	}
+	return nil
+}
+
+func decodeControlRequest(raw []byte, r *controlRequest) error {
+	if err := strictJSON(raw, r); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	allowed := " version operation "
+	switch r.Operation {
+	case "register":
+	case "acquire":
+		allowed += "epoch_id spec "
+	case "image_manifest":
+		allowed += "epoch_id image_digest "
+	case "create":
+		allowed += "epoch_id instance_id bootstrap "
+	case "confirm_guest_storage":
+		allowed += "epoch_id instance_id root_init_result "
+	case "egress":
+		allowed += "epoch_id instance_id egress "
+	case "start", "wait", "terminate", "release":
+		allowed += "epoch_id instance_id "
+	case "reconcile":
+		allowed += "epoch_id "
+	default:
+		return invalid("unknown runtime operation")
+	}
+	for key := range fields {
+		if !strings.Contains(allowed, " "+key+" ") {
+			return invalid("unexpected operation field")
+		}
+	}
+	return validateRequest(*r)
 }
 func pidfdPeer(f *os.File, cred *unix.Ucred) error {
 	// fdinfo is kernel-generated and describes the received *held* descriptor.
@@ -237,4 +308,49 @@ func pidfdPeer(f *os.File, cred *unix.Ucred) error {
 		return errors.New("pidfd does not identify actual Unix peer")
 	}
 	return unix.PidfdSendSignal(int(f.Fd()), 0, nil, 0)
+}
+
+func validateControlResponse(raw []byte, operation string, fdCount int) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	allowed := " version "
+	wantFD := 0
+	if value, failed := fields["error"]; failed {
+		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) || fdCount != 0 {
+			return errors.New("invalid error response envelope")
+		}
+		for key := range fields {
+			if key != "version" && key != "error" {
+				return errors.New("unexpected error response field")
+			}
+		}
+		return nil
+	}
+	switch operation {
+	case "register":
+		allowed += "epoch_id "
+	case "acquire":
+		allowed += "lease "
+	case "image_manifest":
+		allowed += "manifest "
+	case "create":
+		allowed += "unit init endpoint_identity "
+		wantFD = 5
+	case "wait":
+		allowed += "exit "
+	case "start", "confirm_guest_storage", "egress", "terminate", "release", "reconcile":
+	default:
+		return errors.New("unknown response operation")
+	}
+	if fdCount != wantFD {
+		return errors.New("wrong control response descriptor count")
+	}
+	for key := range fields {
+		if !strings.Contains(allowed, " "+key+" ") {
+			return errors.New("unexpected response field")
+		}
+	}
+	return nil
 }

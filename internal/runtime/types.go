@@ -42,14 +42,17 @@ type ProvisionedCredentialBinding struct {
 	Resource  *wire.ResourceSelector `json:"resource"`
 }
 type ModuleSpec struct {
-	ModuleID                         ModuleID
-	ImageDigest                      string
-	Entrypoint, Args                 []string
-	UID, GID                         uint32
-	Config                           *wire.JSONValue
-	Approval                         *wire.Grants
-	CredentialBindings               []ProvisionedCredentialBinding
-	ConfigRevision, ApprovalRevision string
+	ModuleID           ModuleID                       `json:"module_id"`
+	ImageDigest        string                         `json:"image"`
+	Entrypoint         []string                       `json:"entrypoint"`
+	Args               []string                       `json:"args"`
+	UID                uint32                         `json:"uid"`
+	GID                uint32                         `json:"gid"`
+	Config             *wire.JSONValue                `json:"config"`
+	Approval           *wire.Grants                   `json:"approval"`
+	CredentialBindings []ProvisionedCredentialBinding `json:"credential_bindings"`
+	ConfigRevision     string                         `json:"config_revision"`
+	ApprovalRevision   string                         `json:"approval_revision"`
 }
 type InstanceSnapshot struct {
 	Principal        InstancePrincipal
