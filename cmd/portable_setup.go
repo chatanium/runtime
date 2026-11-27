@@ -20,6 +20,9 @@ func initCommand() *cobra.Command {
 			return err
 		}
 		m, err := initializeOrReset(cmd, *budget, first)
+		if errors.Is(err, errSetupDeclined) {
+			return reportSetupDeclined(cmd)
+		}
 		return manifestResult(cmd, m, err)
 	}
 	return cmd
@@ -61,16 +64,23 @@ func serveCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			confirm := approval(cmd)
+			confirm := setupApproval(cmd, approvalInput(cmd), m == nil && first == nil)
 			if m == nil {
 				created, err := install.Init(cmd.Context(), *budget, first, confirm)
+				if errors.Is(err, errSetupDeclined) {
+					return reportSetupDeclined(cmd)
+				}
 				if err != nil {
 					return err
 				}
 				m = &created
 			}
 			if m.State == store.Initializing {
-				if err := install.SetupForServe(cmd.Context(), path, *m, first, confirm); err != nil {
+				err := install.SetupForServe(cmd.Context(), path, *m, first, confirm)
+				if errors.Is(err, errSetupDeclined) {
+					return reportSetupDeclined(cmd)
+				}
+				if err != nil {
 					return err
 				}
 			}
@@ -85,6 +95,7 @@ func setupFlags(cmd *cobra.Command) (*int64, func() (*install.FirstModule, error
 	image := imageFlags(cmd)
 	module := moduleFlags(cmd, false)
 	approvalFlag(cmd)
+	cmd.Flags().Bool("json-approvals", false, "show full JSON plans; use digest prompts for setup approvals")
 	return budget, func() (*install.FirstModule, error) {
 		if !initialModuleRequested(cmd) {
 			return nil, nil

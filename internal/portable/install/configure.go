@@ -149,6 +149,24 @@ type moduleReview struct {
 	Network               store.NetworkProfile `json:"network"`
 }
 
+type configurationApproval struct {
+	Plan   configurationPlan `json:"plan"`
+	Config json.RawMessage   `json:"config"`
+
+	// The already-verified configuration is only used to describe the approval.
+	display *runtime.Config
+}
+
+type moduleApproval struct {
+	Module       string          `json:"module_id"`
+	Source       string          `json:"source_digest"`
+	Image        string          `json:"image_manifest_digest"`
+	Acquisition  json.RawMessage `json:"approved_acquisition"`
+	Declaration  json.RawMessage `json:"image_declaration"`
+	Review       json.RawMessage `json:"review"`
+	ReviewDigest string          `json:"review_digest"`
+}
+
 func (i *Installation) verifyCandidateConfig(p Candidate) (runtime.Config, error) {
 	cfg, err := runtime.DecodeConfig(p.Config)
 	if err != nil {
@@ -275,22 +293,11 @@ func (i *Installation) configure(ctx context.Context, p Candidate, confirm Confi
 	if confirm == nil {
 		return Manifest{}, errors.New("configure requires exact PlanDigest and per-module ReviewDigest approval")
 	}
-	if err := confirm("Approve publishing this stopped configuration revision (PlanDigest)", struct {
-		Plan   any             `json:"plan"`
-		Config json.RawMessage `json:"config"`
-	}{plan, configDoc}, plan.PlanDigest); err != nil {
+	if err := confirm("Approve publishing this stopped configuration revision (PlanDigest)", configurationApproval{Plan: plan, Config: configDoc, display: &cfg}, plan.PlanDigest); err != nil {
 		return Manifest{}, err
 	}
 	for _, module := range m.Modules {
-		value := struct {
-			Module       string          `json:"module_id"`
-			Source       string          `json:"source_digest"`
-			Image        string          `json:"image_manifest_digest"`
-			Acquisition  json.RawMessage `json:"approved_acquisition"`
-			Declaration  json.RawMessage `json:"image_declaration"`
-			Review       json.RawMessage `json:"review"`
-			ReviewDigest string          `json:"review_digest"`
-		}{module.ID, module.Generation.SourceDigest, module.Generation.ManifestDigest, module.AcquisitionJSON, module.Generation.Declaration, module.ReviewJSON, module.Approval.ReviewDigest}
+		value := moduleApproval{module.ID, module.Generation.SourceDigest, module.Generation.ManifestDigest, module.AcquisitionJSON, module.Generation.Declaration, module.ReviewJSON, module.Approval.ReviewDigest}
 		if err := confirm("Approve exact launch, grants, resources and network for "+module.ID+" (ReviewDigest)", value, module.Approval.ReviewDigest); err != nil {
 			return Manifest{}, err
 		}

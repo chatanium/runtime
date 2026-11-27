@@ -450,9 +450,10 @@ amd64/arm64 `whpx`. WHPX must already be enabled. The installer does not enable
 a hypervisor, create accounts, run a service, mount host volumes or alter host
 cgroups, routing or firewall rules.
 
-Run `./chatanium serve` to start. On first use it runs setup, displays the plans
-for approval and starts a foreground worker. With no modules it waits without
-launching a container. Later invocations use the existing reviewed config.
+Run `./chatanium serve` to start. On first use it shows the installation location
+and disk limit. Answer `y` to set up and start the foreground worker. With no
+modules it waits without launching a container. Later runs reuse the existing
+configuration without asking again.
 
 ```sh
 # To configure and start a first module from an offline OCI archive instead:
@@ -464,11 +465,13 @@ launching a container. Later invocations use the existing reviewed config.
 ```
 
 `ARCHIVE_SHA256` is the trusted `sha256:…` of the whole archive. The
-`--approval` file proposes grants; it does not answer the digest prompts.
+`--approval` file proposes grants; review the module and answer `y` when prompted.
+For automation, `serve` and `init` support `--json-approvals` to request full
+plans and digest prompts. Pass `--approve` for each exact digest in prompt order.
 To stage an installation or add another module separately:
 
 1. Run `init` instead of `serve` to set up an installation without starting it.
-   Inspect the location and disk budget and approve the exact `PlanDigest`.
+   Inspect the location and disk budget, then answer `y`.
 2. `prepare-image` accepts a digest-pinned registry source or an explicitly
    selected OCI archive. Parsing and compilation take place in a separate,
    networkless guest. Images must declare
@@ -486,12 +489,12 @@ To stage an installation or add another module separately:
    module data. `purge` lists what it will delete and needs a fresh approval.
    The downloaded executable and shared parent directory are not purge targets.
 
-Running `init` (alias `reset`) on a stopped installation shows the deletion inventory and
-replacement plan. Answer `y` to erase its configuration, cached images, persistent
-module data and backups, then create a fresh installation. The default is **no**:
-an empty answer, `n` or closed stdin keeps the existing installation. `serve`
-never performs a reset. The downloaded launcher and older named installations
-are outside the deletion scope.
+Running `init` (alias `reset`) on a stopped installation shows what will be
+deleted and where it will be recreated. Answer `y` to erase its configuration,
+cached images, persistent module data and backups, then create a fresh
+installation. The default is **no**: an empty answer, `n` or closed stdin keeps
+the existing installation. `serve` never performs a reset. The downloaded
+executable and older named installations are outside the deletion scope.
 
 **Restoring a stopped update backup after copying it to another filesystem:**
 restore only the listed members (including `config.json`) to a fresh private

@@ -357,7 +357,7 @@ async def qualify(candidate, target, image):
                     plan.get('shared_parent_retained_after_purge') == str(root.parent) and
                     plan.get('bundle') == bundle and plan.get('maximum_installation_bytes') == BUDGET)
 
-        init = await trial.call('init', '--budget-bytes', BUDGET, approvals=(approve_init,))
+        init = await trial.call('init', '--json-approvals', '--budget-bytes', BUDGET, approvals=(approve_init,))
         require(init['state'] == 'INITIALIZING' and 'installation_id' not in init,
                 'empty portable root was not initialized or its internal identity was exposed in status')
         root_identity = directory_identity(root)
