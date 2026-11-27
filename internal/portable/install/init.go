@@ -74,13 +74,31 @@ func Doctor(ctx context.Context) (_ map[string]any, resultErr error) {
 		return result, err
 	}
 	result["checked_native_ipc_fallback_parent"] = fallback
-	if i, err := Open(path); err == nil {
-		result["installed_manifest_state"] = i.Manifest.State
-		if err := i.Close(); err != nil {
-			return result, err
-		}
-	} else if !errors.Is(err, fs.ErrNotExist) {
+	i, err := Open(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return result, nil
+	}
+	if err != nil {
 		return result, err
+	}
+	defer func() { resultErr = errors.Join(resultErr, i.Close()) }()
+
+	result["installed_manifest_state"] = i.Manifest.State
+	result["installed_bundle_digest"] = i.Manifest.Bundle.Digest
+	const verification = "installed_bundle_verification"
+	switch i.Manifest.State {
+	case store.Initializing, store.Ready:
+		if i.Manifest.Bundle.Digest != m.Digest {
+			result[verification] = "DIFFERENT_LAUNCHER"
+			return result, nil
+		}
+		if err := i.VerifyBundle(ctx); err != nil {
+			result[verification] = "FAILED"
+			return result, fmt.Errorf("installed bundle verification failed: %w", err)
+		}
+		result[verification] = "VERIFIED"
+	default:
+		result[verification] = "NOT_APPLICABLE"
 	}
 	return result, nil
 }

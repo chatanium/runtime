@@ -1,0 +1,182 @@
+name: Attested portable runtime release
+on:
+  push:
+    tags: ['v*']
+
+concurrency:
+  group: portable-release-${{ github.ref }}
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  candidate:
+    name: Build candidate ${{ matrix.os }}/${{ matrix.arch }}
+    if: github.repository == 'chatanium/runtime' && github.repository_id == '695180706' && github.repository_owner_id == '253326933'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: linux, arch: amd64, suffix: '' }
+          - { os: linux, arch: arm64, suffix: '' }
+          - { os: darwin, arch: arm64, suffix: '' }
+          - { os: windows, arch: amd64, suffix: '.exe' }
+          - { os: windows, arch: arm64, suffix: '.exe' }
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: .go-version
+          cache: false
+      - name: Build target-bound portable-v2 payload and launcher
+        env:
+          TARGET_OS: ${{ matrix.os }}
+          TARGET_ARCH: ${{ matrix.arch }}
+          SUFFIX: ${{ matrix.suffix }}
+        run: |
+          set -euo pipefail
+          export TRUSTED_GH="$(command -v gh)"
+          make build-runtime GOOS="$TARGET_OS" GOARCH="$TARGET_ARCH"
+          target="$TARGET_OS-$TARGET_ARCH"
+          payload=".tools/release/portable/$target"
+          mkdir candidate
+          cp "$payload/chatanium-$target$SUFFIX" candidate/
+          cp "$payload/bundle-manifest.json" "candidate/bundle-manifest-$target.json"
+          cp "$payload/sbom.json" "candidate/sbom-$target.json"
+          export GOOS=linux GOARCH="$TARGET_ARCH" CGO_ENABLED=0 GOENV=off GOWORK=off GOFLAGS=
+          unset GOEXPERIMENT GOFIPS140 GOAMD64 GOARM64
+          if [[ "$GOARCH" == amd64 ]]; then export GOAMD64=v2; else export GOARM64=v8.0; fi
+          exec 8<.tools/deps/discordgo.lock
+          flock -s 8
+          go build -mod=readonly -trimpath -tags= -o "$RUNNER_TEMP/probe" ./tools/build/nativeacceptance/fixture
+          python3 tools/build/nativeacceptance/gate.py pack "$TARGET_ARCH" "$RUNNER_TEMP/probe" candidate/fixture.oci.tar
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: candidate-${{ matrix.os }}-${{ matrix.arch }}-${{ github.run_attempt }}
+          path: candidate/
+          retention-days: 1
+          if-no-files-found: error
+  acceptance:
+    name: Native acceptance ${{ matrix.os }}/${{ matrix.arch }}
+    needs: candidate
+    if: ${{ always() && !cancelled() && github.repository == 'chatanium/runtime' && github.repository_id == '695180706' && github.repository_owner_id == '253326933' }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: linux, arch: amd64, runner: ubuntu-24.04, suffix: '' }
+          - { os: linux, arch: arm64, runner: ubuntu-24.04-arm, suffix: '' }
+          - { os: darwin, arch: arm64, runner: macos-26, suffix: '' }
+          - { os: windows, arch: amd64, runner: windows-2025, suffix: '.exe' }
+          - { os: windows, arch: arm64, runner: windows-11-arm, suffix: '.exe' }
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: candidate-${{ matrix.os }}-${{ matrix.arch }}-${{ github.run_attempt }}
+          path: candidate/
+      - name: Qualify the original candidate as an ordinary user on its native target
+        shell: pwsh
+        env:
+          TARGET: ${{ matrix.os }}/${{ matrix.arch }}
+          TAG: ${{ matrix.os }}-${{ matrix.arch }}
+        run: |
+          if ($IsWindows) {
+            python tools/build/nativeacceptance/gate.py qualify "$env:TARGET" candidate candidate/fixture.oci.tar
+          } else {
+            chmod u+x "candidate/chatanium-${env:TAG}"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            python3 tools/build/nativeacceptance/gate.py qualify "$env:TARGET" candidate candidate/fixture.oci.tar
+          }
+          exit $LASTEXITCODE
+      - name: Attest only the natively qualified candidate and acceptance receipt
+        id: attest
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
+        with:
+          subject-path: |
+            candidate/chatanium-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.suffix }}
+            candidate/bundle-manifest-${{ matrix.os }}-${{ matrix.arch }}.json
+            candidate/sbom-${{ matrix.os }}-${{ matrix.arch }}.json
+            candidate/native-acceptance-${{ matrix.os }}-${{ matrix.arch }}.json
+      - name: Retain signed acceptance evidence
+        shell: pwsh
+        env:
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+          TAG: ${{ matrix.os }}-${{ matrix.arch }}
+        run: Copy-Item -LiteralPath "$env:BUNDLE" -Destination "candidate/native-acceptance-${env:TAG}.sigstore.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: qualified-${{ matrix.os }}-${{ matrix.arch }}-${{ github.run_attempt }}
+          path: |
+            candidate/chatanium-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.suffix }}
+            candidate/bundle-manifest-${{ matrix.os }}-${{ matrix.arch }}.json
+            candidate/sbom-${{ matrix.os }}-${{ matrix.arch }}.json
+            candidate/native-acceptance-${{ matrix.os }}-${{ matrix.arch }}.json
+            candidate/native-acceptance-${{ matrix.os }}-${{ matrix.arch }}.sigstore.json
+          if-no-files-found: error
+  release:
+    if: ${{ always() && !cancelled() && github.repository == 'chatanium/runtime' && github.repository_id == '695180706' && github.repository_owner_id == '253326933' }}
+    needs: acceptance
+    runs-on: ubuntu-24.04
+    permissions:
+      attestations: read
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: qualified-*-${{ github.run_attempt }}
+          path: qualified
+      - name: Verify native acceptance and select only attested target assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir release
+          accepted=0
+          for target in linux-amd64 linux-arm64 darwin-arm64 windows-amd64 windows-arm64; do
+            dir="qualified/qualified-$target-$GITHUB_RUN_ATTEMPT"
+            if [[ ! -d "$dir" ]]; then
+              echo "::warning::Withholding $target: no successful native acceptance"
+              continue
+            fi
+            if ! python3 tools/build/nativeacceptance/gate.py verify "${target/-//}" "$dir" "$(command -v gh)"; then
+              echo "::warning::Withholding $target: exact native acceptance attestation did not verify"
+              continue
+            fi
+            launcher="chatanium-$target"
+            if [[ "$target" == windows-* ]]; then launcher+=.exe; fi
+            cp -- "$dir/$launcher" "$dir/bundle-manifest-$target.json" "$dir/sbom-$target.json" \
+              "$dir/native-acceptance-$target.json" "$dir/native-acceptance-$target.sigstore.json" release/
+            accepted=$((accepted + 1))
+          done
+          if (( accepted == 0 )); then
+            echo 'No target completed verified ordinary-user native acceptance; nothing to release' >&2
+            exit 1
+          fi
+          cd release
+          sha256sum -- * > SHA256SUMS
+      - name: Create a new release containing only verified assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          flags=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes "${flags[@]}" -- release/*

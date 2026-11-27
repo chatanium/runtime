@@ -28,7 +28,7 @@ VOLUME = 16 << 20
 BUDGET = 12 << 30
 MODULE = 'release-probe'
 CHECKS = [
-    'read-only doctor and bounded installation plan',
+    'read-only doctor verified installed code, rejected an extra file without removing it, and skipped uninstalled code',
     'fixed singleton path and bounded installation plan on an isolated data home or disposable account',
     'same-ISA offline OCI preparation and approved configuration',
     'native nonroot init, serve and observed clean stop in NONE and PUBLIC_INTERNET',
@@ -233,7 +233,7 @@ class Trial:
         return await asyncio.create_subprocess_exec(str(self.launcher), command, *map(str, args),
             env=self.env, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
 
-    async def call(self, command, *args, approvals=()):
+    async def call(self, command, *args, approvals=(), expected_error=None):
         proc = await self.spawn(command, *args)
         stdout = asyncio.create_task(proc.stdout.read())
         stderr = bytearray()
@@ -256,7 +256,9 @@ class Trial:
                         seen += 1
                         del pending[:match.end()]
                 result = await proc.wait()
-                require(result == 0, f'{command} failed ({result}): {stderr[-3000:].decode(errors="replace")}')
+                matched = result == 0 if expected_error is None else result == 1 and expected_error in stderr.splitlines()
+                require(matched, f'{command} returned unexpected status or diagnostics ({result}): '
+                        f'{stderr[-3000:].decode(errors="replace")}')
                 require(seen == len(approvals), command + ': missing explicit approval')
                 return json.loads(await stdout)
         finally:
@@ -342,9 +344,11 @@ async def qualify(candidate, target, image):
         trial.check_slot()
         own = lambda plan: plan.get('format') == 'portable-v2' and plan.get('installation_directory') == str(root)
         doc = await trial.call('doctor')
+        trial.check_slot()
         require(doc['format'] == 'portable-v2' and Path(doc['installation_directory']) == root and not root.exists() and
                 doc['bundle_target'] == bundle['target'] and doc['pinned_engine'] == bundle['engine'] and
                 doc['verified_embedded_manifest'] == bundle['digest'], 'doctor crossed a user path or disagreed with the exact release manifest')
+        require('installed_bundle_verification' not in doc, 'doctor crossed a user path or disagreed with the exact release manifest')
 
         def approve_init(plan):
             trial.check_slot()
@@ -365,6 +369,23 @@ async def qualify(candidate, target, image):
         require(re.fullmatch(r'[0-9a-f]{32}', installation_id) and manifest['plan_digest'] == init['plan_digest'] and
                 manifest['config']['host']['runtime_installation_id'] == installation_id,
                 'initialized manifest and host config did not share the new installation identity')
+
+        doc = await trial.call('doctor')
+        require(doc['installed_manifest_state'] == 'INITIALIZING' and doc['installed_bundle_digest'] == bundle['digest'] and
+                doc['installed_bundle_verification'] == 'VERIFIED', 'doctor did not verify the clean initializing installation')
+        code = root / json.loads((root / 'installation.json').read_bytes())['code_directory']
+        require(code.parent == root and code.is_dir() and code.resolve(strict=True) == code,
+                'code generation is outside the fixture installation')
+        extra = code / 'native-acceptance-extra'
+        extra.touch(exist_ok=False)
+        try:
+            diagnostic = f'Error: installed bundle verification failed: unlisted or unsafe portable file: {extra.name}'.encode()
+            doc = await trial.call('doctor', expected_error=diagnostic)
+            require(doc['installed_bundle_verification'] == 'FAILED' and extra.is_file(),
+                    'doctor did not report failed verification or did not leave the extra file in place')
+        finally:
+            extra.unlink(missing_ok=True)
+
         prepared = await trial.call('prepare-image', '--source-kind', 'oci-archive', '--source', image, '--digest', source,
             approvals=(lambda plan: own(plan) and plan.get('archive_path') == str(image) and
                 plan.get('bundle_digest') == bundle['digest'] and
@@ -397,9 +418,6 @@ async def qualify(candidate, target, image):
             live = await trial.run(root_identity)
             require(live and live != instance, 'first and second native launches did not have distinct instance identities')
             instance = live
-        volumes = list((root / 'volumes').glob('*.ext4'))
-        require(len(volumes) == 1 and volumes[0].stat().st_size == VOLUME, 'persistent volume did not retain the approved bounded image')
-        trial.check_slot(root_identity)
 
         def approve_purge(plan):
             trial.check_slot(root_identity)
@@ -409,11 +427,17 @@ async def qualify(candidate, target, image):
                     plan.get('installation_manifest_digest') == manifest_digest and
                     ledger_identity['ID'] == installation_id and ledger_identity['BundleDigest'] == bundle['digest'])
 
+        volumes = list((root / 'volumes').glob('*.ext4'))
+        require(len(volumes) == 1 and volumes[0].stat().st_size == VOLUME, 'persistent volume did not retain the approved bounded image')
+        trial.check_slot(root_identity)
         code = root / json.loads((root / 'installation.json').read_bytes())['code_directory']
         require(code.parent == root and code.is_dir(), 'code generation is outside the fixture installation')
         state = await trial.call('uninstall')
         require('installation_id' not in state, 'uninstall status exposed the internal installation identity')
         require(state['state'] == 'UNINSTALLED' and not code.exists() and volumes[0].is_file(), 'uninstall did not preserve the data-only state')
+        doc = await trial.call('doctor')
+        require(doc['installed_manifest_state'] == 'UNINSTALLED' and doc['installed_bundle_verification'] == 'NOT_APPLICABLE',
+                'doctor did not skip verification for the uninstalled installation')
 
         trial.check_slot(root_identity)
         manifest_digest = file_hash(manifest_path)
