@@ -28,7 +28,9 @@ import (
 
 // Run holds the installation lock through native child observation, lease
 // settlement and control-channel shutdown. duration starts at worker READY.
-func Run(ctx context.Context, dir, expectedID string, duration time.Duration, output, diagnostics io.Writer) (result error) {
+// observe, if non-nil, receives lifecycle events synchronously; its errors
+// are returned after cleanup.
+func Run(ctx context.Context, dir, expectedID string, duration time.Duration, observe func(session.WorkerEvent) error, diagnostics io.Writer) (result error) {
 	if duration < 0 {
 		return errors.New("negative foreground duration")
 	}
@@ -206,7 +208,7 @@ func Run(ctx context.Context, dir, expectedID string, duration time.Duration, ou
 		init: session.WorkerInit{Config: i.Manifest.Config, Credentials: creds, Endpoint: endpoint, Secrets: secrets},
 		stop: stop.request, serveDone: serveDone, startup: time.Duration(cfg.Defaults.StartupDeadline),
 		drain: time.Duration(cfg.Defaults.DrainDeadline) + cleanupTime, cleanup: cleanupTime,
-		duration: duration, moduleCount: len(modules), output: output, fence: func(c context.Context) error { return db.RequestStop(c, epoch.ID) },
+		duration: duration, moduleCount: len(modules), observe: observe, fence: func(c context.Context) error { return db.RequestStop(c, epoch.ID) },
 	})
 	return result
 }

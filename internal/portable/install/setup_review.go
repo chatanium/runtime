@@ -24,8 +24,8 @@ type SetupApprovalSummary struct {
 	EmptyConfiguration bool
 }
 
-// DescribeSetupApproval presents a value passed to Confirm during setup. It
-// does not grant approval or change the exact plan and digest used by Confirm.
+// DescribeSetupApproval presents a value passed to Confirm during setup or
+// maintenance. It does not grant approval or change the exact plan and digest.
 func DescribeSetupApproval(value any) (SetupApprovalSummary, error) {
 	switch plan := value.(type) {
 	case initPlan:
@@ -50,6 +50,10 @@ func DescribeSetupApproval(value any) (SetupApprovalSummary, error) {
 		return describeSetupConfiguration(plan)
 	case moduleApproval:
 		return describeSetupModule(plan)
+	case updatePlan:
+		return describeSetupUpdate(plan)
+	case purgeScope:
+		return describeSetupPurge(plan)
 	case ResetPlan:
 		location, err := setupPath(plan.Purge.Root)
 		if err != nil {
@@ -67,6 +71,45 @@ func DescribeSetupApproval(value any) (SetupApprovalSummary, error) {
 	default:
 		return SetupApprovalSummary{}, fmt.Errorf("unsupported setup approval type %T", value)
 	}
+}
+
+func describeSetupUpdate(plan updatePlan) (SetupApprovalSummary, error) {
+	location, err := setupPath(plan.Path)
+	if err != nil {
+		return SetupApprovalSummary{}, err
+	}
+	backup, err := setupPath(plan.BackupPath)
+	if err != nil {
+		return SetupApprovalSummary{}, err
+	}
+	target := plan.NextBundle.Target
+	return SetupApprovalSummary{Heading: "Update Chatanium runtime", Lines: []string{
+		"Installation: " + location,
+		fmt.Sprintf("Target: %s (%s); GVX engine %s.", strconv.QuoteToASCII(target.OS+"/"+target.Arch), strconv.QuoteToASCII(target.Backend), strconv.QuoteToASCII(plan.NextBundle.Engine.Release)),
+		fmt.Sprintf("Backup repository: %s (up to %s for this backup).", backup, setupBytes(plan.BackupBytes)),
+		"The backup preserves the previous configuration and ledger, existing data for persistent volumes, referenced cached images, and any Discord ownership database.",
+		fmt.Sprintf("Backup scope: persistent volumes %d; referenced image generations %d.", len(plan.Volumes), len(plan.Images)),
+		"Persistent volumes, cached images, and existing backups stay in place.",
+		"The update replaces installed code and clears the active configuration and module approvals. Review and configure modules again before launching them.",
+	}}, nil
+}
+
+func describeSetupPurge(plan purgeScope) (SetupApprovalSummary, error) {
+	location, err := setupPath(plan.Root)
+	if err != nil {
+		return SetupApprovalSummary{}, err
+	}
+	parent, err := setupPath(plan.ParentRetained)
+	if err != nil {
+		return SetupApprovalSummary{}, err
+	}
+	return SetupApprovalSummary{Heading: "Purge Chatanium runtime", Lines: []string{
+		"Installation: " + location,
+		"Warning: This permanently deletes the installation.",
+		"Removes installed code, configuration and the ledger, plus any managed volumes, cached images, backups, uploads, Discord ownership data and other managed runtime data.",
+		fmt.Sprintf("Managed inventory: volumes %d; cached image generations %d; backups %d.", len(plan.Ledger.Volumes), len(plan.Ledger.Images), len(plan.Ledger.Backups)),
+		"Shared parent retained: " + parent + ". The downloaded executable is not removed.",
+	}}, nil
 }
 
 func describeSetupInit(plan initPlan, replacement bool) (SetupApprovalSummary, error) {

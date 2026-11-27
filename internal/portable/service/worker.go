@@ -2,10 +2,8 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"time"
 
@@ -20,7 +18,7 @@ type workerLaunch struct {
 	stop, serveDone                   <-chan struct{}
 	startup, drain, cleanup, duration time.Duration
 	moduleCount                       int
-	output                            io.Writer
+	observe                           func(session.WorkerEvent) error
 	fence                             func(context.Context) error
 }
 
@@ -76,10 +74,6 @@ func runWorker(ctx context.Context, w workerLaunch) (result error, observed bool
 	clear(w.init.Secrets)
 	var timer *time.Timer
 	var stopAfter <-chan time.Time
-	var encoder *json.Encoder
-	if w.output != nil {
-		encoder = json.NewEncoder(w.output)
-	}
 	defer func() {
 		if timer != nil {
 			timer.Stop()
@@ -111,8 +105,8 @@ func runWorker(ctx context.Context, w workerLaunch) (result error, observed bool
 			}
 			if msg.event.Type == "FAILED" {
 				result = fmt.Errorf("worker failed: %s", msg.event.Reason)
-				if encoder != nil {
-					result = errors.Join(result, encoder.Encode(msg.event))
+				if w.observe != nil {
+					result = errors.Join(result, w.observe(msg.event))
 				}
 				goto draining
 			}
@@ -133,8 +127,8 @@ func runWorker(ctx context.Context, w workerLaunch) (result error, observed bool
 					stopAfter = timer.C
 				}
 			}
-			if encoder != nil {
-				result = encoder.Encode(msg.event)
+			if w.observe != nil {
+				result = w.observe(msg.event)
 			}
 		}
 	}
@@ -166,8 +160,8 @@ draining:
 				case "DRAINED":
 					if len(msg.event.Modules) != w.moduleCount || !msg.event.Clean {
 						drainErr = errors.New("worker reported incomplete drain")
-					} else if encoder != nil {
-						drainErr = encoder.Encode(msg.event)
+					} else if w.observe != nil {
+						drainErr = w.observe(msg.event)
 					}
 					if drainErr == nil {
 						select {

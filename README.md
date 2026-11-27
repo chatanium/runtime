@@ -460,6 +460,13 @@ and disk limit. Answer `y` to set up and start the foreground worker. With no
 modules it waits without launching a container. Later runs reuse the existing
 configuration without asking again.
 
+Interactive status lines use `[ RT ]` and a color-coded label. `serve` shows
+when the runtime is ready, any module state changes, and when shutdown finishes.
+Use `NO_COLOR=1` for the same layout without color. Redirected stdout and CI
+keep the existing JSON (newline-delimited events for `serve`). Use `--json`
+to request that format in a terminal. `generate-config` and `inspect-config`
+always emit JSON documents on stdout.
+
 ```sh
 # To configure and start a first module from an offline OCI archive instead:
 ./chatanium serve \
@@ -471,8 +478,11 @@ configuration without asking again.
 
 `ARCHIVE_SHA256` is the trusted `sha256:…` of the whole archive. The
 `--approval` file proposes grants; review the module and answer `y` when prompted.
-For automation, `serve` and `init` support `--json-approvals` to request full
-plans and digest prompts. Pass `--approve` for each exact digest in prompt order.
+Use `--json-approvals` for complete approval plans. For `serve` and `init`,
+this switches setup prompts to exact digests; `reset` always asks `y/N` before
+deletion. Standalone `prepare-image`, `configure`, `update` and `purge` always
+require exact digests, even when showing a terminal summary. Use repeatable
+`--approve` values in prompt order to supply those digests from a script.
 To stage an installation or add another module separately:
 
 1. Run `init` instead of `serve` to set up an installation without starting it.

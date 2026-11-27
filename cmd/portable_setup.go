@@ -1,12 +1,14 @@
 package cmd
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
 	"github.com/thirdscam/chatanium/internal/portable/install"
 	"github.com/thirdscam/chatanium/internal/portable/service"
+	"github.com/thirdscam/chatanium/internal/portable/session"
 	"github.com/thirdscam/chatanium/internal/portable/store"
 )
 
@@ -20,6 +22,12 @@ func initCommand() *cobra.Command {
 			return err
 		}
 		m, err := initializeOrReset(cmd, *budget, first)
+		if errors.Is(err, errResetDeclined) {
+			if _, human := operatorOutput(cmd); human {
+				return nil
+			}
+			err = nil
+		}
 		if errors.Is(err, errSetupDeclined) {
 			return reportSetupDeclined(cmd)
 		}
@@ -47,7 +55,7 @@ func serveCommand() *cobra.Command {
 		}
 		if m != nil && m.State == store.Ready {
 			if initialModuleRequested(cmd) || cmd.Flags().Changed("budget-bytes") || cmd.Flags().Changed("approve") {
-				if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "Using the existing configuration; first-use options were not applied."); err != nil {
+				if err := runtimeView(cmd.ErrOrStderr()).status("INFO", "Using the existing configuration; first-use options were not applied."); err != nil {
 					return err
 				}
 			}
@@ -85,7 +93,24 @@ func serveCommand() *cobra.Command {
 				}
 			}
 		}
-		return service.Run(cmd.Context(), path, m.ID, *duration, cmd.OutOrStdout(), cmd.ErrOrStderr())
+		view, human := operatorOutput(cmd)
+		var observe func(session.WorkerEvent) error
+		if human {
+			if err := view.status("START", "Starting Chatanium"); err != nil {
+				return err
+			}
+			observe = terminalWorkerEvents(view)
+		} else {
+			encoder := json.NewEncoder(cmd.OutOrStdout())
+			observe = func(event session.WorkerEvent) error { return encoder.Encode(event) }
+		}
+		if err := service.Run(cmd.Context(), path, m.ID, *duration, observe, cmd.ErrOrStderr()); err != nil {
+			return err
+		}
+		if human {
+			return view.status("STOPPED", "Chatanium stopped.")
+		}
+		return nil
 	}
 	return cmd
 }
@@ -95,7 +120,7 @@ func setupFlags(cmd *cobra.Command) (*int64, func() (*install.FirstModule, error
 	image := imageFlags(cmd)
 	module := moduleFlags(cmd, false)
 	approvalFlag(cmd)
-	cmd.Flags().Bool("json-approvals", false, "show full JSON plans; use digest prompts for setup approvals")
+	jsonOutputFlag(cmd)
 	return budget, func() (*install.FirstModule, error) {
 		if !initialModuleRequested(cmd) {
 			return nil, nil

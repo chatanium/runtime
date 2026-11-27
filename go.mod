@@ -17,6 +17,8 @@ require (
 	github.com/hashicorp/go-plugin v1.8.0
 	github.com/hashicorp/yamux v0.1.2
 	github.com/klauspost/compress v1.18.1
+	github.com/mattn/go-colorable v0.1.16
+	github.com/mattn/go-isatty v0.0.24
 	github.com/spf13/cobra v1.10.1
 	golang.org/x/net v0.62.0
 	golang.org/x/sys v0.49.0
@@ -44,8 +46,6 @@ require (
 	github.com/jhump/protoreflect v1.19.0 // indirect
 	github.com/jhump/protoreflect/v2 v2.0.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
-	github.com/mattn/go-colorable v0.1.16 // indirect
-	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect
 	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect

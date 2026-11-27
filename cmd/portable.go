@@ -19,13 +19,13 @@ func init() {
 	doctor := &cobra.Command{Use: "doctor", Short: "Read-only inspection of portable runtime prerequisites", Args: cobra.NoArgs}
 	doctor.RunE = func(cmd *cobra.Command, _ []string) error {
 		result, err := install.Doctor(cmd.Context())
-		return errors.Join(err, printJSON(cmd, result))
+		return doctorResult(cmd, result, err)
 	}
 	stop := installedCommand("stop", "Record STOPPED and verify portable runtime shutdown", func(cmd *cobra.Command, path string) error {
 		if err := service.Stop(cmd.Context(), path); err != nil {
 			return err
 		}
-		return printJSON(cmd, map[string]string{"state": "STOPPED"})
+		return operatorResult(cmd, "STOPPED", "Chatanium stopped.", map[string]string{"state": "STOPPED"})
 	})
 	configure := installedCommand("configure", "Review each prepared module and publish a stopped configuration", func(cmd *cobra.Command, path string) error {
 		candidatePath, _ := cmd.Flags().GetString("config")
@@ -63,10 +63,15 @@ func init() {
 		if err := install.Purge(cmd.Context(), path, approval(cmd)); err != nil {
 			return err
 		}
-		return printJSON(cmd, map[string]string{"state": "PURGED"})
+		return operatorResult(cmd, "OK", "Installation and managed data deleted.", map[string]string{"state": "PURGED"})
 	})
 	approvalFlag(purge)
-	rootCmd.AddCommand(doctor, initCommand(), prepareImageCommand(), generateConfigCommand(), configure, inspect, serveCommand(), stop, update, uninstall, purge)
+	for _, command := range []*cobra.Command{doctor, stop, configure, update, uninstall, purge} {
+		jsonOutputFlag(command)
+	}
+	addOperatorCommands("runtime", serveCommand(), stop, initCommand(), doctor)
+	addOperatorCommands("modules", prepareImageCommand(), generateConfigCommand(), configure, inspect)
+	addOperatorCommands("maintenance", update, uninstall, purge)
 	for _, name := range []string{"service", "_owner", "prepare-dev-worker", "discard-dev-revision", "inspect-dev-lock"} {
 		rootCmd.AddCommand(&cobra.Command{Use: name, Hidden: true, DisableFlagParsing: true, RunE: func(_ *cobra.Command, _ []string) error { return install.ErrLegacy }})
 	}
@@ -96,11 +101,31 @@ func legacyFlagError(_ *cobra.Command, err error) error {
 }
 
 func approvalFlag(cmd *cobra.Command) {
-	cmd.Flags().StringArray("approve", nil, "exact displayed digest, repeated in approval order; otherwise read approval from stdin")
+	cmd.Flags().StringArray("approve", nil, "approve exact digests in order (repeatable)")
+	cmd.Flags().Bool("json-approvals", false, "show complete approval plans as JSON")
 }
 
 func approval(cmd *cobra.Command) install.Confirm {
-	return digestApproval(cmd, approvalInput(cmd))
+	input := approvalInput(cmd)
+	view := runtimeView(cmd.ErrOrStderr())
+	_, human := operatorOutput(cmd)
+	jsonMode, _ := cmd.Flags().GetBool("json-approvals")
+	if !human || !view.terminal || jsonMode || cmd.Flags().Changed("approve") {
+		return digestApproval(cmd, input)
+	}
+	return func(_ string, value any, digest string) error {
+		summary, err := install.DescribeSetupApproval(value)
+		if err != nil {
+			return err
+		}
+		if err := showApproval(view, summary); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(view.out, "      Type %s to approve: ", view.paint(digest, "1;33")); err != nil {
+			return err
+		}
+		return readDigestApproval(view.out, input, digest)
+	}
 }
 
 func approvalInput(cmd *cobra.Command) *bufio.Reader {
@@ -116,22 +141,29 @@ func digestApproval(cmd *cobra.Command, stdin *bufio.Reader) install.Confirm {
 		if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "%s\nType %s to approve: ", description, digest); err != nil {
 			return err
 		}
-		var received string
-		if len(approved) > 0 {
-			received, approved = approved[0], approved[1:]
-		} else {
-			var err error
-			received, err = stdin.ReadString('\n')
-			if err != nil && !(errors.Is(err, io.EOF) && received != "") {
-				return errors.New("explicit approval required")
-			}
+		if len(approved) == 0 {
+			return readDigestApproval(cmd.ErrOrStderr(), stdin, digest)
 		}
-		if strings.TrimSpace(received) != digest {
-			return errors.New("APPROVAL_MISMATCH: displayed digest was not approved")
-		}
-		_, err := fmt.Fprintln(cmd.ErrOrStderr())
-		return err
+		received := approved[0]
+		approved = approved[1:]
+		return finishDigestApproval(cmd.ErrOrStderr(), received, digest)
 	}
+}
+
+func readDigestApproval(out io.Writer, input *bufio.Reader, digest string) error {
+	received, err := input.ReadString('\n')
+	if err != nil && !(errors.Is(err, io.EOF) && received != "") {
+		return errors.New("explicit approval required")
+	}
+	return finishDigestApproval(out, received, digest)
+}
+
+func finishDigestApproval(out io.Writer, received, digest string) error {
+	if strings.TrimSpace(received) != digest {
+		return errors.New("APPROVAL_MISMATCH: displayed digest was not approved")
+	}
+	_, err := fmt.Fprintln(out)
+	return err
 }
 
 func printJSON(cmd *cobra.Command, value any) error {
@@ -141,6 +173,9 @@ func printJSON(cmd *cobra.Command, value any) error {
 func manifestResult(cmd *cobra.Command, m install.Manifest, err error) error {
 	if err != nil {
 		return err
+	}
+	if view, human := operatorOutput(cmd); human {
+		return manifestStatus(view, cmd, m)
 	}
 	return printJSON(cmd, struct {
 		State      string `json:"state"`
@@ -171,6 +206,12 @@ func prepareImageCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		if view, human := operatorOutput(cmd); human {
+			if err := view.status("OK", "Image prepared for module review."); err != nil {
+				return err
+			}
+			return view.detail("Image ID", g.ID)
+		}
 		return printJSON(cmd, struct {
 			ID           string `json:"id"`
 			State        string `json:"state"`
@@ -180,6 +221,7 @@ func prepareImageCommand() *cobra.Command {
 	})
 	read = imageFlags(command)
 	approvalFlag(command)
+	jsonOutputFlag(command)
 	return command
 }
 

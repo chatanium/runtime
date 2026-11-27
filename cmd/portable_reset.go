@@ -43,7 +43,7 @@ func initializeOrReset(cmd *cobra.Command, budget int64, first *install.FirstMod
 			if describeErr != nil {
 				return describeErr
 			}
-			yes, err = promptSetupApproval(out, input, summary, "Reset this installation?")
+			yes, err = promptSetupApproval(runtimeView(out), input, summary, "Reset this installation?")
 		}
 		if err != nil {
 			return err
@@ -55,7 +55,9 @@ func initializeOrReset(cmd *cobra.Command, budget int64, first *install.FirstMod
 	}
 	m, err := install.Reinitialize(cmd.Context(), path, old.ID, budget, first, setup, confirmReset)
 	if errors.Is(err, errResetDeclined) {
-		_, err := fmt.Fprintln(cmd.ErrOrStderr(), "Installation unchanged.")
+		if writeErr := runtimeView(cmd.ErrOrStderr()).status("CANCEL", "Installation unchanged."); writeErr != nil {
+			return *old, writeErr
+		}
 		return *old, err
 	}
 	return m, err

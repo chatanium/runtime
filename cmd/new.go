@@ -40,11 +40,14 @@ var newCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		cmd.Printf("Created v2 module at %s\n", path)
-		cmd.Println("Prepare the SDK checkout with make prepare-sdk, then run go mod tidy in the new module.")
-		cmd.Println("Build its independent executable with CGO_ENABLED=0 go build -trimpath -o module .")
-		cmd.Println("Follow the generated README.md to build its OCI image and approve its immutable digest and scoped capabilities.")
-		return nil
+		view := runtimeView(cmd.OutOrStdout())
+		if err := view.status("OK", "Created a v2 module"); err != nil {
+			return err
+		}
+		if err := view.detail("Location", path); err != nil {
+			return err
+		}
+		return view.detail("Next", "Follow the generated README.md to build and package the module.")
 	},
 }
 
@@ -53,5 +56,5 @@ func init() {
 	newCmd.Flags().String("output", "", "New module directory (default modules/<name>)")
 	newCmd.Flags().String("sdk-path", ".", "Local Chatanium v2 SDK checkout (default current directory)")
 	newCmd.Flags().String("module-path", "", "Go module import path (default example.com/<name>)")
-	rootCmd.AddCommand(newCmd)
+	addOperatorCommands("modules", newCmd)
 }
