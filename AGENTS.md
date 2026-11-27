@@ -14,6 +14,7 @@ Read [CONCEPT.md](CONCEPT.md) before designing or implementing changes. Plan bef
 | `proto/`, `shared/` | Public v2 protocol and module SDK. Provider-specific Discord types are separate from `core-v2`. |
 | `examples/`, `modules/`, `internal/scaffold/` | Example and bundled modules, plus scaffolding for independent modules. |
 | `tests/integration/`, `tools/build/nativeacceptance/` | Integration fixtures and native release checks. |
+| `docs/proposal/` | Design proposals, named by their `CHAT-N` IDs. |
 
 ## Runtime Rules
 
@@ -24,7 +25,7 @@ Read [CONCEPT.md](CONCEPT.md) before designing or implementing changes. Plan bef
 
 ## Proposal Generation
 
-- Use unique, sequential IDs `CHATANIUM-N`, starting at `0`. The existing root-level proposals `chatanium-0-self-contained-runtime.md` and `chatanium-1-portable-module-runtime.md` reserve `CHATANIUM-0` and `CHATANIUM-1`. Save new proposals as `docs/proposal/CHATANIUM-N.md`; do not rename the historical files as part of new proposal work.
+- Use unique, sequential IDs `CHAT-N`, starting at `0`. Save proposals as `docs/proposal/CHAT-N.md` using the ID alone as the filename.
 - Write proposals in English, with `Seonguk Moon` as author. Mark exactly one status in bold: `Draft`, `In Review`, `Approved` or `Implemented`. Update it when the stage changes.
 - For decisions that require user input, present the relevant section and wait for a response; do not use a questioning tool. Have one independent agent check the completed proposal for logical inconsistencies. Correct minor inconsistencies without changing the agreed design; obtain approval for significant changes.
 
@@ -39,5 +40,5 @@ Read [CONCEPT.md](CONCEPT.md) before designing or implementing changes. Plan bef
 ```text
 feat(runtime): activate the worker after approved setup
 
-Refs: CHATANIUM-2
+Refs: CHAT-2
 ```

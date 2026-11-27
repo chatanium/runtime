@@ -16,9 +16,9 @@
 
 ## 2. Background & Motivation
 
-[0번 프로포절](chatanium-0-self-contained-runtime.md)은 기존 Linux 설치의 명세로 남깁니다. 기존 설치는 시스템 계정과 그룹 3쌍, systemd, XFS 프로젝트 쿼터, 선할당 루프 파일을 사용합니다. 잠깐 실행해도 호스트 전체를 변경하므로 일반 사용자용 설치는 별도 형식 `portable-v2`를 사용합니다.
+[CHAT-0](CHAT-0.md)은 기존 Linux 설치의 명세로 남깁니다. 기존 설치는 시스템 계정과 그룹 3쌍, systemd, XFS 프로젝트 쿼터, 선할당 루프 파일을 사용합니다. 잠깐 실행해도 호스트 전체를 변경하므로 일반 사용자용 설치는 별도 형식 `portable-v2`를 사용합니다.
 
-[현재 Chatanium 배포 핀](tools/build/release-lock.json#L3-L19)은 `v0.16.10002026110900`입니다. 이 제안의 기준은 [공식 GVX `v0.22.10002026111600`](https://github.com/gfire-sigs/gvx/releases/tag/v0.22.10002026111600), 커밋 `a90476e02630e7d35861e1da16d407e03e71e8b7`입니다. 이 버전이 제공하는 NAT 방화벽, 대역폭 제한, ext4lite 볼륨을 사용합니다. 새 전송 프로토콜이나 볼륨 할당기를 만드는 작업은 필요 없습니다. 핀 변경과 제품 통합은 구현 단계에 남습니다.
+[현재 Chatanium 배포 핀](../../tools/build/release-lock.json#L3-L19)은 `v0.16.10002026110900`입니다. 이 제안의 기준은 [공식 GVX `v0.22.10002026111600`](https://github.com/gfire-sigs/gvx/releases/tag/v0.22.10002026111600), 커밋 `a90476e02630e7d35861e1da16d407e03e71e8b7`입니다. 이 버전이 제공하는 NAT 방화벽, 대역폭 제한, ext4lite 볼륨을 사용합니다. 새 전송 프로토콜이나 볼륨 할당기를 만드는 작업은 필요 없습니다. 핀 변경과 제품 통합은 구현 단계에 남습니다.
 
 ## 3. Goals & Non-Goals
 
@@ -193,8 +193,8 @@ func (a *GVXAdapter) SetEgress(ctx context.Context, instanceID string, policy Eg
 
 ## 7. References
 
-- Chatanium: [현재 Linux 기동 인자](internal/host/gvx_platform_linux.go#L357-L392), [승인에서 `STAGE_INIT`까지](internal/runtime/manager.go#L338-L374), [특수 목적 주소 목록](internal/host/network_policy.go#L75-L92)
-- 모듈: [core-v2 자원 필드](proto/core-v2/core.proto#L63-L84), [게스트 저장소 확인과 권한 전환](internal/gvxipc/bridge_linux.go#L187-L224), [`audio-player`의 한도 검사](modules/audio-player/config.go#L78-L85)
+- Chatanium: [현재 Linux 기동 인자](../../internal/host/gvx_platform_linux.go#L357-L392), [승인에서 `STAGE_INIT`까지](../../internal/runtime/manager.go#L338-L374), [특수 목적 주소 목록](../../internal/host/network_policy.go#L75-L92)
+- 모듈: [core-v2 자원 필드](../../proto/core-v2/core.proto#L63-L84), [게스트 저장소 확인과 권한 전환](../../internal/gvxipc/bridge_linux.go#L187-L224), [`audio-player`의 한도 검사](../../modules/audio-player/config.go#L78-L85)
 - GVX 실행: [대상 OS와 ISA](https://github.com/gfire-sigs/gvx/blob/a90476e02630e7d35861e1da16d407e03e71e8b7/README.md), [CPU, RAM, PID](https://github.com/gfire-sigs/gvx/blob/a90476e02630e7d35861e1da16d407e03e71e8b7/docs/cli.md#L279-L289), [OCI 초기화와 lockdown 순서](https://github.com/gfire-sigs/gvx/blob/a90476e02630e7d35861e1da16d407e03e71e8b7/pkg/gvx/sandbox.go#L237-L279)
 - GVX 네트워크: [NAT 대역폭, 방화벽과 DNS](https://github.com/gfire-sigs/gvx/blob/a90476e02630e7d35861e1da16d407e03e71e8b7/docs/cli.md#L409-L473), [기본 IPv4 경로](https://github.com/gfire-sigs/gvx/blob/a90476e02630e7d35861e1da16d407e03e71e8b7/pkg/netbackend/nat_forwarder.go#L447-L492), [`gvx-ctrl/2` 인증과 RPC](https://github.com/gfire-sigs/gvx/blob/a90476e02630e7d35861e1da16d407e03e71e8b7/docs/control-protocol.md#L56-L150), [정책 교체와 연결 취소](https://github.com/gfire-sigs/gvx/blob/a90476e02630e7d35861e1da16d407e03e71e8b7/pkg/netbackend/nat_policy.go#L576-L596)
 - GVX 저장소: [볼륨 옵션과 체크포인트](https://github.com/gfire-sigs/gvx/blob/a90476e02630e7d35861e1da16d407e03e71e8b7/docs/cli.md#L241-L249), [그룹 확장과 호스트 할당](https://github.com/gfire-sigs/gvx/blob/a90476e02630e7d35861e1da16d407e03e71e8b7/docs/architecture.md#L640-L672), [게스트 마운트 순서](https://github.com/gfire-sigs/gvx/blob/a90476e02630e7d35861e1da16d407e03e71e8b7/pkg/gvx/boot_vfs.go#L391-L500), [게스트 바인드와 권한](https://github.com/gfire-sigs/gvx/blob/a90476e02630e7d35861e1da16d407e03e71e8b7/pkg/sentry/syscalls/linux/sys_mount.go#L26-L113)

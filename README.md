@@ -515,7 +515,7 @@ this command cannot rebind volumes from an ordinary installation.
 No raw ext4 image import: GVX opens an existing volume before host lockdown.
 Only this installation's recorded volume with the expected native file
 identity and maximum length may be reopened. Details and upstream source:
-[portable-v2 design](chatanium-1-portable-module-runtime.md).
+[portable-v2 design](docs/proposal/CHAT-1.md).
 
 <details>
 <summary>Legacy Linux administrator installation (v1 launcher only)</summary>
