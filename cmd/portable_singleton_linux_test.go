@@ -28,7 +28,7 @@ func TestPortableCommandsUseSingleInstallation(t *testing.T) {
 
 	for _, name := range []string{
 		"doctor", "init", "prepare-image", "generate-config", "configure", "inspect-config",
-		"start", "stop", "update", "uninstall", "purge", "bind-restored-volumes",
+		"serve", "stop", "update", "uninstall", "purge", "bind-restored-volumes",
 	} {
 		rootCmd.SetArgs([]string{name, "--installation-id=old"})
 		command, err := rootCmd.ExecuteC()

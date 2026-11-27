@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/thirdscam/chatanium/internal/gvxcontract"
@@ -46,16 +45,14 @@ func init() {
 		m, err := install.Init(cmd.Context(), budget, first, approval(cmd))
 		return manifestResult(cmd, m, err)
 	}
-	start := installedCommand("start", "Run the portable supervisor in the foreground", func(cmd *cobra.Command, path string) error {
-		foreground, _ := cmd.Flags().GetBool("foreground")
+	serve := installedCommand("serve", "Run the portable supervisor in the foreground", func(cmd *cobra.Command, path string) error {
 		duration, _ := cmd.Flags().GetDuration("duration")
-		if !foreground || duration < 0 {
-			return errors.New("start requires --foreground and a nonnegative observation duration")
+		if duration < 0 {
+			return errors.New("serve duration must be nonnegative")
 		}
 		return service.Run(cmd.Context(), path, duration, cmd.OutOrStdout(), cmd.ErrOrStderr())
 	})
-	start.Flags().Bool("foreground", false, "run the owned supervisor in the foreground")
-	start.Flags().Duration("duration", time.Duration(0), "optional observation duration before orderly shutdown")
+	serve.Flags().Duration("duration", 0, "optional observation duration before orderly shutdown")
 	stop := installedCommand("stop", "Record STOPPED and verify portable runtime shutdown", func(cmd *cobra.Command, path string) error {
 		if err := service.Stop(cmd.Context(), path); err != nil {
 			return err
@@ -101,7 +98,7 @@ func init() {
 		return printJSON(cmd, map[string]string{"state": "PURGED"})
 	})
 	approvalFlag(purge)
-	rootCmd.AddCommand(doctor, initialize, prepareImageCommand(), generateConfigCommand(), configure, inspect, start, stop, update, uninstall, purge)
+	rootCmd.AddCommand(doctor, initialize, prepareImageCommand(), generateConfigCommand(), configure, inspect, serve, stop, update, uninstall, purge)
 	for _, name := range []string{"service", "_owner", "prepare-dev-worker", "discard-dev-revision", "inspect-dev-lock"} {
 		rootCmd.AddCommand(&cobra.Command{Use: name, Hidden: true, DisableFlagParsing: true, RunE: func(_ *cobra.Command, _ []string) error { return install.ErrLegacy }})
 	}

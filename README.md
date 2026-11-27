@@ -459,7 +459,7 @@ configuration was approved, not that the module is running.
 ./chatanium init \
   --source-kind oci-archive --source "$PWD/module.tar" --digest "$ARCHIVE_SHA256" \
   --module-id demo --module-config "$PWD/module.json" --approval "$PWD/grants.json"
-./chatanium start --foreground
+./chatanium serve
 # In another terminal, using the same account:
 ./chatanium stop
 ```
@@ -479,7 +479,7 @@ To stage an installation or add another module separately:
    resource limits and network grant. `configure` requires the matching module
    `ReviewDigest` before activation. The guest sees its approved PID, RAM and
    CPU limits; these are not constraints on the host worker's RSS or threads.
-4. `start --foreground` runs the actual worker and modules.
+4. `serve` runs the worker and modules in the foreground.
    `stop` fences new launches before waiting for exit.
    `NONE` has no external networking. `PUBLIC_INTERNET` starts denied and opens
    the reviewed GVX NAT policy only after module authentication and grant checks.

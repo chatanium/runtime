@@ -35,7 +35,7 @@ export GENERATED_FILES GENERATED_EXPECTED_FILES BUILD_OUTPUTS
 
 MAKE_COMMAND_TARGETS := tools prepare-sdk build build-runtime build-module build-native build-integration buf buf-check clean run \
 MAKE_COMMAND_TARGETS := tools prepare-sdk build build-runtime build-dev-worker build-module build-native build-integration buf buf-check clean run run-legacy-dev \
-	sqlc start new_module list-module image-module image-media check-offline check-sandbox check-sandbox-policy smoke-discord smoke-voice
+	sqlc serve new_module list-module image-module image-media check-offline check-sandbox check-sandbox-policy smoke-discord smoke-voice
 .PHONY: $(MAKE_COMMAND_TARGETS)
 
 # Make has no positional arguments: consume exactly one otherwise-unrecognized
@@ -148,9 +148,9 @@ run: build-runtime
 	@./bin/chatanium start --config "$(CONFIG)" --supervisor-socket "$(SUPERVISOR_SOCKET)" \
 		--supervisor-uid "$(SUPERVISOR_UID)" --supervisor-max-bytes "$(SUPERVISOR_MAX_BYTES)"
 	@test "$$DEV_MODE" = 0 || { echo 'Portable-v2 development: build-runtime, then use update after stopping. For v1 hot-swap use run-legacy-dev.' >&2; exit 1; }
-	@test -z "$$CONFIG" || { echo 'Portable-v2 start uses the reviewed installation configuration, not CONFIG' >&2; exit 1; }
+	@test -z "$$CONFIG" || { echo 'Portable-v2 serve uses the reviewed installation configuration, not CONFIG' >&2; exit 1; }
 	@test -x "$(PORTABLE_LOCAL)" || { echo 'Run build-runtime for the local portable-v2 launcher first' >&2; exit 1; }
-	@./$(PORTABLE_LOCAL) start --foreground
+	@./$(PORTABLE_LOCAL) serve
 
 run-legacy-dev:
 	@test -n "$$LEGACY_RUNTIME" || { echo 'Set LEGACY_RUNTIME to the existing v1 launcher' >&2; exit 1; }
@@ -161,7 +161,7 @@ run-legacy-dev:
 sqlc:
 	@sqlc generate -f database/sqlc.yaml
 
-start: run
+serve: run
 
 new_module: build-runtime
 	@./bin/chatanium new

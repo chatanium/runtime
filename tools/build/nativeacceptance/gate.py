@@ -31,7 +31,7 @@ CHECKS = [
     'read-only doctor and bounded installation plan',
     'fixed singleton path and bounded installation plan on an isolated data home or disposable account',
     'same-ISA offline OCI preparation and approved configuration',
-    'native nonroot init, start and observed clean stop in NONE and PUBLIC_INTERNET',
+    'native nonroot init, serve and observed clean stop in NONE and PUBLIC_INTERNET',
     'TCP closed before approval, public TCP open after approval, private listener blocked',
     'requested NAT policy and nonzero send/receive ceilings verified by native adapter',
     'persistent seed survived, scratch and tmp were fresh, shared and separate volume ceilings enforced',
@@ -265,7 +265,7 @@ class Trial:
                 stdout.cancel()
 
     async def run(self, identity):
-        proc = await self.spawn('start', '--foreground')
+        proc = await self.spawn('serve')
         stderr = asyncio.create_task(proc.stderr.read())
         try:
             async with asyncio.timeout(75):
@@ -286,7 +286,7 @@ class Trial:
             async with asyncio.timeout(75):
                 remaining, diagnostics = await asyncio.gather(proc.stdout.read(), stderr)
                 status = await proc.wait()
-            require(status == 0, 'start exited unsuccessfully: ' + diagnostics[-3000:].decode(errors='replace'))
+            require(status == 0, 'serve exited unsuccessfully: ' + diagnostics[-3000:].decode(errors='replace'))
             drained = [event for line in remaining.splitlines() if (event := json.loads(line))['type'] == 'DRAINED']
             require(len(drained) == 1 and drained[0]['clean'] is True, 'native stop did not prove clean writer exit')
             return live
