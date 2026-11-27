@@ -139,6 +139,11 @@ release. Only a root-owned executable with a protected installation path is
 accepted. Set `TRUSTED_GH` only to select a different trusted absolute path.
 Neither Go nor `gh` is required on a host that only runs the built launcher.
 
+`make build-runtime` logs three stages: toolchain and SDK preparation, pinned
+GVX verification, and launcher build and packaging. Interactive terminals show
+color and a single updating build-status line. Set `NO_COLOR=1` to disable
+colors. CI and redirected output use plain stage lines.
+
 `make tools` installs Buf 1.75.0, protoc-gen-go v1.36.12 and
 protoc-gen-go-grpc v1.6.2 under `.tools/bin`. From the repository root:
 

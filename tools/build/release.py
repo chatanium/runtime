@@ -29,6 +29,45 @@ NOTICES = ('LICENSE', 'README.md', 'THIRD_PARTY_LICENSES.txt')
 PAYLOAD_PKG = 'github.com/thirdscam/chatanium/internal/releasepayload'
 
 
+class BuildProgress:
+    def __init__(self):
+        self.live = sys.stdout.isatty() and os.environ.get('CHATANIUM_BUILD_TTY') == '1'
+        self.color = self.live and not os.environ.get('NO_COLOR')
+        self.detail_visible = False
+
+    def label(self, step, style='36'):
+        if self.color:
+            return f'\x1b[1;{style}m[ RT ]\x1b[0m \x1b[1m[{step}]\x1b[0m'
+        return f'[ RT ] [{step}]'
+
+    def clear_detail(self):
+        if self.detail_visible:
+            print('\r\x1b[2K', end='', flush=True)
+            self.detail_visible = False
+
+    def stage(self, step, message):
+        self.clear_detail()
+        print(f'{self.label(step)} {message}', flush=True)
+
+    def detail(self, step, total, message):
+        if self.live:
+            columns = shutil.get_terminal_size().columns
+            line = f'       {step}/{total}  {message}'
+            print('\r\x1b[2K' + line[:max(0, columns - 1)], end='', flush=True)
+            self.detail_visible = True
+
+    def done(self, message):
+        self.clear_detail()
+        print(f'{self.label(" OK ", "32")} {message}', flush=True)
+
+    def failed(self, error):
+        if self.detail_visible:
+            # A tool may have written diagnostics since the last update.
+            print(flush=True)
+            self.detail_visible = False
+        print(f'{self.label("FAIL", "31")} {error}', file=sys.stderr, flush=True)
+
+
 def _trusted_verifier_path(supplied):
     if not supplied.is_absolute():
         raise RuntimeError('TRUSTED_GH must be an independently trusted absolute path')
@@ -353,14 +392,15 @@ def assemble(go, stage, inputs, target, lock, engine, guest_engine, executables)
     host = capture(go, 'env', 'GOHOSTOS', 'GOHOSTARCH').replace('\n', '/')
     host_os, host_arch = host.split('/')
     env = dict(os.environ, GOOS=host_os, GOARCH=host_arch, CGO_ENABLED='0', GOFLAGS='', GOENV='off')
-    run(go, 'run', '-mod=readonly', './tools/build/verifybundle', target, inputs, env=env)
+    run(go, 'run', '-mod=readonly', './tools/build/verifybundle', target, inputs, env=env, stdout=subprocess.DEVNULL)
     return host
 
 
-def build(target):
+def build(target, progress):
     lock = json.loads(LOCK.read_text())
     if target not in lock['targets']:
         raise RuntimeError(f'Unsupported portable-v2 target: {target}')
+    progress.stage('2/3', f'Verify pinned GVX for {target} ({lock["targets"][target]["backend"]})')
     gh = trusted_verifier()
     go = os.environ['GO_BINARY']
     os_name, arch = target.split('/')
@@ -407,6 +447,8 @@ def build(target):
             guest_rungv = stage / 'guest' / original.name
             original.rename(guest_rungv)
             engines[guest_tag] = guest_engine
+        progress.stage('3/3', 'Build and package the portable launcher')
+        progress.detail(1, 7, 'Resolve Go dependencies')
 
         worker_pkg = './cmd/chatanium-worker'
         guest_pkgs = ('./cmd/gvx-guest-bridge', './cmd/gvx-preparer')
@@ -416,12 +458,15 @@ def build(target):
         collect_go_modules(go, host_env, ('.',), modules)
         suffix = '.exe' if os_name == 'windows' else ''
         worker = stage / 'bin' / ('chatanium-worker' + suffix)
+        progress.detail(2, 7, 'Compile runtime worker')
         build_program(go, worker_pkg, worker, target, lock['targets'][target], stage)
         guest_programs = []
-        for package in guest_pkgs:
+        for index, package in enumerate(guest_pkgs, start=3):
+            progress.detail(index, 7, f'Compile {package.rsplit("/", 1)[1]}')
             output = stage / 'guest' / package.rsplit('/', 1)[1]
             build_program(go, package, output, guest_target, lock['targets'][guest_target], stage)
             guest_programs.append(output)
+        progress.detail(5, 7, 'Assemble and verify the embedded bundle')
         sdk = json.loads(capture('python3', ROOT / 'tools/sdk.py', '--go', go, '--verify-only', '--json'))
         sdk.pop('Dir', None)
         write_json(stage / 'provenance' / 'sdk-module.json', sdk)
@@ -440,24 +485,27 @@ def build(target):
         for name in ('manifest.json', 'bundle.tar.gz'):
             publish_file(inputs / name, PAYLOAD / name, 0o644)
         launcher = temp / ('chatanium-' + tag + suffix)
+        progress.detail(6, 7, 'Compile and verify the launcher')
         go_build(go, '.', launcher, host_env)
         executable_info(go, launcher, target, lock['targets'][target])
+        progress.detail(7, 7, 'Publish launcher, manifest and SBOM')
         publish_file(inputs / 'manifest.json', out / 'bundle-manifest.json', 0o444)
         publish_file(stage / 'sbom.json', out / 'sbom.json', 0o444)
         publish_file(launcher, out / launcher.name, 0o755)
         if host == target:
             publish_file(launcher, ROOT / 'bin' / ('chatanium' + suffix), 0o755)
-    print(f'Built portable-v2 {target} ({lock["targets"][target]["backend"]}; no native voice): {out / launcher.name}')
+    progress.done(str((out / launcher.name).relative_to(ROOT)))
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('target', help='exact GOOS/GOARCH pair')
     args = parser.parse_args()
+    progress = BuildProgress()
     try:
         os.chdir(ROOT)
-        build(args.target)
+        build(args.target, progress)
     except (KeyError, OSError, ValueError, RuntimeError, struct.error, tarfile.TarError, zipfile.BadZipFile,
             subprocess.CalledProcessError) as error:
-        print(str(error), file=sys.stderr)
+        progress.failed(error)
         sys.exit(1)
