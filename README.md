@@ -450,16 +450,15 @@ amd64/arm64 `whpx`. WHPX must already be enabled. The installer does not enable
 a hypervisor, create accounts, run a service, mount host volumes or alter host
 cgroups, routing or firewall rules.
 
-For a first module in an offline OCI archive, `init` can also run preparation
-and approval in one invocation. Read each displayed plan; `READY` means the
-configuration was approved, not that the module is running.
+Run `./chatanium serve` to start. On first use it runs setup, displays the plans
+for approval and starts a foreground worker. With no modules it waits without
+launching a container. Later invocations use the existing reviewed config.
 
 ```sh
-./chatanium doctor
-./chatanium init \
+# To configure and start a first module from an offline OCI archive instead:
+./chatanium serve \
   --source-kind oci-archive --source "$PWD/module.tar" --digest "$ARCHIVE_SHA256" \
   --module-id demo --module-config "$PWD/module.json" --approval "$PWD/grants.json"
-./chatanium serve
 # In another terminal, using the same account:
 ./chatanium stop
 ```
@@ -468,8 +467,8 @@ configuration was approved, not that the module is running.
 `--approval` file proposes grants; it does not answer the digest prompts.
 To stage an installation or add another module separately:
 
-1. Run `init`, inspect the location and disk budget, and
-   approve the exact `PlanDigest`. An empty installation cannot start a module.
+1. Run `init` instead of `serve` to set up an installation without starting it.
+   Inspect the location and disk budget and approve the exact `PlanDigest`.
 2. `prepare-image` accepts a digest-pinned registry source or an explicitly
    selected OCI archive. Parsing and compilation take place in a separate,
    networkless guest. Images must declare

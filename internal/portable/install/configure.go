@@ -48,6 +48,10 @@ func GenerateConfig(path string, options GenerateOptions) (Candidate, error) {
 		return Candidate{}, err
 	}
 	defer i.Close()
+	return i.generateConfig(options)
+}
+
+func (i *Installation) generateConfig(options GenerateOptions) (Candidate, error) {
 	if i.Manifest.State != store.Initializing && i.Manifest.State != store.Ready {
 		return Candidate{}, store.ErrState
 	}
@@ -156,8 +160,17 @@ func (i *Installation) verifyCandidateConfig(p Candidate) (runtime.Config, error
 		cfg.Limits.UploadRecordsPerHost != 1 || cfg.Limits.UploadRecordsPerInstance != 1 {
 		return runtime.Config{}, errors.New("candidate changes approved installation identity, paths or upload bounds")
 	}
-	if len(cfg.Modules) == 0 || len(p.Prepared) != len(cfg.Modules) || len(p.Network) != len(cfg.Modules) {
-		return runtime.Config{}, errors.New("candidate needs at least one module and an exact prepared image and network profile for each module")
+	if len(p.Prepared) != len(cfg.Modules) || len(p.Network) != len(cfg.Modules) {
+		return runtime.Config{}, errors.New("candidate needs an exact prepared image and network profile for each module")
+	}
+	if len(cfg.Modules) == 0 {
+		if i.Manifest.State != store.Initializing || i.Manifest.Revision != "" || len(i.Manifest.Modules) != 0 {
+			return runtime.Config{}, store.ErrState
+		}
+		if err := verifyDefaultConfig(i.Manifest, i.Path, p.Config); err != nil {
+			return runtime.Config{}, err
+		}
+		return cfg, nil
 	}
 	if backend, ok := cfg.Backends["discord"]; ok {
 		var config struct {
@@ -178,6 +191,35 @@ func (i *Installation) verifyCandidateConfig(p Candidate) (runtime.Config, error
 	return cfg, nil
 }
 
+type configurationPlan struct {
+	Format, Installation, BundleDigest, ConfigDigest, Revision, PlanDigest string
+	BudgetBytes                                                            int64
+	Reviews                                                                []string
+}
+
+func planConfiguration(path string, m Manifest, configDigest string, approvals []store.Approval) (store.Configuration, configurationPlan, error) {
+	configuration := store.Configuration{ConfigDigest: configDigest, Approvals: approvals}
+	var err error
+	configuration.Revision, err = planDigest(configuration)
+	if err != nil {
+		return store.Configuration{}, configurationPlan{}, err
+	}
+	plan := configurationPlan{Format: Format, Installation: path, BundleDigest: m.Bundle.Digest, ConfigDigest: configDigest, Revision: configuration.Revision, BudgetBytes: m.BudgetBytes, Reviews: make([]string, len(approvals))}
+	for index, approval := range approvals {
+		plan.Reviews[index] = approval.ReviewDigest
+	}
+	plan.PlanDigest, err = planDigest(plan)
+	return configuration, plan, err
+}
+
+func verifyDefaultConfig(m Manifest, path string, configDoc []byte) error {
+	expected, err := defaultConfig(m.ID, m.Bundle.Digest, path)
+	if err != nil || !bytes.Equal(configDoc, expected) {
+		return errors.Join(store.ErrApprovalMismatch, err)
+	}
+	return nil
+}
+
 // Configure publishes approved staged generations and activates a stopped
 // configuration only after both PlanDigest and every ReviewDigest match.
 func Configure(ctx context.Context, path string, p Candidate, confirm Confirm) (_ Manifest, resultErr error) {
@@ -186,6 +228,10 @@ func Configure(ctx context.Context, path string, p Candidate, confirm Confirm) (
 		return Manifest{}, err
 	}
 	defer func() { resultErr = errors.Join(resultErr, i.Close()) }()
+	return i.configure(ctx, p, confirm)
+}
+
+func (i *Installation) configure(ctx context.Context, p Candidate, confirm Confirm) (_ Manifest, resultErr error) {
 	if i.Manifest.State != store.Initializing && i.Manifest.State != store.Ready {
 		return Manifest{}, store.ErrState
 	}
@@ -220,24 +266,11 @@ func Configure(ctx context.Context, path string, p Candidate, confirm Confirm) (
 	for index, module := range m.Modules {
 		approvals[index] = module.Approval
 	}
-	configuration := store.Configuration{ConfigDigest: configDigest, Approvals: approvals}
-	configuration.Revision, err = planDigest(configuration)
+	configuration, plan, err := planConfiguration(i.Path, m, configDigest, approvals)
 	if err != nil {
 		return Manifest{}, err
 	}
 	m.Revision = configuration.Revision
-	plan := struct {
-		Format, Installation, BundleDigest, ConfigDigest, Revision, PlanDigest string
-		BudgetBytes                                                            int64
-		Reviews                                                                []string
-	}{Format: Format, Installation: path, BundleDigest: m.Bundle.Digest, ConfigDigest: configDigest, Revision: m.Revision, BudgetBytes: m.BudgetBytes, Reviews: make([]string, len(approvals))}
-	for index, approval := range approvals {
-		plan.Reviews[index] = approval.ReviewDigest
-	}
-	plan.PlanDigest, err = planDigest(plan)
-	if err != nil {
-		return Manifest{}, err
-	}
 	m.ConfigPlanDigest = plan.PlanDigest
 	if confirm == nil {
 		return Manifest{}, errors.New("configure requires exact PlanDigest and per-module ReviewDigest approval")
@@ -267,6 +300,16 @@ func Configure(ctx context.Context, path string, p Candidate, confirm Confirm) (
 		return Manifest{}, err
 	}
 	defer func() { resultErr = errors.Join(resultErr, db.Close()) }()
+	previous, err := db.Installation(ctx)
+	if err != nil {
+		return Manifest{}, err
+	}
+	if previous.State != i.Manifest.State {
+		return Manifest{}, store.ErrApprovalMismatch
+	}
+	if err := matchMaintenanceManifest(previous, i.Manifest); err != nil {
+		return Manifest{}, err
+	}
 	epoch, err := i.beginEpoch(ctx, db)
 	if err != nil {
 		return Manifest{}, err
@@ -282,13 +325,6 @@ func Configure(ctx context.Context, path string, p Candidate, confirm Confirm) (
 	if len(runs) != 0 {
 		return Manifest{}, store.ErrCleanupPending
 	}
-	previous, err := db.Configuration(ctx)
-	if err != nil {
-		return Manifest{}, err
-	}
-	if previous.Revision != i.Manifest.Revision {
-		return Manifest{}, store.ErrApprovalMismatch
-	}
 	if err := checkRuntimeBudget(ctx, db, m.LogBytes, approvals); err != nil {
 		return Manifest{}, err
 	}
@@ -298,7 +334,7 @@ func Configure(ctx context.Context, path string, p Candidate, confirm Confirm) (
 	if err := i.publishReviewed(ctx, db, epoch, m.Modules); err != nil {
 		return Manifest{}, err
 	}
-	if err := db.Configure(ctx, epoch, previous.Revision, configuration); err != nil {
+	if err := db.Configure(ctx, epoch, previous.ConfigRevision, configuration); err != nil {
 		return Manifest{}, err
 	}
 	if err := db.Activate(ctx, epoch, m.PlanDigest, m.Revision); err != nil {
@@ -315,6 +351,16 @@ func checkRuntimeBudget(ctx context.Context, db *store.Store, logBytes int64, ap
 	if err != nil {
 		return err
 	}
+	left := usage.BudgetBytes
+	for _, charge := range [...]int64{usage.MetadataBytes, usage.PersistentBytes, usage.ScratchBytes, usage.PreparationBytes, usage.CacheBytes, usage.LogBytes, usage.BackupBytes} {
+		if charge < 0 || charge > left {
+			return store.ErrBudgetExceeded
+		}
+		left -= charge
+	}
+	if len(approvals) == 0 {
+		return nil
+	}
 	volumes, err := db.Volumes(ctx)
 	if err != nil {
 		return err
@@ -322,13 +368,6 @@ func checkRuntimeBudget(ctx context.Context, db *store.Store, logBytes int64, ap
 	retained := make(map[string]int64, len(volumes))
 	for _, volume := range volumes {
 		retained[volume.ModuleID] = volume.MaxBytes
-	}
-	left := usage.BudgetBytes
-	for _, charge := range [...]int64{usage.MetadataBytes, usage.PersistentBytes, usage.ScratchBytes, usage.PreparationBytes, usage.CacheBytes, usage.LogBytes, usage.BackupBytes} {
-		if charge < 0 || charge > left {
-			return store.ErrBudgetExceeded
-		}
-		left -= charge
 	}
 	for _, a := range approvals {
 		for _, charge := range [...]int64{max(a.PersistentBytes-retained[a.ModuleID], 0), a.ScratchBytes, logBytes} {
@@ -356,6 +395,9 @@ func (i *Installation) stageManifest(m Manifest) error {
 }
 
 func (i *Installation) publishReviewed(ctx context.Context, db *store.Store, epoch string, modules []Module) error {
+	if len(modules) == 0 {
+		return nil
+	}
 	imagesList, err := db.Images(ctx)
 	if err != nil {
 		return err
@@ -453,7 +495,26 @@ func verifyStoredReviews(m Manifest, path string) error {
 		return store.ErrApprovalMismatch
 	}
 	if len(m.Modules) == 0 {
-		if m.State == store.Ready || m.Revision != "" {
+		configDoc, err := canonicalJSON(m.Config)
+		if err != nil {
+			return err
+		}
+		if err := verifyDefaultConfig(m, path, configDoc); err != nil {
+			return err
+		}
+		if m.Revision == "" {
+			if m.State == store.Ready || m.ConfigPlanDigest != "" {
+				return store.ErrApprovalMismatch
+			}
+			return nil
+		}
+		// A module-free revision has no individual reviews to bind the config
+		// or plan. Recompute both digests over the canonical default.
+		configuration, plan, err := planConfiguration(path, m, hashBytes(configDoc), []store.Approval{})
+		if err != nil {
+			return err
+		}
+		if m.State == store.Initializing || m.Revision != configuration.Revision || m.ConfigPlanDigest != plan.PlanDigest {
 			return store.ErrApprovalMismatch
 		}
 		return nil

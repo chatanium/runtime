@@ -28,7 +28,7 @@ import (
 
 // Run holds the installation lock through native child observation, lease
 // settlement and control-channel shutdown. duration starts at worker READY.
-func Run(ctx context.Context, dir string, duration time.Duration, output, diagnostics io.Writer) (result error) {
+func Run(ctx context.Context, dir, expectedID string, duration time.Duration, output, diagnostics io.Writer) (result error) {
 	if duration < 0 {
 		return errors.New("negative foreground duration")
 	}
@@ -37,6 +37,9 @@ func Run(ctx context.Context, dir string, duration time.Duration, output, diagno
 		return err
 	}
 	defer i.Close()
+	if i.Manifest.ID != expectedID {
+		return store.ErrIdentity
+	}
 	if i.Manifest.Format != store.Format || i.Manifest.State != store.Ready {
 		return errors.New("installation has not been activated")
 	}
@@ -52,7 +55,7 @@ func Run(ctx context.Context, dir string, duration time.Duration, output, diagno
 	if err != nil {
 		return err
 	}
-	if record.State != store.Ready || record.PlanDigest != i.Manifest.PlanDigest {
+	if record.State != store.Ready || record.PlanDigest != i.Manifest.PlanDigest || record.ConfigRevision != i.Manifest.Revision {
 		return store.ErrApprovalMismatch
 	}
 	var configBytes bytes.Buffer
@@ -203,17 +206,17 @@ func Run(ctx context.Context, dir string, duration time.Duration, output, diagno
 		init: session.WorkerInit{Config: i.Manifest.Config, Credentials: creds, Endpoint: endpoint, Secrets: secrets},
 		stop: stop.request, serveDone: serveDone, startup: time.Duration(cfg.Defaults.StartupDeadline),
 		drain: time.Duration(cfg.Defaults.DrainDeadline) + cleanupTime, cleanup: cleanupTime,
-		duration: duration, output: output, fence: func(c context.Context) error { return db.RequestStop(c, epoch.ID) },
+		duration: duration, moduleCount: len(modules), output: output, fence: func(c context.Context) error { return db.RequestStop(c, epoch.ID) },
 	})
 	return result
 }
 
 func reviewedModules(cfg modruntime.Config, m install.Manifest) ([]sandbox.Module, error) {
-	if len(cfg.Modules) == 0 {
-		return nil, errors.New("no approved module; prepare an image and approve its configuration before start")
-	}
 	if len(cfg.Modules) != len(m.Modules) {
 		return nil, store.ErrApprovalMismatch
+	}
+	if len(cfg.Modules) == 0 {
+		return nil, nil
 	}
 	byID := make(map[string]*install.Module, len(m.Modules))
 	for j := range m.Modules {

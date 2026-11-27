@@ -46,7 +46,7 @@ func RunPortableWorker(ctx context.Context, input io.Reader, output io.Writer) e
 		return errors.Join(errors.New("portable worker requires INIT"), reportWorkerFailure(out, "INVALID_INIT"))
 	}
 	config, err := runtime.DecodeConfig(init.Config)
-	if err != nil || config.Host.Format != runtime.PortableFormat || len(config.Modules) == 0 {
+	if err != nil || config.Host.Format != runtime.PortableFormat || len(config.Modules) == 0 && len(config.Backends) != 0 {
 		return errors.Join(errors.New("portable worker configuration rejected"), reportWorkerFailure(out, "INVALID_CONFIGURATION"))
 	}
 	if !matchCapturedSecrets(config, init.Secrets) {
@@ -230,6 +230,10 @@ func (w *portableWork) run(ctx context.Context, client *session.Client, secrets 
 	if err = session.WriteWorkerEvent(out, session.WorkerEvent{Type: "READY", Modules: previous}); err != nil {
 		return err
 	}
+	if len(previous) == 0 {
+		<-ctx.Done()
+		return nil
+	}
 	next := make([]session.ModuleStatus, 0, len(previous))
 	ticker := time.NewTicker(time.Duration(w.config.Limits.ReadinessPollInterval))
 	defer ticker.Stop()
@@ -260,7 +264,7 @@ func (w *portableWork) close(deadline time.Time) bool {
 	ctx, cancel := context.WithDeadline(context.Background(), deadline)
 	defer cancel()
 	clean := true
-	if w.manager != nil {
+	if w.manager != nil && len(w.config.Modules) != 0 {
 		results := make(chan bool, len(w.config.Modules))
 		for _, spec := range w.config.Modules {
 			go func(id runtime.ModuleID) {

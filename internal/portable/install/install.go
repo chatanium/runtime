@@ -156,6 +156,47 @@ func openInstallation(parent *os.Root, path string) (*Installation, error) {
 	return &Installation{Path: path, Root: root, Manifest: m}, nil
 }
 
+// InstalledManifest returns nil only when the singleton has not been published.
+// An existing directory without its manifest is damaged, not a fresh install.
+func InstalledManifest(path string) (*Manifest, error) {
+	parent, err := anchor(path, false)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer parent.Close()
+	if err := requireNoPurgeReceipt(parent, path); err != nil {
+		return nil, err
+	}
+	root, err := privateChild(parent, filepath.Base(path), false)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	m, err := decodeManifest(root, manifestName, "")
+	if err != nil {
+		return nil, fmt.Errorf("cannot open existing installation at %s: %w", path, err)
+	}
+	return &m, nil
+}
+
+func requireNoPurgeReceipt(parent *os.Root, path string) error {
+	name := purgeTerminalName(path)
+	for _, leaf := range [...]string{name, ".writing-" + name} {
+		if _, err := parent.Lstat(leaf); err == nil {
+			return fmt.Errorf("%w: finish the pending purge before setup", store.ErrCleanupPending)
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
 // Open reads the durable typed manifest without taking the foreground writer
 // lock. Stop uses it while the authenticated owner is already running.
 func Open(path string) (*Installation, error) {
@@ -170,6 +211,10 @@ func Open(path string) (*Installation, error) {
 // Lock holds the native writer lock for a foreground run or offline operation.
 // Guardian children can keep OwnerLock held after unexpected supervisor exit.
 func Lock(path string) (*Installation, error) {
+	return lockPath(path, nil)
+}
+
+func lockPath(path string, check func(*Manifest) error) (*Installation, error) {
 	parent, err := anchor(path, false)
 	if err != nil {
 		return nil, err
@@ -180,15 +225,22 @@ func Lock(path string) (*Installation, error) {
 		return nil, err
 	}
 	defer gate.Close()
-	return lockInstallation(parent, path)
+	return lockInstallationChecked(parent, path, check)
 }
 
 func lockInstallation(parent *os.Root, path string) (*Installation, error) {
+	return lockInstallationChecked(parent, path, nil)
+}
+
+func lockInstallationChecked(parent *os.Root, path string, check func(*Manifest) error) (*Installation, error) {
 	i, err := openInstallation(parent, path)
 	if err != nil {
 		return nil, err
 	}
 	i.OwnerLock, err = process.Lock(filepath.Join(path, ownerLock))
+	if err == nil && check != nil {
+		err = check(&i.Manifest)
+	}
 	if err == nil {
 		err = i.reconcile(context.Background())
 	}

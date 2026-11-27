@@ -21,38 +21,6 @@ func init() {
 		result, err := install.Doctor(cmd.Context())
 		return errors.Join(err, printJSON(cmd, result))
 	}
-	initialize := &cobra.Command{Use: "init", Short: "Review and create a private, stopped portable installation", Args: cobra.NoArgs}
-	approvalFlag(initialize)
-	initialize.SetFlagErrorFunc(legacyFlagError)
-	initialize.Flags().Int64("budget-bytes", install.DefaultBudgetBytes, "maximum simultaneous installation-owned bytes")
-	imageArgs := imageFlags(initialize)
-	moduleArgs := moduleFlags(initialize, false)
-	initialize.RunE = func(cmd *cobra.Command, _ []string) error {
-		budget, _ := cmd.Flags().GetInt64("budget-bytes")
-		var first *install.FirstModule
-		if initialModuleRequested(cmd) {
-			first = new(install.FirstModule)
-			var err error
-			first.Image, err = imageArgs()
-			if err != nil {
-				return err
-			}
-			first.Module, err = moduleArgs()
-			if err != nil {
-				return err
-			}
-		}
-		m, err := install.Init(cmd.Context(), budget, first, approval(cmd))
-		return manifestResult(cmd, m, err)
-	}
-	serve := installedCommand("serve", "Run the portable supervisor in the foreground", func(cmd *cobra.Command, path string) error {
-		duration, _ := cmd.Flags().GetDuration("duration")
-		if duration < 0 {
-			return errors.New("serve duration must be nonnegative")
-		}
-		return service.Run(cmd.Context(), path, duration, cmd.OutOrStdout(), cmd.ErrOrStderr())
-	})
-	serve.Flags().Duration("duration", 0, "optional observation duration before orderly shutdown")
 	stop := installedCommand("stop", "Record STOPPED and verify portable runtime shutdown", func(cmd *cobra.Command, path string) error {
 		if err := service.Stop(cmd.Context(), path); err != nil {
 			return err
@@ -98,7 +66,7 @@ func init() {
 		return printJSON(cmd, map[string]string{"state": "PURGED"})
 	})
 	approvalFlag(purge)
-	rootCmd.AddCommand(doctor, initialize, prepareImageCommand(), generateConfigCommand(), configure, inspect, serve, stop, update, uninstall, purge)
+	rootCmd.AddCommand(doctor, initCommand(), prepareImageCommand(), generateConfigCommand(), configure, inspect, serveCommand(), stop, update, uninstall, purge)
 	for _, name := range []string{"service", "_owner", "prepare-dev-worker", "discard-dev-revision", "inspect-dev-lock"} {
 		rootCmd.AddCommand(&cobra.Command{Use: name, Hidden: true, DisableFlagParsing: true, RunE: func(_ *cobra.Command, _ []string) error { return install.ErrLegacy }})
 	}

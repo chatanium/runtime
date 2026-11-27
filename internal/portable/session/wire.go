@@ -194,6 +194,7 @@ type ModuleStatus struct {
 	CleanupComplete bool   `json:"cleanup_complete"`
 }
 
+// READY and DRAINED may be empty; the supervisor checks the approved count.
 type WorkerEvent struct {
 	Type    string         `json:"type"`
 	Modules []ModuleStatus `json:"modules,omitempty"`
@@ -226,11 +227,11 @@ func (ev WorkerEvent) valid() bool {
 	}
 	switch ev.Type {
 	case "READY":
-		return len(ev.Modules) > 0 && !ev.Clean && ev.Reason == ""
+		return !ev.Clean && ev.Reason == ""
 	case "STATUS":
 		return !ev.Clean && (ev.Reason == "" || ev.Reason == "BACKEND_ERROR")
 	case "DRAINED":
-		return len(ev.Modules) > 0 && ev.Reason == ""
+		return ev.Reason == ""
 	case "FAILED":
 		switch ev.Reason {
 		case "INVALID_INIT", "INVALID_CONFIGURATION", "INVALID_SECRET_BINDINGS", "INVALID_SUPERVISOR_SESSION",

@@ -19,6 +19,7 @@ type workerLaunch struct {
 	init                              session.WorkerInit
 	stop, serveDone                   <-chan struct{}
 	startup, drain, cleanup, duration time.Duration
+	moduleCount                       int
 	output                            io.Writer
 	fence                             func(context.Context) error
 }
@@ -120,6 +121,10 @@ func runWorker(ctx context.Context, w workerLaunch) (result error, observed bool
 				goto draining
 			}
 			if msg.event.Type == "READY" {
+				if len(msg.event.Modules) != w.moduleCount {
+					result = errors.New("worker readiness does not cover the approved modules")
+					goto draining
+				}
 				ready = true
 				startupDone = nil
 				stopStartup()
@@ -159,7 +164,7 @@ draining:
 				}
 				switch msg.event.Type {
 				case "DRAINED":
-					if !msg.event.Clean {
+					if len(msg.event.Modules) != w.moduleCount || !msg.event.Clean {
 						drainErr = errors.New("worker reported incomplete drain")
 					} else if encoder != nil {
 						drainErr = encoder.Encode(msg.event)

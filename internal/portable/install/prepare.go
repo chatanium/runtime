@@ -102,6 +102,10 @@ func prepareImage(ctx context.Context, path string, request ImageInput, confirm 
 		return images.Generation{}, err
 	}
 	defer func() { resultErr = errors.Join(resultErr, i.Close()) }()
+	return i.prepareImage(ctx, request, confirm, initDigest, approvedImagePlan)
+}
+
+func (i *Installation) prepareImage(ctx context.Context, request ImageInput, confirm Confirm, initDigest, approvedImagePlan string) (_ images.Generation, resultErr error) {
 	if i.Manifest.State != store.Initializing && i.Manifest.State != store.Ready {
 		return images.Generation{}, store.ErrState
 	}
@@ -114,7 +118,7 @@ func prepareImage(ctx context.Context, path string, request ImageInput, confirm 
 	if err := errors.Join(engineErr, prepErr, compilerErr); err != nil {
 		return images.Generation{}, err
 	}
-	plan, err := planImage(i.Manifest, path, request)
+	plan, err := planImage(i.Manifest, i.Path, request)
 	if err != nil {
 		return images.Generation{}, err
 	}
