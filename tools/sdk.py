@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -17,6 +18,42 @@ ROOT = Path(__file__).resolve().parents[1]
 MODULE = 'github.com/bwmarrin/discordgo'
 STAMP = '.flexmodule-sdk.json'
 PROVENANCE = ('Path', 'Version', 'Sum', 'GoModSum', 'PatchSHA256', 'SourceSHA256')
+
+
+def _absolute_executable(candidate):
+    return candidate.is_absolute() and candidate.is_file() and os.access(candidate, os.X_OK)
+
+
+def _find_go(toolchain):
+    override = os.environ.get('BOOTSTRAP_GO')
+    if override:
+        if not _absolute_executable(Path(override)):
+            raise RuntimeError('BOOTSTRAP_GO must name an absolute path to an executable Go binary')
+        return override
+
+    local = ROOT / '.tools/go/bin/go'
+    if _absolute_executable(local):
+        _owned_path(local)
+        return str(local)
+
+    for directory in os.get_exec_path():
+        candidate = Path(directory) / 'go'
+        if 'shims' not in candidate.parts and _absolute_executable(candidate):
+            return str(candidate)
+
+    goenv = shutil.which('goenv')
+    if goenv and Path(goenv).is_absolute():
+        # Ask goenv for the pinned binary without executing its version shim.
+        result = subprocess.run([goenv, 'which', 'go'],
+                                env={**os.environ, 'GOENV_VERSION': toolchain.removeprefix('go')},
+                                capture_output=True, text=True)
+        if result.returncode == 0:
+            candidate = Path(result.stdout.strip())
+            if _absolute_executable(candidate):
+                return str(candidate)
+
+    raise RuntimeError(f'Go not found; install {toolchain} on PATH or through goenv, '
+                       'or set BOOTSTRAP_GO to its binary')
 
 
 def _go_environment(go, readonly):
@@ -33,18 +70,7 @@ def _go_environment(go, readonly):
         # counters/uploads to a non-directory sink without writing a mode file.
         env['TEST_TELEMETRY_DIR'] = os.devnull
     if go is None:
-        go = os.environ.get('BOOTSTRAP_GO')
-        if not go:
-            candidate = ROOT / '.tools/go/bin/go'
-            if candidate.is_file() and os.access(candidate, os.X_OK):
-                go = str(candidate)
-        if not go:
-            go = next((str(Path(directory) / 'go') for directory in os.get_exec_path()
-                       if 'shims' not in Path(directory).parts
-                       and os.access(Path(directory) / 'go', os.X_OK)
-                       and (Path(directory) / 'go').is_file()), None)
-        if not go:
-            raise RuntimeError('Set BOOTSTRAP_GO or install the pinned Go distribution in .tools/go')
+        go = _find_go(toolchain)
     go = str(go)
     actual = subprocess.check_output([go, 'env', 'GOVERSION'], env=env, text=True).strip()
     if readonly and actual != toolchain:
@@ -332,10 +358,17 @@ def provenance(metadata):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--go', help='Selected Go binary (otherwise use the pinned toolchain)')
+    parser.add_argument('--find-go', metavar='TOOLCHAIN', help=argparse.SUPPRESS)
     parser.add_argument('--module-dir', type=Path, default=ROOT)
     parser.add_argument('--json', action='store_true', help='Print metadata instead of the source directory')
     parser.add_argument('--verify-only', action='store_true', help='Validate prepared source without writes or downloads')
     args = parser.parse_args()
+    if args.find_go:
+        try:
+            print(_find_go(args.find_go))
+        except RuntimeError as error:
+            parser.exit(1, f'{error}\n')
+        return
     metadata = resolve(args.go, args.module_dir, prepare=not args.verify_only)
     print(json.dumps(metadata) if args.json else metadata['Dir'])
 

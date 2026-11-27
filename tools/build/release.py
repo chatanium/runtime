@@ -29,8 +29,7 @@ NOTICES = ('LICENSE', 'README.md', 'THIRD_PARTY_LICENSES.txt')
 PAYLOAD_PKG = 'github.com/thirdscam/chatanium/internal/releasepayload'
 
 
-def trusted_verifier():
-    supplied = Path(os.environ['TRUSTED_GH'])
+def _trusted_verifier_path(supplied):
     if not supplied.is_absolute():
         raise RuntimeError('TRUSTED_GH must be an independently trusted absolute path')
     verifier = supplied.resolve(strict=True)
@@ -41,6 +40,22 @@ def trusted_verifier():
         if info.st_uid != 0 or info.st_mode & 0o022:
             raise RuntimeError(f'Untrusted verifier path: {path}')
     return verifier
+
+
+def trusted_verifier():
+    supplied = os.environ.get('TRUSTED_GH')
+    if supplied is not None:
+        return _trusted_verifier_path(Path(supplied))
+    for entry in os.environ.get('PATH', '').split(os.pathsep):
+        directory = Path(entry)
+        if not directory.is_absolute():
+            continue
+        try:
+            return _trusted_verifier_path(directory / 'gh')
+        except (OSError, RuntimeError):
+            continue
+    raise RuntimeError('No trusted gh executable found in PATH; set TRUSTED_GH to an '
+                       'independently trusted root-owned GitHub CLI executable')
 
 
 def download(url, destination, size, sha256):

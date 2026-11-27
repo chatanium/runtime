@@ -3,7 +3,6 @@ set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/../common.sh"
 [[ $(uname -s) == Linux ]] || fail 'Build portable-v2 artifacts on a Linux build host (all five targets can cross-compile)'
 [[ "${DISABLE_VOICE:-1}" == 1 ]] || fail 'This portable-v2 distribution does not include a verified native voice closure'
-: "${TRUSTED_GH:?Set TRUSTED_GH to an independently trusted root-owned GitHub CLI executable}"
 export GOENV=off
 unset GOEXPERIMENT GOFIPS140
 use_go

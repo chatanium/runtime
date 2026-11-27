@@ -111,22 +111,7 @@ use_go() {
     unset GOROOT
     export GOTOOLCHAIN=$GO_TOOLCHAIN GOWORK=off GOFLAGS=
     local actual
-    # Version-manager shims may reject .go-version before Go can handle
-    # GOTOOLCHAIN. Select an actual bootstrap binary, never such a shim.
-    GO_BINARY=${BOOTSTRAP_GO:-}
-    if [[ -z "$GO_BINARY" && -x .tools/go/bin/go ]]; then
-        safe_file .tools/go/bin/go
-        GO_BINARY=$ROOT/.tools/go/bin/go
-    fi
-    if [[ -z "$GO_BINARY" ]]; then
-        local candidate
-        while IFS= read -r candidate; do
-            [[ "$candidate" != */shims/* ]] || continue
-            GO_BINARY=$candidate
-            break
-        done < <(type -a -p go || true)
-    fi
-    [[ "$GO_BINARY" == /* && -x "$GO_BINARY" ]] || fail 'Set BOOTSTRAP_GO to an actual Go binary, or install the pinned Go distribution in .tools/go'
+    GO_BINARY=$(python3 -I tools/sdk.py --find-go "$GO_TOOLCHAIN") || exit 1
     go_probe=$(mktemp .tools/go-version.XXXXXXXX)
     run "$GO_BINARY" env GOVERSION > "$go_probe"
     IFS= read -r actual < "$go_probe"

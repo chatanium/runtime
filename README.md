@@ -128,16 +128,16 @@ Use canonical absolute operator paths rather than relying on a writable cwd.
 ## Pinned builds and independent artifacts
 
 The language floor is Go 1.27.0; the compiler is pinned to **Go 1.27.3** in
-`.go-version` and `tools/versions.mk`. Supply an actual Go executable through
-`BOOTSTRAP_GO`, or install the pinned distribution at `.tools/go/bin/go`.
-Version-manager shims are not accepted as compiler executables. The scripts
-select the pinned toolchain, neutralize inherited `GOROOT`, and use read-only module files.
+`.go-version` and `tools/versions.mk`. Build scripts discover Go at
+`.tools/go/bin/go`, on your `PATH`, or through `goenv` without executing its
+shim. Set `BOOTSTRAP_GO` only to override discovery with an absolute path to a
+Go executable. The scripts still select the pinned toolchain, neutralize
+inherited `GOROOT`, and use read-only module files.
 
-For a goenv installation, resolve the real pinned executable rather than its shim:
-
-```sh
-export BOOTSTRAP_GO="$(GOENV_VERSION=1.27.3 goenv which go)"
-```
+Portable builds find GitHub CLI (`gh`) on your `PATH` to verify the bundled GVX
+release. Only a root-owned executable with a protected installation path is
+accepted. Set `TRUSTED_GH` only to select a different trusted absolute path.
+Neither Go nor `gh` is required on a host that only runs the built launcher.
 
 `make tools` installs Buf 1.75.0, protoc-gen-go v1.36.12 and
 protoc-gen-go-grpc v1.6.2 under `.tools/bin`. From the repository root:
@@ -168,8 +168,8 @@ Commit the SQL changes together with all three generated Go files
 |---|---|
 | `make prepare-sdk` | Download the pinned upstream DiscordGo module, verify its original checksums and apply the maintained patches; no application/native compilation |
 | `make list-module` | Display detailed manifest blocks with name/version, author, description, backend protocols and grouped capability names; no Go/native/SDK preparation, module build or runtime query |
-| `TRUSTED_GH=/usr/bin/gh make build-runtime GOOS=linux GOARCH=amd64` | Build the offline portable launcher, target-matched original GVX and worker, Linux guest bridge/preparer and their provenance |
-| `TRUSTED_GH=/usr/bin/gh make build-runtime GOOS=windows GOARCH=arm64` | Cross-build a Windows arm64 artifact on the Linux build host; this is not a WHPX execution test |
+| `make build-runtime GOOS=linux GOARCH=amd64` | Build the offline portable launcher, target-matched original GVX and worker, Linux guest bridge/preparer and their provenance |
+| `make build-runtime GOOS=windows GOARCH=arm64` | Cross-build a Windows arm64 artifact on the Linux build host; this is not a WHPX execution test |
 | `make build` | Build the portable runtime plus direct v2 module directories under `modules/` |
 | `make build-module music-bot` | Build only `modules/music-bot` into `bin/modules/music-bot/module`; any module folder name works without editing the Makefile |
 | `make build-module examples/general-bot` | Explicitly build the root-module example into `bin/examples/general-bot/module` |

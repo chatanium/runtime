@@ -39,7 +39,6 @@ jobs:
           SUFFIX: ${{ matrix.suffix }}
         run: |
           set -euo pipefail
-          export TRUSTED_GH="$(command -v gh)"
           make build-runtime GOOS="$TARGET_OS" GOARCH="$TARGET_ARCH"
           target="$TARGET_OS-$TARGET_ARCH"
           payload=".tools/release/portable/$target"
