@@ -58,7 +58,7 @@ class BuildProgress:
 
     def done(self, message):
         self.clear_detail()
-        print(f'{self.label(" OK ", "32")} {message}', flush=True)
+        print(f'{self.label("OK", "32")} {message}', flush=True)
 
     def failed(self, error):
         if self.detail_visible:
