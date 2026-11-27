@@ -16,6 +16,7 @@ __debug_bin
 !/.github/
 !/.github/**
 /internal/releasepayload/assets/
+/explanations/
 /plugin-impl-example
 __pycache__/
 *.py[cod]
