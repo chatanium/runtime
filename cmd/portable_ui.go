@@ -34,6 +34,9 @@ func commandView(cmd *cobra.Command, out io.Writer) terminalView {
 }
 
 func commandArea(cmd *cobra.Command) string {
+	if parent := cmd.Parent(); cmd.Name() == "acl" || parent != nil && parent.Name() == "acl" {
+		return "ACL"
+	}
 	name := cmd.CalledAs()
 	if name == "" {
 		name = cmd.Name()

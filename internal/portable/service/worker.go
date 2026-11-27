@@ -16,10 +16,18 @@ type workerLaunch struct {
 	lock                              *process.OwnerLock
 	init                              session.WorkerInit
 	stop, serveDone                   <-chan struct{}
+	acl                               <-chan workerACLRequest
 	startup, drain, cleanup, duration time.Duration
 	moduleCount                       int
 	observe                           func(session.WorkerEvent) error
 	fence                             func(context.Context) error
+}
+
+var errWorkerACLUncertain = errors.New("worker Discord ACL update outcome is uncertain")
+
+type workerACLRequest struct {
+	change session.WorkerACLChange
+	result chan error // Buffered so a departed caller cannot block the worker owner.
 }
 
 type readEvent struct {
@@ -54,6 +62,7 @@ func runWorker(ctx context.Context, w workerLaunch) (result error, observed bool
 	quit := make(chan struct{})
 	defer close(quit)
 	go func() {
+		defer close(events)
 		for {
 			event, err := session.ReadWorkerEvent(out)
 			select {
@@ -82,7 +91,22 @@ func runWorker(ctx context.Context, w workerLaunch) (result error, observed bool
 	ready := false
 	result = initErr
 	startupDone := startup.Done()
+	var pending workerACLRequest
+	var aclTimer *time.Timer
+	var aclDeadline <-chan time.Time
+	var aclWrite <-chan error
+	var aclWriteErr error
+	replyACL := func(err error) {
+		aclTimer.Stop()
+		aclDeadline = nil
+		pending.result <- err
+		pending = workerACLRequest{}
+	}
 	for result == nil {
+		var requests <-chan workerACLRequest
+		if ready && pending.result == nil && aclWrite == nil {
+			requests = w.acl
+		}
 		select {
 		case <-ctx.Done():
 			goto draining
@@ -98,6 +122,40 @@ func runWorker(ctx context.Context, w workerLaunch) (result error, observed bool
 			goto draining
 		case <-stopAfter:
 			goto draining
+		case req, ok := <-requests:
+			if !ok {
+				w.acl = nil
+				continue
+			}
+			// A stop already observable at admission must win over the update.
+			select {
+			case <-ctx.Done():
+			case <-w.stop:
+			case <-stopAfter:
+			case <-w.serveDone:
+				result = errors.New("worker control listener closed")
+			default:
+				pending = req
+				aclTimer = time.NewTimer(w.cleanup)
+				aclDeadline = aclTimer.C
+				done := make(chan error, 1)
+				aclWrite = done
+				// The owner may fence immediately on STOP, even if the pipe is full.
+				// It waits for this writer before sending DRAIN on the same stream.
+				go func() { done <- session.WriteWorkerACL(in, req.change) }()
+				continue
+			}
+			req.result <- errors.New("worker is draining")
+			goto draining
+		case aclWriteErr = <-aclWrite:
+			aclWrite = nil
+			if aclWriteErr != nil {
+				result = fmt.Errorf("writing worker ACL update: %w", aclWriteErr)
+				goto draining
+			}
+		case <-aclDeadline:
+			result = fmt.Errorf("worker ACL acknowledgement: %w", context.DeadlineExceeded)
+			goto draining
 		case msg := <-events:
 			if msg.err != nil {
 				result = fmt.Errorf("worker event stream before drain: %w", msg.err)
@@ -109,6 +167,19 @@ func runWorker(ctx context.Context, w workerLaunch) (result error, observed bool
 					result = errors.Join(result, w.observe(msg.event))
 				}
 				goto draining
+			}
+			if msg.event.Type == "ACL_ACK" {
+				ack := msg.event.ACL
+				if pending.result == nil || ack.Revision != pending.change.Revision {
+					result = errors.New("unexpected worker ACL acknowledgement revision")
+					goto draining
+				}
+				if ack.Status == session.WorkerACLApplied {
+					replyACL(nil)
+				} else {
+					replyACL(errors.New("worker rejected Discord ACL update"))
+				}
+				continue
 			}
 			if msg.event.Type != "STATUS" && (msg.event.Type != "READY" || ready) {
 				result = errors.New("unexpected worker lifecycle event")
@@ -135,6 +206,14 @@ func runWorker(ctx context.Context, w workerLaunch) (result error, observed bool
 
 draining:
 	stopStartup()
+	lateACLRevision := pending.change.Revision
+	if pending.result != nil {
+		err := errWorkerACLUncertain
+		if result != nil {
+			err = fmt.Errorf("%w: %w", errWorkerACLUncertain, result)
+		}
+		replyACL(err)
+	}
 	fenceCtx, stopFence := context.WithTimeout(context.Background(), w.cleanup)
 	fenceErr := w.fence(fenceCtx)
 	stopFence()
@@ -144,19 +223,40 @@ draining:
 	drainCtx, stopDrain := context.WithTimeout(context.Background(), w.drain)
 	defer stopDrain()
 	deadline, _ := drainCtx.Deadline()
-	stopWrite = context.AfterFunc(drainCtx, func() { in.Close() })
-	drainErr := session.WriteWorkerDrain(in, deadline)
-	stopWrite()
+	if aclWrite != nil {
+		select {
+		case aclWriteErr = <-aclWrite:
+		case <-drainCtx.Done():
+			aclWriteErr = drainCtx.Err()
+		}
+	}
+	// A failed write may have left a partial frame. Do not append DRAIN to it.
+	drainErr := aclWriteErr
+	if drainErr == nil {
+		stopWrite = context.AfterFunc(drainCtx, func() { in.Close() })
+		drainErr = session.WriteWorkerDrain(in, deadline)
+		stopWrite()
+	}
 	in.Close()
 	if drainErr == nil {
 		for {
 			select {
-			case msg := <-events:
+			case msg, ok := <-events:
+				if !ok {
+					drainErr = errors.New("worker event stream closed before DRAINED")
+					goto settle
+				}
 				if msg.err != nil {
 					drainErr = fmt.Errorf("worker closed before DRAINED: %w", msg.err)
 					goto settle
 				}
 				switch msg.event.Type {
+				case "ACL_ACK":
+					if lateACLRevision == 0 || msg.event.ACL.Revision != lateACLRevision {
+						drainErr = errors.New("unexpected worker ACL acknowledgement during drain")
+						goto settle
+					}
+					lateACLRevision = 0
 				case "DRAINED":
 					if len(msg.event.Modules) != w.moduleCount || !msg.event.Clean {
 						drainErr = errors.New("worker reported incomplete drain")

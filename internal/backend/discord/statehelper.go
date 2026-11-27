@@ -8,7 +8,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func (h *Helper) userChannelPermissions(ctx context.Context, request proto.Message) (proto.Message, error) {
+func (h *Helper) userChannelPermissions(ctx context.Context, request proto.Message) (_ proto.Message, err error) {
 	req, ok := request.(*wire.UserChannelPermissionsRequest)
 	if !ok || !snowflake(req.ChannelId) || (req.UserId != "@me" && !snowflake(req.UserId)) {
 		return nil, invalid("DISCORD_PERMISSION_TARGET_INVALID")
@@ -35,6 +35,12 @@ func (h *Helper) userChannelPermissions(ctx context.Context, request proto.Messa
 	if _, e := h.services.Authorizer.AwaitOperation(ctx, BackendID, "UserChannelPermissions"); e != nil {
 		return nil, e
 	}
+	admitted := false
+	defer func() {
+		if !admitted {
+			err = h.scopeLookupError(ctx, err)
+		}
+	}()
 	lookup, cancel := context.WithTimeout(ctx, h.backend.config.HTTP.RequestDeadline)
 	defer cancel()
 	channel, cached := h.backend.channelSnapshot(req.ChannelId)
@@ -77,6 +83,7 @@ func (h *Helper) userChannelPermissions(ctx context.Context, request proto.Messa
 	if e != nil {
 		return nil, e
 	}
+	admitted = true
 	defer op.Admission.Release()
 	bounded, done, e := h.gatewayContext(op.Context, op.Principal)
 	if e != nil {

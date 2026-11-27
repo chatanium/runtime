@@ -109,6 +109,9 @@ func (v *CredentialRegistry) Issue(ctx context.Context, owner InstancePrincipal,
 	if registration.ValidateSelector == nil || registration.ValidateSelector(b.Resource) != nil {
 		return nil, credentialError()
 	}
+	if b.BackendID == discordBackend && i.discordACL != nil && !i.discordACL.Allows(discordSelectorScope(b.Resource)) {
+		return nil, credentialError()
+	}
 	if len(i.credentials) >= v.manager.config.Limits.CredentialRefsPerInstance {
 		return nil, runtimeError(codes.ResourceExhausted, "CREDENTIAL_REFERENCE_LIMIT")
 	}
@@ -157,6 +160,9 @@ func (v *CredentialRegistry) Acquire(ctx context.Context, ref *wire.CredentialRe
 		return nil, credentialError()
 	}
 	if admission.policy.Backend != want.BackendID {
+		return nil, credentialError()
+	}
+	if want.BackendID == discordBackend && i.discordACL != nil && !i.discordACL.Allows(discordSelectorScope(r.ref.ResourceScope)) {
 		return nil, credentialError()
 	}
 	for lease := range r.leases {

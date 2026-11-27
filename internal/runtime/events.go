@@ -3,9 +3,11 @@ package runtime
 import (
 	"context"
 	"math"
+	"slices"
 	"sync"
 	"time"
 
+	"github.com/thirdscam/chatanium/internal/discordacl"
 	wire "github.com/thirdscam/chatanium/proto/core-v2"
 	core "github.com/thirdscam/chatanium/shared/core-v2"
 	"google.golang.org/grpc/codes"
@@ -33,6 +35,14 @@ type BackendEvent struct {
 	ReceivedAt   time.Time
 	Recipient    func(InstancePrincipal) bool
 	Project      func(context.Context, InstancePrincipal) (*anypb.Any, error)
+	// DiscordScopes is host-verified evidence covering the projected event,
+	// including nested resources. An empty list means it cannot be scoped.
+	DiscordScopes []discordacl.Scope
+}
+type queuedEvent struct {
+	raw           []byte
+	discord       bool
+	discordScopes []discordacl.Scope
 }
 type Dispatcher struct {
 	mu       sync.Mutex
@@ -57,6 +67,8 @@ func (d *Dispatcher) Admit(ctx context.Context, event BackendEvent) error {
 		return runtimeError(codes.ResourceExhausted, "INGRESS_SEQUENCE_EXHAUSTED")
 	}
 	d.sequence++
+	discord := event.BackendID == discordBackend
+	var discordScopes []discordacl.Scope
 	for moduleID := range m.installed {
 		m.mu.Lock()
 		i := m.instances[moduleID]
@@ -65,25 +77,29 @@ func (d *Dispatcher) Admit(ctx context.Context, event BackendEvent) error {
 			continue
 		}
 		i.mu.Lock()
-		eligible := i.state == Running && i.bound && eventAllowedLocked(i, policy, event.Scope)
+		eligible := i.state == Running && i.bound && eventAllowedLocked(i, policy, event.Scope) && (!discord || discordAllows(i.discordACL, event.DiscordScopes))
 		i.mu.Unlock()
 		if !eligible || event.Recipient != nil && !event.Recipient(i.principal) {
 			continue
 		}
 		payload, err := event.Project(ctx, i.principal)
-		if err != nil {
-			m.fail(i, "EVENT_PROJECTION_FAILED")
-			continue
-		}
-		if payload == nil || payload.TypeUrl != registeredEvent.PayloadTypeURL {
-			m.fail(i, "EVENT_PROJECTION_FAILED")
+		if err != nil || payload == nil || payload.TypeUrl != registeredEvent.PayloadTypeURL {
+			i.mu.Lock()
+			// Preserve the unmanaged failure policy. For a managed instance
+			// a newly revoked event is no longer its failure to own.
+			failed := (!discord || discordAllows(i.discordACL, event.DiscordScopes)) && i.failLocked("EVENT_PROJECTION_FAILED")
+			i.mu.Unlock()
+			if failed {
+				m.startStop(i, nil)
+			}
 			continue
 		}
 		envelope := &wire.EventEnvelope{BackendId: event.BackendID, BackendMajor: event.BackendMajor, EventType: event.EventType, IngressSequence: d.sequence, ReceivedAt: timestamppb.New(event.ReceivedAt), Payload: payload}
 		size := proto.Size(envelope)
 		i.mu.Lock()
-		// This check and reservation share the exact lifecycle/admission lock.
-		if i.state != Running || !i.bound || !eventAllowedLocked(i, policy, event.Scope) {
+		// Projection ran outside the instance lock. Recheck before reserving
+		// room in the queue.
+		if i.state != Running || !i.bound || !eventAllowedLocked(i, policy, event.Scope) || discord && !discordAllows(i.discordACL, event.DiscordScopes) {
 			i.mu.Unlock()
 			continue
 		}
@@ -100,7 +116,10 @@ func (d *Dispatcher) Admit(ctx context.Context, event BackendEvent) error {
 			m.fail(i, "EVENT_PROJECTION_FAILED")
 			continue
 		}
-		i.queue = append(i.queue, raw)
+		if discordScopes == nil && len(event.DiscordScopes) != 0 {
+			discordScopes = slices.Clone(event.DiscordScopes)
+		}
+		i.queue = append(i.queue, queuedEvent{raw: raw, discord: discord, discordScopes: discordScopes})
 		i.retainedCount++
 		i.retainedBytes += int64(len(raw))
 		i.signalLocked()
@@ -183,9 +202,25 @@ func (i *Instance) eventLane() {
 			}
 			continue
 		}
-		raw := i.queue[0]
-		i.queue[0] = nil
+		if i.discordACLWaiters != 0 && i.queue[0].discord {
+			changed := i.changed
+			i.mu.Unlock()
+			select {
+			case <-parent.Done():
+				return
+			case <-changed:
+			}
+			continue
+		}
+		event := i.queue[0]
+		i.queue[0] = queuedEvent{}
 		i.queue = i.queue[1:]
+		if event.discord && !discordAllows(i.discordACL, event.discordScopes) {
+			i.retainedCount--
+			i.retainedBytes -= int64(len(event.raw))
+			i.mu.Unlock()
+			continue
+		}
 		ref, err := randomID()
 		if err != nil {
 			i.mu.Unlock()
@@ -197,9 +232,12 @@ func (i *Instance) eventLane() {
 		i.workRef = ref
 		i.workContext = callback
 		i.callbackActive = true
+		if event.discord {
+			i.discordWork = event
+		}
 		i.mu.Unlock()
 		envelope := new(wire.EventEnvelope)
-		err = proto.Unmarshal(raw, envelope)
+		err = proto.Unmarshal(event.raw, envelope)
 		if err == nil {
 			err = i.hooks.OnEvent(callback, envelope)
 		}
@@ -207,10 +245,11 @@ func (i *Instance) eventLane() {
 		i.mu.Lock()
 		i.workRef = ""
 		i.workContext = nil
+		i.discordWork = queuedEvent{}
 		if err == nil {
 			i.callbackActive = false
 			i.retainedCount--
-			i.retainedBytes -= int64(len(raw))
+			i.retainedBytes -= int64(len(event.raw))
 			i.signalLocked()
 		}
 		i.mu.Unlock()
@@ -228,7 +267,7 @@ func (i *Instance) eventLane() {
 // FailEvent handles a known malformed event for which trustworthy target facts
 // cannot be recovered. It never fabricates a scope, projects a payload, issues
 // credentials or queues an event. Only RUNNING holders of that registered
-// event's actual capability are failed. Unknown events produce a diagnostic.
+// event's actual capability that do not require a verified Discord scope are failed.
 // reason must be a fixed trusted code, never source JSON or an error body.
 func (d *Dispatcher) FailEvent(ctx context.Context, backend, eventType, reason string) error {
 	d.mu.Lock()
@@ -284,7 +323,7 @@ func (d *Dispatcher) failBackendInstancesLocked(backend, reason, eventCapability
 		}
 		eligible := false
 		if eventCapability != "" {
-			if instance.state == Running && instance.bound && actual != nil {
+			if instance.state == Running && instance.bound && actual != nil && (backend != discordBackend || instance.discordACL == nil) {
 				grant := capability(actual.Capabilities, eventCapability)
 				eligible = grant != nil && len(grant.ResourceScopes) != 0
 			}

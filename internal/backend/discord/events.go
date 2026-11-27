@@ -151,6 +151,7 @@ func (b *Backend) observe(session *discordgo.Session, event *discordgo.Event, sd
 	}
 	received := time.Now()
 	admitted := runtime.BackendEvent{BackendID: BackendID, BackendMajor: BackendMajor, EventType: event.Type, Operation: descriptor.Capability, Scope: target, ReceivedAt: received}
+	admitted.DiscordScopes = b.eventDiscordEvidence(event.Type, raw, event.Struct, target)
 	admitted.Recipient = func(p runtime.InstancePrincipal) bool {
 		b.mu.Lock()
 		i := b.instances[p.InstanceID]

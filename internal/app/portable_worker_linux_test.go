@@ -17,6 +17,7 @@ import (
 	"time"
 
 	plugin "github.com/hashicorp/go-plugin"
+	"github.com/thirdscam/chatanium/internal/discordacl"
 	"github.com/thirdscam/chatanium/internal/host"
 	"github.com/thirdscam/chatanium/internal/portable/process"
 	"github.com/thirdscam/chatanium/internal/portable/session"
@@ -306,12 +307,29 @@ func TestPortableWorkerRunsAuthenticatedModuleAndDrains(t *testing.T) {
 		_ = out.Close()
 		workerDone <- err
 	}()
-	if err = session.WriteWorkerInit(toWorker, session.WorkerInit{Endpoint: endpoint, Credentials: creds, Config: raw}); err != nil {
+	if err = session.WriteWorkerInit(toWorker, session.WorkerInit{Endpoint: endpoint, Credentials: creds, Config: raw,
+		DiscordACL: map[string]discordacl.Policy{"fixture": {}}}); err != nil {
 		t.Fatal(err)
 	}
 	ready, err := session.ReadWorkerEvent(fromWorker)
 	if err != nil || ready.Type != "READY" || len(ready.Modules) != 1 || ready.Modules[0].State != string(runtime.Running) || ready.Modules[0].InstanceID == "" {
 		t.Fatalf("worker did not observe real RUNNING: %+v (%v)", ready, err)
+	}
+	for _, tc := range []struct {
+		moduleID string
+		revision uint64
+		status   string
+	}{
+		{"not-installed", 1, session.WorkerACLRejected},
+		{"fixture", 2, session.WorkerACLApplied},
+	} {
+		if err = session.WriteWorkerACL(toWorker, session.WorkerACLChange{ModuleID: tc.moduleID, Revision: tc.revision}); err != nil {
+			t.Fatal(err)
+		}
+		ack, err := session.ReadWorkerEvent(fromWorker)
+		if err != nil || ack.Type != "ACL_ACK" || ack.ACL == nil || ack.ACL.Revision != tc.revision || ack.ACL.Status != tc.status {
+			t.Fatalf("unexpected worker ACL acknowledgement: %+v (%v)", ack, err)
+		}
 	}
 	if err = session.WriteWorkerDrain(toWorker, time.Now().Add(5*time.Second)); err != nil {
 		t.Fatal(err)

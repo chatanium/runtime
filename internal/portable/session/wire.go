@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/thirdscam/chatanium/internal/discordacl"
 	"github.com/thirdscam/chatanium/internal/gvxcontract"
 )
 
@@ -25,6 +26,7 @@ const (
 	maxInitBytes    = 32 << 20
 	maxWorkerConfig = 16 << 20
 	maxSecrets      = 1 << 20
+	maxControlFrame = 1 << 20
 	maxWorkerEvent  = 1 << 20
 	maxEpochLength  = 128
 	maxTokenLength  = 32
@@ -115,18 +117,20 @@ func writeAll(w io.Writer, b []byte) error {
 }
 
 type WorkerInit struct {
-	Endpoint    string            `json:"endpoint"`
-	Credentials Credentials       `json:"credentials"`
-	Config      json.RawMessage   `json:"config"`
-	Secrets     map[string]string `json:"secrets,omitempty"`
+	Endpoint    string                       `json:"endpoint"`
+	Credentials Credentials                  `json:"credentials"`
+	Config      json.RawMessage              `json:"config"`
+	Secrets     map[string]string            `json:"secrets,omitempty"`
+	DiscordACL  map[string]discordacl.Policy `json:"discord_acl,omitempty"`
 }
 
 type workerInitFrame struct {
-	Type        string            `json:"type"`
-	Endpoint    string            `json:"endpoint"`
-	Credentials Credentials       `json:"credentials"`
-	Config      []byte            `json:"config"`
-	Secrets     map[string]string `json:"secrets,omitempty"`
+	Type        string                       `json:"type"`
+	Endpoint    string                       `json:"endpoint"`
+	Credentials Credentials                  `json:"credentials"`
+	Config      []byte                       `json:"config"`
+	Secrets     map[string]string            `json:"secrets,omitempty"`
+	DiscordACL  map[string]discordacl.Policy `json:"discord_acl,omitempty"`
 }
 
 func (v WorkerInit) valid() bool {
@@ -140,6 +144,14 @@ func (v WorkerInit) valid() bool {
 			return false
 		}
 	}
+	if len(v.DiscordACL) > maxModules {
+		return false
+	}
+	for id := range v.DiscordACL {
+		if !validWorkerModuleID(id) {
+			return false
+		}
+	}
 	return true
 }
 
@@ -148,7 +160,7 @@ func WriteWorkerInit(w io.Writer, init WorkerInit) error {
 		return errProtocol
 	}
 	return writeFrame(w, maxInitBytes, workerInitFrame{Type: "INIT", Endpoint: init.Endpoint,
-		Credentials: init.Credentials, Config: init.Config, Secrets: init.Secrets})
+		Credentials: init.Credentials, Config: init.Config, Secrets: init.Secrets, DiscordACL: init.DiscordACL})
 }
 
 func ReadWorkerInit(r io.Reader) (WorkerInit, error) {
@@ -156,42 +168,88 @@ func ReadWorkerInit(r io.Reader) (WorkerInit, error) {
 	if err := readFrame(r, maxInitBytes, &msg); err != nil {
 		return WorkerInit{}, err
 	}
-	init := WorkerInit{Endpoint: msg.Endpoint, Credentials: msg.Credentials, Config: msg.Config, Secrets: msg.Secrets}
+	init := WorkerInit{Endpoint: msg.Endpoint, Credentials: msg.Credentials, Config: msg.Config, Secrets: msg.Secrets, DiscordACL: msg.DiscordACL}
 	if msg.Type != "INIT" || !init.valid() {
 		return WorkerInit{}, errProtocol
 	}
 	return init, nil
 }
 
-type workerDrainFrame struct {
-	Type     string    `json:"type"`
-	Deadline time.Time `json:"deadline"`
+type WorkerACLChange struct {
+	ModuleID string
+	Revision uint64
+	Policy   discordacl.Policy
+}
+
+type WorkerControl struct {
+	DrainDeadline time.Time
+	ACLChange     WorkerACLChange
+}
+
+type workerControlFrame struct {
+	Type     string             `json:"type"`
+	Deadline *time.Time         `json:"deadline,omitempty"`
+	ModuleID string             `json:"module_id,omitempty"`
+	Revision uint64             `json:"revision,omitempty"`
+	Policy   *discordacl.Policy `json:"policy,omitempty"`
+}
+
+func validWorkerModuleID(id string) bool {
+	return id != "" && len(id) <= 256 && utf8.ValidString(id) && !strings.ContainsAny(id, "\x00\r\n")
 }
 
 func WriteWorkerDrain(w io.Writer, deadline time.Time) error {
 	if deadline.IsZero() {
 		return errProtocol
 	}
-	return writeFrame(w, 256, workerDrainFrame{Type: "DRAIN", Deadline: deadline.UTC()})
+	deadline = deadline.UTC()
+	return writeFrame(w, 256, workerControlFrame{Type: "DRAIN", Deadline: &deadline})
 }
 
-func ReadWorkerDrain(r io.Reader) (time.Time, error) {
-	var msg workerDrainFrame
-	if err := readFrame(r, 256, &msg); err != nil {
-		return time.Time{}, err
+func WriteWorkerACL(w io.Writer, change WorkerACLChange) error {
+	if !validWorkerModuleID(change.ModuleID) || change.Revision == 0 {
+		return errProtocol
 	}
-	if msg.Type != "DRAIN" || msg.Deadline.IsZero() {
-		return time.Time{}, errProtocol
+	return writeFrame(w, maxControlFrame, workerControlFrame{
+		Type: "ACL_UPDATE", ModuleID: change.ModuleID, Revision: change.Revision, Policy: &change.Policy,
+	})
+}
+
+func ReadWorkerControl(r io.Reader) (WorkerControl, error) {
+	var msg workerControlFrame
+	if err := readFrame(r, maxControlFrame, &msg); err != nil {
+		return WorkerControl{}, err
 	}
-	return msg.Deadline, nil
+	switch msg.Type {
+	case "DRAIN":
+		if msg.Deadline != nil && !msg.Deadline.IsZero() && msg.ModuleID == "" && msg.Revision == 0 && msg.Policy == nil {
+			return WorkerControl{DrainDeadline: *msg.Deadline}, nil
+		}
+	case "ACL_UPDATE":
+		if msg.Deadline == nil && validWorkerModuleID(msg.ModuleID) && msg.Revision != 0 && msg.Policy != nil {
+			return WorkerControl{ACLChange: WorkerACLChange{ModuleID: msg.ModuleID, Revision: msg.Revision, Policy: *msg.Policy}}, nil
+		}
+	}
+	return WorkerControl{}, errProtocol
 }
 
 type ModuleStatus struct {
-	ModuleID        string `json:"module_id"`
-	InstanceID      string `json:"instance_id,omitempty"`
-	State           string `json:"state"`
-	Reason          string `json:"reason,omitempty"`
-	CleanupComplete bool   `json:"cleanup_complete"`
+	ModuleID            string `json:"module_id"`
+	InstanceID          string `json:"instance_id,omitempty"`
+	State               string `json:"state"`
+	Reason              string `json:"reason,omitempty"`
+	CleanupComplete     bool   `json:"cleanup_complete"`
+	DiscordAccessDenied bool   `json:"discord_access_denied,omitempty"`
+}
+
+const (
+	WorkerACLApplied  = "APPLIED"
+	WorkerACLRejected = "REJECTED"
+)
+
+type WorkerACLAck struct {
+	Revision uint64 `json:"revision"`
+	Status   string `json:"status"`
 }
 
 // READY and DRAINED may be empty; the supervisor checks the approved count.
@@ -200,15 +258,23 @@ type WorkerEvent struct {
 	Modules []ModuleStatus `json:"modules,omitempty"`
 	Clean   bool           `json:"clean,omitempty"`
 	Reason  string         `json:"reason,omitempty"`
+	ACL     *WorkerACLAck  `json:"acl,omitempty"`
 }
 
 func (ev WorkerEvent) valid() bool {
+	if ev.Type == "ACL_ACK" {
+		return ev.ACL != nil && ev.ACL.Revision != 0 &&
+			(ev.ACL.Status == WorkerACLApplied || ev.ACL.Status == WorkerACLRejected) &&
+			len(ev.Modules) == 0 && !ev.Clean && ev.Reason == ""
+	}
+	if ev.ACL != nil {
+		return false
+	}
 	if len(ev.Modules) > maxModules {
 		return false
 	}
 	for _, module := range ev.Modules {
-		if module.ModuleID == "" || len(module.ModuleID) > 256 || !utf8.ValidString(module.ModuleID) ||
-			strings.ContainsAny(module.ModuleID, "\x00\r\n") || len(module.Reason) > 128 ||
+		if !validWorkerModuleID(module.ModuleID) || len(module.Reason) > 128 ||
 			ev.Clean && !module.CleanupComplete || ev.Type == "READY" && module.State != "RUNNING" {
 			return false
 		}

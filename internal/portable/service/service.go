@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/thirdscam/chatanium/internal/bundle"
@@ -188,8 +189,17 @@ func Run(ctx context.Context, dir, expectedID string, duration time.Duration, ob
 	if err = process.ProtectPrivateDir(controlDir); err != nil {
 		return err
 	}
+	workerLife, cancelWorker := context.WithCancelCause(ctx)
+	defer cancelWorker(nil)
+	acl, err := loadACL(ctx, db, cfg, epoch.ID, record.ConfigRevision, strings.TrimPrefix(secrets["discord:bot_token"], "Bot "), workerLife, func() {
+		cancelWorker(errors.New("worker did not confirm the saved Discord ACL"))
+	})
+	if err != nil {
+		return err
+	}
+	initialACL := acl.initialPolicies()
 	fence := func(c context.Context) error { return db.RequestStop(c, epoch.ID) }
-	control, err = listenControl(filepath.Join(controlDir, controlLeaf), epoch.ID, fence, nil)
+	control, err = listenControl(filepath.Join(controlDir, controlLeaf), epoch.ID, fence, acl.control)
 	if err != nil {
 		return err
 	}
@@ -208,15 +218,20 @@ func Run(ctx context.Context, dir, expectedID string, duration time.Duration, ob
 	go func() { defer close(serveDone); serveErr = session.Serve(life, listener, creds, backend) }()
 	defer func() { cancelServe(); <-serveDone; cleanupErr = errors.Join(cleanupErr, serveErr) }()
 	defer control.drain()
-	result, workerObserved = runWorker(ctx, workerLaunch{
+	result, workerObserved = runWorker(workerLife, workerLaunch{
 		self: self, program: worker, dir: i.Path, lock: i.OwnerLock,
-		init: session.WorkerInit{Config: i.Manifest.Config, Credentials: creds, Endpoint: endpoint, Secrets: secrets},
+		init: session.WorkerInit{Config: i.Manifest.Config, Credentials: creds, Endpoint: endpoint, Secrets: secrets, DiscordACL: initialACL},
 		stop: control.request, serveDone: serveDone, startup: time.Duration(cfg.Defaults.StartupDeadline),
+		acl: acl.worker,
 		drain: time.Duration(cfg.Defaults.DrainDeadline) + cleanupTime, cleanup: cleanupTime,
 		duration: duration, moduleCount: len(modules),
 		observe: func(event session.WorkerEvent) error {
 			if event.Type == "READY" {
 				control.markReady()
+				for n, module := range event.Modules {
+					policy, managed := initialACL[module.ModuleID]
+					event.Modules[n].DiscordAccessDenied = managed && len(policy.Scopes) == 0
+				}
 			}
 			if observe != nil {
 				return observe(event)
@@ -228,6 +243,9 @@ func Run(ctx context.Context, dir, expectedID string, duration time.Duration, ob
 			return fence(c)
 		},
 	})
+	if cause := context.Cause(workerLife); cause != nil && ctx.Err() == nil {
+		result = errors.Join(result, cause)
+	}
 	return result
 }
 

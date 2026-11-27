@@ -9,6 +9,7 @@ import (
 
 	"github.com/hashicorp/go-hclog"
 	plugin "github.com/hashicorp/go-plugin"
+	"github.com/thirdscam/chatanium/internal/discordacl"
 	"github.com/thirdscam/chatanium/internal/host"
 	wire "github.com/thirdscam/chatanium/proto/core-v2"
 	core "github.com/thirdscam/chatanium/shared/core-v2"
@@ -26,6 +27,7 @@ type Manager struct {
 	options     ManagerOptions
 	instances   map[ModuleID]*Instance
 	installed   map[ModuleID]struct{}
+	discordACL  map[ModuleID]*discordacl.Policy
 	lifecycles  map[ModuleID]*moduleLifecycle
 	backends    map[string]BackendRegistration
 	operations  map[string]OperationPolicy
@@ -52,6 +54,10 @@ func NewManager(config Config, options ManagerOptions) (*Manager, error) {
 	for _, s := range config.Modules {
 		m.installed[s.ModuleID] = struct{}{}
 	}
+	if err := m.setInitialDiscordACL(options.DiscordACL); err != nil {
+		return nil, err
+	}
+	m.options.DiscordACL = nil
 	for _, p := range []OperationPolicy{{Operation: "GetConfig", Capability: core.CapabilityConfigRead, InitSafe: true, ResourceFree: true, Class: FiniteOperation}, {Operation: "Upload", Capability: core.CapabilityUpload, ResourceFree: true, Class: LongLivedOperation}, {Operation: "DeleteUpload", Capability: core.CapabilityUpload, InitSafe: true, ResourceFree: true, Class: OwnerCleanupOperation}} {
 		m.operations[operationKey(p.Backend, p.Operation)] = p
 	}
@@ -176,6 +182,7 @@ func (m *Manager) launch(ctx context.Context, spec ModuleSpec) (result *Instance
 	startup, cancelStartup := context.WithTimeout(ctx, time.Duration(m.config.Defaults.StartupDeadline))
 	lifetime, cancelLifetime := context.WithCancel(context.Background())
 	i := &Instance{manager: m, principal: InstancePrincipal{spec.ModuleID, InstanceID(id)}, spec: spec, state: Starting, gate: make(chan struct{}), changed: make(chan struct{}), startup: startup, cancelStartup: cancelStartup, lifetime: lifetime, cancelLifetime: cancelLifetime, admissions: make(map[*Admission]struct{}), stopDone: make(chan struct{}), launchDone: make(chan struct{}), credentials: make(map[string]*credentialRecord), drainReady: make(chan struct{})}
+	i.discordACL = m.discordACL[spec.ModuleID]
 	m.instances[spec.ModuleID] = i
 	m.mu.Unlock()
 	defer func() {

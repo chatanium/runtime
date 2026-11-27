@@ -9,6 +9,7 @@ Read [CONCEPT.md](CONCEPT.md) before designing or implementing changes. Plan bef
 | `main.go`, `cmd/` | Launcher and user-facing CLI: `serve`, setup, review, diagnostics and maintenance. Also contains separate worker and guest helper entry points. |
 | `internal/portable/` | User-local installation, verified image preparation, process supervision, IPC, sandbox policy and SQLite lifecycle ledger. |
 | `internal/app/`, `internal/runtime/`, `internal/backend/` | Worker composition, backend-neutral module lifecycle and optional chat-provider adapters. |
+| `internal/discordacl/`, `internal/discordsetup/` | Discord access policy types and host-only discovery for setup and ACL review. |
 | `internal/bundle/`, `internal/releasepayload/`, `tools/build/` | Target-specific release packaging, GVX pins, embedded payload and native release qualification. |
 | `internal/bootstrap/`, Linux host service code in `internal/host/`, `tools/dev/` | Legacy Linux administration and development paths. Shared runtime contracts remain in `internal/host/`; keep the privileged paths out of portable startup. |
 | `proto/`, `shared/` | Public v2 protocol and module SDK. Provider-specific Discord types are separate from `core-v2`. |

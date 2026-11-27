@@ -136,6 +136,7 @@ type moduleJSON struct {
 	CredentialBindings []ProvisionedCredentialBinding `json:"credential_bindings"`
 	ConfigRevision     string                         `json:"config_revision"`
 	ApprovalRevision   string                         `json:"approval_revision"`
+	DiscordACLRequired bool                           `json:"discord_acl_required,omitempty"`
 }
 
 // DecodeConfig rejects unknown and duplicate fields; module JSON bytes are kept exact.
@@ -173,7 +174,7 @@ func DecodeConfig(raw []byte) (Config, error) {
 		if protojson.Unmarshal(m.Approval, grants) != nil {
 			return Config{}, invalidConfig()
 		}
-		c.Modules = append(c.Modules, ModuleSpec{ModuleID: m.ModuleID, ImageDigest: m.Image, Entrypoint: m.Entrypoint, Args: m.Args, UID: m.UID, GID: m.GID, Config: &wire.JSONValue{Json: bytes.Clone(m.Config)}, Approval: grants, CredentialBindings: m.CredentialBindings, ConfigRevision: m.ConfigRevision, ApprovalRevision: m.ApprovalRevision})
+		c.Modules = append(c.Modules, ModuleSpec{ModuleID: m.ModuleID, ImageDigest: m.Image, Entrypoint: m.Entrypoint, Args: m.Args, UID: m.UID, GID: m.GID, Config: &wire.JSONValue{Json: bytes.Clone(m.Config)}, Approval: grants, CredentialBindings: m.CredentialBindings, ConfigRevision: m.ConfigRevision, ApprovalRevision: m.ApprovalRevision, DiscordACLRequired: m.DiscordACLRequired})
 	}
 	if err := c.Validate(); err != nil {
 		return Config{}, err
@@ -371,6 +372,11 @@ func (c Config) validateSpec(s ModuleSpec) error {
 	}
 	if strings.TrimSpace(string(s.ModuleID)) == "" || !imageOK || s.UID == 0 || s.GID == 0 || !pathOK || s.Approval == nil {
 		return invalidConfig()
+	}
+	if s.DiscordACLRequired {
+		if backend, present := c.Backends["discord"]; c.Host.Format != PortableFormat || !present || backend.Major != 2 || backendGrant(s.Approval, "discord") == nil {
+			return invalidConfig()
+		}
 	}
 	if c.Host.Network.Profile == host.NetworkNone && s.Approval.EgressPolicy == wire.EgressPolicy_EGRESS_POLICY_PUBLIC_INTERNET {
 		return invalidConfig()

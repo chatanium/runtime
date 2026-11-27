@@ -250,5 +250,5 @@ func (h *Helper) provisionedCredential(ctx context.Context, request proto.Messag
 		return nil, err
 	}
 	defer op.Admission.Release()
-	return (instanceEncoder{backend: h.backend, services: h.services}).EncodeCredential(ctx, core.CredentialBinding{BackendID: BackendID, Purpose: secret.Purpose, ResourceScope: secret.Resource, ExpiresAt: secret.ExpiresAt}, secret.Value)
+	return (instanceEncoder{backend: h.backend, services: h.services}).EncodeCredential(op.Context, core.CredentialBinding{BackendID: BackendID, Purpose: secret.Purpose, ResourceScope: secret.Resource, ExpiresAt: secret.ExpiresAt}, secret.Value)
 }

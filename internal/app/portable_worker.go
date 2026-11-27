@@ -8,6 +8,7 @@ import (
 	"time"
 
 	discordbackend "github.com/thirdscam/chatanium/internal/backend/discord"
+	"github.com/thirdscam/chatanium/internal/discordacl"
 	"github.com/thirdscam/chatanium/internal/portable/session"
 	runtime "github.com/thirdscam/chatanium/internal/runtime"
 	"github.com/thirdscam/chatanium/internal/runtime/upload"
@@ -59,11 +60,24 @@ func RunPortableWorker(ctx context.Context, input io.Reader, output io.Writer) e
 	life, cancel := context.WithCancel(ctx)
 	defer cancel()
 	readDone := make(chan struct{})
+	acl := make(chan session.WorkerACLChange, 1)
 	var command workerDrain
 	go func() {
-		command.deadline, command.err = session.ReadWorkerDrain(in)
-		close(readDone)
-		cancel()
+		defer cancel()
+		defer close(readDone)
+		for {
+			control, err := session.ReadWorkerControl(in)
+			if err != nil || !control.DrainDeadline.IsZero() {
+				command = workerDrain{deadline: control.DrainDeadline, err: err}
+				return
+			}
+			select {
+			case acl <- control.ACLChange:
+			default:
+				command.err = errors.New("unexpected queued worker ACL change")
+				return
+			}
+		}
 	}()
 	defer func() { _ = in.Close(); <-readDone }()
 
@@ -99,7 +113,7 @@ func RunPortableWorker(ctx context.Context, input io.Reader, output io.Writer) e
 	defer func() { close(watchDone); <-watchExit }()
 
 	work := portableWork{config: config}
-	workErr := work.run(life, client, init.Secrets, out)
+	workErr := work.run(life, client, init.Secrets, init.DiscordACL, acl, out)
 	deadline := time.Now().Add(shutdownBudget)
 	var requested workerDrain
 	select {
@@ -155,7 +169,7 @@ type portableWork struct {
 	cancelBackend context.CancelFunc
 }
 
-func (w *portableWork) run(ctx context.Context, client *session.Client, secrets map[string]string, out io.Writer) error {
+func (w *portableWork) run(ctx context.Context, client *session.Client, secrets map[string]string, initialACL map[string]discordacl.Policy, acl <-chan session.WorkerACLChange, out io.Writer) error {
 	startup, cancel := context.WithTimeout(ctx, time.Duration(w.config.Defaults.StartupDeadline))
 	defer cancel()
 	probe, finishProbe := context.WithTimeout(startup, time.Duration(w.config.Limits.HostOperationDeadline))
@@ -198,8 +212,15 @@ func (w *portableWork) run(ctx context.Context, client *session.Client, secrets 
 		registrations = append(registrations, w.backend.Registration())
 	}
 	clear(secrets)
+	var discordACL map[runtime.ModuleID]discordacl.Policy
+	if len(initialACL) != 0 {
+		discordACL = make(map[runtime.ModuleID]discordacl.Policy, len(initialACL))
+		for id, policy := range initialACL {
+			discordACL[runtime.ModuleID(id)] = policy
+		}
+	}
 	w.manager, err = runtime.NewManager(w.config, runtime.ManagerOptions{Host: client, Backends: registrations,
-		FileTransfer: w.files.RegistrarFactory, FileCleanup: w.files.CleanupInstance})
+		FileTransfer: w.files.RegistrarFactory, FileCleanup: w.files.CleanupInstance, DiscordACL: discordACL})
 	if err != nil {
 		return errors.New("portable runtime initialization failed")
 	}
@@ -230,22 +251,42 @@ func (w *portableWork) run(ctx context.Context, client *session.Client, secrets 
 	if err = session.WriteWorkerEvent(out, session.WorkerEvent{Type: "READY", Modules: previous}); err != nil {
 		return err
 	}
-	if len(previous) == 0 {
-		<-ctx.Done()
-		return nil
+	var tick <-chan time.Time
+	if len(previous) != 0 {
+		ticker := time.NewTicker(time.Duration(w.config.Limits.ReadinessPollInterval))
+		defer ticker.Stop()
+		tick = ticker.C
 	}
 	next := make([]session.ModuleStatus, 0, len(previous))
-	ticker := time.NewTicker(time.Duration(w.config.Limits.ReadinessPollInterval))
-	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
+		case change := <-acl:
+			// DRAIN cancels ctx directly from the frame reader, including while an
+			// update is queued or waiting to enter the manager.
+			if ctx.Err() != nil {
+				return nil
+			}
+			apply, finishApply := context.WithTimeout(ctx, time.Duration(w.config.Limits.HostOperationDeadline))
+			applyErr := w.manager.SetDiscordACL(apply, change.ModuleID, change.Policy)
+			finishApply()
+			if ctx.Err() != nil {
+				return nil
+			}
+			status := session.WorkerACLApplied
+			if applyErr != nil {
+				status = session.WorkerACLRejected
+			}
+			if err = session.WriteWorkerEvent(out, session.WorkerEvent{Type: "ACL_ACK",
+				ACL: &session.WorkerACLAck{Revision: change.Revision, Status: status}}); err != nil {
+				return err
+			}
 		case <-backendErrors:
 			if err = session.WriteWorkerEvent(out, session.WorkerEvent{Type: "STATUS", Modules: previous, Reason: "BACKEND_ERROR"}); err != nil {
 				return err
 			}
-		case <-ticker.C:
+		case <-tick:
 			next = w.statuses(next[:0])
 			if !slices.Equal(previous, next) {
 				if err = session.WriteWorkerEvent(out, session.WorkerEvent{Type: "STATUS", Modules: next}); err != nil {

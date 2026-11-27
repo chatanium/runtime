@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	plugin "github.com/hashicorp/go-plugin"
+	"github.com/thirdscam/chatanium/internal/discordacl"
 	"github.com/thirdscam/chatanium/internal/host"
 	wire "github.com/thirdscam/chatanium/proto/core-v2"
 	core "github.com/thirdscam/chatanium/shared/core-v2"
@@ -53,6 +54,7 @@ type ModuleSpec struct {
 	CredentialBindings []ProvisionedCredentialBinding `json:"credential_bindings"`
 	ConfigRevision     string                         `json:"config_revision"`
 	ApprovalRevision   string                         `json:"approval_revision"`
+	DiscordACLRequired bool                           `json:"discord_acl_required,omitempty"`
 }
 type InstanceSnapshot struct {
 	Principal        InstancePrincipal
@@ -95,6 +97,7 @@ type Instance struct {
 	drainReady         chan struct{}
 	bound              bool
 	grants             *wire.Grants
+	discordACL         *discordacl.Policy
 	activating         bool
 	gate               chan struct{}
 	changed            chan struct{}
@@ -108,7 +111,7 @@ type Instance struct {
 	admissions         map[*Admission]struct{}
 	workRef            string
 	workContext        context.Context
-	queue              [][]byte
+	queue              []queuedEvent
 	retainedCount      int
 	retainedBytes      int64
 	incomplete         int
@@ -125,6 +128,8 @@ type Instance struct {
 	laneDone           chan struct{}
 	drainSent          bool
 	callbackActive     bool
+	discordWork        queuedEvent
+	discordACLWaiters  int
 	credentials        map[string]*credentialRecord
 	credentialsRevoked bool
 }
@@ -230,4 +235,5 @@ type ManagerOptions struct {
 	Backends        []BackendRegistration
 	FileTransfer    FileTransferFactory
 	FileCleanup     InstanceCleanup
+	DiscordACL      map[ModuleID]discordacl.Policy
 }

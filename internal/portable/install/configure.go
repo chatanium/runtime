@@ -40,6 +40,7 @@ type GenerateOptions struct {
 	UID, GID            uint32
 	ModuleConfig, Grant []byte
 	Network             store.NetworkProfile
+	discordACLRequired  bool
 }
 
 func GenerateConfig(path string, options GenerateOptions) (Candidate, error) {
@@ -105,6 +106,7 @@ func (i *Installation) candidateForModule(cfg runtime.Config, g images.Generatio
 		return Candidate{}, err
 	}
 	spec := runtime.ModuleSpec{ModuleID: runtime.ModuleID(options.ModuleID), ImageDigest: "record:" + g.Digest, Entrypoint: entrypoint, Args: args, UID: options.UID, GID: options.GID, Config: &wire.JSONValue{Json: configDoc}, Approval: grant, ConfigRevision: hashBytes(configDoc), ApprovalRevision: hashBytes(grantDoc)}
+	spec.DiscordACLRequired = options.discordACLRequired
 	index := slices.IndexFunc(cfg.Modules, func(old runtime.ModuleSpec) bool { return old.ModuleID == spec.ModuleID })
 	if index == -1 {
 		cfg.Modules = append(cfg.Modules, spec)
@@ -113,6 +115,9 @@ func (i *Installation) candidateForModule(cfg runtime.Config, g images.Generatio
 			return Candidate{}, fmt.Errorf("module %q is already installed", spec.ModuleID)
 		}
 		spec.CredentialBindings = cfg.Modules[index].CredentialBindings
+		if cfg.Modules[index].DiscordACLRequired && slices.ContainsFunc(grant.GetBackends(), func(b *wire.BackendGrant) bool { return b.GetBackendId() == "discord" }) {
+			spec.DiscordACLRequired = true
+		}
 		cfg.Modules[index] = spec
 	}
 	p := Candidate{Format: Format, Prepared: make(map[string]string), Network: make(map[string]store.NetworkProfile)}

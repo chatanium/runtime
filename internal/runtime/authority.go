@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/thirdscam/chatanium/internal/discordacl"
 	wire "github.com/thirdscam/chatanium/proto/core-v2"
 	core "github.com/thirdscam/chatanium/shared/core-v2"
 	"google.golang.org/grpc"
@@ -32,9 +33,11 @@ type OperationPolicy struct {
 	Class        OperationClass
 }
 type AccessRequest struct {
-	Backend   string
-	Operation string
-	Scopes    []*wire.ResourceScope
+	Backend           string
+	Operation         string
+	Scopes            []*wire.ResourceScope
+	DiscordUnscopable bool
+	DiscordGuildWide  bool
 }
 type Authorizer struct{ instance *Instance }
 type principalKey struct{}
@@ -46,13 +49,14 @@ type rpcCall struct {
 // Admission is an operation-scoped authority lease, never wire identity. Its
 // context is canceled at expiry, drain expiry or terminal failure.
 type Admission struct {
-	instance  *Instance
-	principal InstancePrincipal
-	policy    OperationPolicy
-	ctx       context.Context
-	cancel    context.CancelFunc
-	stopWork  func() bool
-	released  bool
+	instance      *Instance
+	principal     InstancePrincipal
+	policy        OperationPolicy
+	ctx           context.Context
+	cancel        context.CancelFunc
+	stopWork      func() bool
+	released      bool
+	discordScopes []discordacl.Scope
 }
 
 func (a *Admission) Context() context.Context     { return a.ctx }
@@ -151,11 +155,16 @@ func (a *Authorizer) operationLocked(ctx context.Context, backend, operation str
 
 // Every target is required (AND); the actual grant's scopes remain alternatives
 // (OR). All targets are checked while holding the one instance authority lock.
-func (a *Authorizer) checkScopesLocked(policy OperationPolicy, grant *wire.CapabilityGrant, scopes []*wire.ResourceScope) error {
+func (a *Authorizer) checkScopesLocked(policy OperationPolicy, grant *wire.CapabilityGrant, req *AccessRequest) error {
+	scopes := req.Scopes
 	if len(scopes) == 0 {
 		return runtimeError(codes.PermissionDenied, "RESOURCE_SCOPE_DENIED")
 	}
 	if policy.ResourceFree && len(scopes) != 1 {
+		return runtimeError(codes.PermissionDenied, "RESOURCE_SCOPE_DENIED")
+	}
+	acl := a.instance.discordACL
+	if policy.Backend == discordBackend && acl != nil && req.DiscordUnscopable {
 		return runtimeError(codes.PermissionDenied, "RESOURCE_SCOPE_DENIED")
 	}
 	for _, scope := range scopes {
@@ -168,6 +177,15 @@ func (a *Authorizer) checkScopesLocked(policy OperationPolicy, grant *wire.Capab
 		if policy.Backend != "" {
 			registration := a.instance.manager.backends[policy.Backend]
 			if registration.ValidateSelector == nil || registration.ValidateSelector(scope.GetSelector()) != nil {
+				return runtimeError(codes.PermissionDenied, "RESOURCE_SCOPE_DENIED")
+			}
+		}
+		if policy.Backend == discordBackend && acl != nil {
+			target := discordScope(scope)
+			if req.DiscordGuildWide {
+				target.ChannelID = ""
+			}
+			if !acl.Allows(target) {
 				return runtimeError(codes.PermissionDenied, "RESOURCE_SCOPE_DENIED")
 			}
 		}
@@ -189,7 +207,7 @@ func operationKey(backend, operation string) string { return backend + "\x00" + 
 // eligibleLocked is the shared state and activation policy for both readonly
 // relationship lookups and final resource admission. It returns with i.mu held,
 // including on error. Gate waits temporarily release only that same lock.
-func (a *Authorizer) eligibleLocked(ctx context.Context, backend, operation string, scopes []*wire.ResourceScope, checkScopes bool) (*rpcCall, OperationPolicy, error) {
+func (a *Authorizer) eligibleLocked(ctx context.Context, backend, operation string, req *AccessRequest) (*rpcCall, OperationPolicy, error) {
 	i := a.instance
 	for {
 		if ctx.Err() != nil {
@@ -199,10 +217,13 @@ func (a *Authorizer) eligibleLocked(ctx context.Context, backend, operation stri
 		if err != nil {
 			return nil, policy, err
 		}
-		if checkScopes {
-			if err := a.checkScopesLocked(policy, grant, scopes); err != nil {
+		if req != nil {
+			if err := a.checkScopesLocked(policy, grant, req); err != nil {
 				return nil, policy, err
 			}
+		}
+		if backend == discordBackend && i.discordACL != nil && (policy.ResourceFree || isDiscordNativeVoice(policy.Capability) || len(i.discordACL.Scopes) == 0) {
+			return nil, policy, runtimeError(codes.PermissionDenied, "RESOURCE_SCOPE_DENIED")
 		}
 		if i.state == Ready && i.activating && !policy.InitSafe && policy.Class != OwnerCleanupOperation {
 			gate, startup := i.gate, i.startup
@@ -264,7 +285,7 @@ func (a *Authorizer) AwaitOperation(ctx context.Context, backend, operation stri
 	i := a.instance
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	if _, _, err := a.eligibleLocked(ctx, backend, operation, nil, false); err != nil {
+	if _, _, err := a.eligibleLocked(ctx, backend, operation, nil); err != nil {
 		return InstancePrincipal{}, err
 	}
 	return i.principal, nil
@@ -274,7 +295,7 @@ func (a *Authorizer) Authorize(ctx context.Context, req AccessRequest) (Instance
 	i := a.instance
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	call, policy, err := a.eligibleLocked(ctx, req.Backend, req.Operation, req.Scopes, true)
+	call, policy, err := a.eligibleLocked(ctx, req.Backend, req.Operation, &req)
 	if err != nil {
 		return InstancePrincipal{}, err
 	}
@@ -284,6 +305,16 @@ func (a *Authorizer) Authorize(ctx context.Context, req AccessRequest) (Instance
 	}
 	admitted, cancel := context.WithCancel(ctx)
 	lease := &Admission{instance: i, principal: i.principal, policy: policy, ctx: admitted, cancel: cancel}
+	if policy.Backend == discordBackend && !req.DiscordUnscopable {
+		lease.discordScopes = make([]discordacl.Scope, 0, len(req.Scopes))
+		for _, target := range req.Scopes {
+			resolved := discordScope(target)
+			if req.DiscordGuildWide {
+				resolved.ChannelID = ""
+			}
+			lease.discordScopes = append(lease.discordScopes, resolved)
+		}
+	}
 	i.admissions[lease] = struct{}{}
 	call.admissions = append(call.admissions, lease)
 	if i.state == Draining && policy.Class == FiniteOperation {

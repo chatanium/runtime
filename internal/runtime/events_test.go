@@ -31,13 +31,13 @@ func regressionQueuedEvents(t *testing.T, i *Instance) []*wire.EventEnvelope {
 	defer i.mu.Unlock()
 	var events []*wire.EventEnvelope
 	var queuedBytes int64
-	for _, raw := range i.queue {
+	for _, event := range i.queue {
 		e := new(wire.EventEnvelope)
-		if err := proto.Unmarshal(raw, e); err != nil {
+		if err := proto.Unmarshal(event.raw, e); err != nil {
 			t.Fatal(err)
 		}
 		events = append(events, e)
-		queuedBytes += int64(len(raw))
+		queuedBytes += int64(len(event.raw))
 	}
 	if i.retainedCount < len(events) || i.retainedBytes < queuedBytes {
 		t.Fatal("queue exceeds retained resource reservation")
@@ -72,7 +72,7 @@ func TestEventFIFOAndOverflowAreInstanceLocal(t *testing.T) {
 				// Model the eventLane's dequeue boundary without a fake hook:
 				// the serialized delivery leaves FIFO but still owns its budget.
 				slow.mu.Lock()
-				inflightBytes = int64(len(slow.queue[0]))
+				inflightBytes = int64(len(slow.queue[0].raw))
 				slow.queue = nil
 				slow.mu.Unlock()
 			}

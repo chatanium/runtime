@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	discordhttp "github.com/thirdscam/chatanium/internal/backend/discord/http"
+	"github.com/thirdscam/chatanium/internal/discordacl"
 	"github.com/thirdscam/chatanium/internal/runtime/upload"
 	corewire "github.com/thirdscam/chatanium/proto/core-v2"
 	"google.golang.org/protobuf/proto"
@@ -229,7 +230,20 @@ func (h *Helper) validateResultScopes(operation string, raw []byte, op *Operatio
 		parent["user_id"] = op.invokingUser
 	}
 	graph := resourceGraphContext{grant: grant, invokingUser: op.invokingUser}
-	return graph.check(raw, resultKind(operation), parent, 0, false)
+	if err := graph.check(raw, resultKind(operation), parent, 0, false); err != nil {
+		return err
+	}
+	var checked []discordacl.Scope
+	if h.services.Authorizer.ManagedDiscordACL() {
+		evidence := scopeEvidence{backend: h.backend}
+		for _, target := range op.Scopes {
+			evidence.add(selectorEvidence(target))
+		}
+		if evidence.walk(raw, discordacl.Scope{GuildID: parent["guild_id"], ChannelID: parent["channel_id"]}, resultKind(operation), 0) {
+			checked = evidence.scopes
+		}
+	}
+	return op.Admission.CheckDiscordResult(checked)
 }
 
 // Credential records include the ingress-observed limit; absent data never

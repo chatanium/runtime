@@ -148,6 +148,9 @@ func terminalWorkerEvents(view terminalView) func(session.WorkerEvent) error {
 			if module.Reason != "" {
 				message += " · " + strings.ToLower(strings.ReplaceAll(module.Reason, "_", " "))
 			}
+			if module.DiscordAccessDenied {
+				message += " · Discord access: none"
+			}
 			if err := moduleView.log(level, message); err != nil {
 				return err
 			}

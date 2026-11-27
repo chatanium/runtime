@@ -67,7 +67,7 @@ func EncodePortableConfig(config Config) ([]byte, error) {
 		}
 		modules = append(modules, moduleJSON{ModuleID: spec.ModuleID, Image: spec.ImageDigest, Entrypoint: spec.Entrypoint,
 			Args: spec.Args, UID: spec.UID, GID: spec.GID, Config: spec.Config.Json, Approval: grants,
-			CredentialBindings: spec.CredentialBindings, ConfigRevision: spec.ConfigRevision, ApprovalRevision: spec.ApprovalRevision})
+			CredentialBindings: spec.CredentialBindings, ConfigRevision: spec.ConfigRevision, ApprovalRevision: spec.ApprovalRevision, DiscordACLRequired: spec.DiscordACLRequired})
 	}
 	return json.Marshal(struct {
 		Config

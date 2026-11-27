@@ -368,7 +368,7 @@ func (b *Backend) resolveTarget(ctx context.Context, p runtime.InstancePrincipal
 	}
 	return scope(ids), nil
 }
-func (h *Helper) authorize(ctx context.Context, operation string, plan *RESTPlan) (*OperationContext, error) {
+func (h *Helper) authorize(ctx context.Context, operation string, plan *RESTPlan) (_ *OperationContext, err error) {
 	p, e := h.services.Authorizer.AwaitOperation(ctx, BackendID, operation)
 	if e != nil {
 		return nil, e
@@ -376,6 +376,7 @@ func (h *Helper) authorize(ctx context.Context, operation string, plan *RESTPlan
 	if p != h.services.Principal {
 		return nil, denied("UNAUTHENTICATED_INSTANCE")
 	}
+	defer func() { err = h.scopeLookupError(ctx, err) }()
 	lookup, cancel := context.WithTimeout(ctx, h.backend.config.HTTP.RequestDeadline)
 	defer cancel()
 	cache := &relationshipCache{entries: make(map[string][]byte), max: h.backend.config.HTTP.ResponseMaxBytes}
@@ -536,7 +537,12 @@ func (h *Helper) authorize(ctx context.Context, operation string, plan *RESTPlan
 		}
 		targets = append(targets, scope(map[string]string{}))
 	}
-	if _, e = h.services.Authorizer.Authorize(ctx, runtime.AccessRequest{Backend: BackendID, Operation: operation, Scopes: targets}); e != nil {
+	// Crossposting fans out to undisclosed follower channels, and audit-log
+	// entries contain arbitrary, action-dependent resource relationships.
+	unscopable := plan.FullList || operation == "GuildAuditLog" || operation == "ChannelMessageCrosspost"
+	// Starting a thread creates a new channel whose exact ID is not yet known.
+	guildWide := operation == "ForumThreadStartComplex" || operation == "MessageThreadStartComplex" || operation == "ThreadStartComplex"
+	if _, e = h.services.Authorizer.Authorize(ctx, runtime.AccessRequest{Backend: BackendID, Operation: operation, Scopes: targets, DiscordUnscopable: unscopable, DiscordGuildWide: guildWide}); e != nil {
 		return nil, e
 	}
 	admission, e := runtime.AdmissionFromContext(ctx)
@@ -558,6 +564,16 @@ func (h *Helper) authorize(ctx context.Context, operation string, plan *RESTPlan
 	}
 	return &OperationContext{Context: context.WithValue(admission.Context(), relationshipCacheKey{}, cache), Principal: p, Admission: admission, Scopes: targets, credentialDestinations: plan.credentialDestinations, invokingUser: invokingUser}, nil
 }
+
+// Before final scope admission a lookup's error could reveal the existence or
+// state of an unrelated resource. Keep lookup diagnostics inside the host.
+func (h *Helper) scopeLookupError(ctx context.Context, err error) error {
+	if err != nil && ctx.Err() == nil && h.services.Authorizer.ManagedDiscordACL() {
+		return denied("RESOURCE_SCOPE_DENIED")
+	}
+	return err
+}
+
 func (h *Helper) requireReadGrant(ctx context.Context, op string, targets []*corewire.ResourceScope) error {
 	if _, e := h.services.Authorizer.AwaitOperation(ctx, BackendID, op); e != nil {
 		return e
