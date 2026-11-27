@@ -55,7 +55,7 @@ func serveCommand() *cobra.Command {
 		}
 		if m != nil && m.State == store.Ready {
 			if initialModuleRequested(cmd) || cmd.Flags().Changed("budget-bytes") || cmd.Flags().Changed("approve") {
-				if err := commandView(cmd, cmd.ErrOrStderr()).status("INFO", "Using the existing configuration; first-use options were not applied."); err != nil {
+				if err := commandView(cmd, cmd.ErrOrStderr()).log(logWarn, "Using the existing configuration; first-use options were not applied."); err != nil {
 					return err
 				}
 			}
@@ -94,21 +94,23 @@ func serveCommand() *cobra.Command {
 			}
 		}
 		view, human := operatorOutput(cmd)
+		diagnostics := cmd.ErrOrStderr()
 		var observe func(session.WorkerEvent) error
 		if human {
-			if err := view.status("START", "Starting Chatanium"); err != nil {
+			if err := view.log(logInfo, "Starting Chatanium."); err != nil {
 				return err
 			}
 			observe = terminalWorkerEvents(view)
+			diagnostics = moduleDiagnostics{view: commandView(cmd, diagnostics)}
 		} else {
 			encoder := json.NewEncoder(cmd.OutOrStdout())
 			observe = func(event session.WorkerEvent) error { return encoder.Encode(event) }
 		}
-		if err := service.Run(cmd.Context(), path, m.ID, *duration, observe, cmd.ErrOrStderr()); err != nil {
+		if err := service.Run(cmd.Context(), path, m.ID, *duration, observe, diagnostics); err != nil {
 			return err
 		}
 		if human {
-			return view.status("STOPPED", "Chatanium stopped.")
+			return view.log(logInfo, "Chatanium stopped.")
 		}
 		return nil
 	}

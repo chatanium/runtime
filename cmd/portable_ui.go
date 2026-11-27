@@ -39,36 +39,30 @@ func commandArea(cmd *cobra.Command) string {
 		name = cmd.Name()
 	}
 	switch name {
-	case "serve":
-		return "[SERV]"
+	case "serve", "stop":
+		return "RUNTIME"
 	case "doctor":
-		return "[DIAG]"
+		return "DOCTOR"
 	case "init":
-		return "[INIT]"
+		return "INIT"
 	case "reset":
-		return "[RSET]"
-	case "stop":
-		return "[STOP]"
+		return "RESET"
 	case "new":
-		return "[ NW ]"
+		return "MODULE"
 	case "prepare-image":
-		return "[IMAG]"
-	case "generate-config":
-		return "[GENC]"
-	case "configure":
-		return "[CONF]"
-	case "inspect-config":
-		return "[INSP]"
+		return "IMAGE"
+	case "generate-config", "configure", "inspect-config":
+		return "CONFIG"
 	case "update":
-		return "[UPDT]"
+		return "UPDATE"
 	case "uninstall":
-		return "[UNIN]"
+		return "UNINSTALL"
 	case "purge":
-		return "[PRGE]"
+		return "PURGE"
 	case "bind-restored-volumes":
-		return "[BIND]"
+		return "RESTORE"
 	default:
-		return "[CHAT]"
+		return "CLI"
 	}
 }
 
@@ -89,21 +83,30 @@ func (v terminalView) paint(text, style string) string {
 	return "\x1b[" + style + "m" + text + "\x1b[0m"
 }
 
-func (v terminalView) prefix(state string) string {
-	style := "1;36"
-	switch state {
-	case "OK", "READY", "RUNNING", "STOPPED":
-		style = "1;32"
-	case "REVIEW", "WARN", "CANCEL":
-		style = "1;33"
-	case "FAIL", "FAILED":
-		style = "1;31"
-	}
-	return v.paint(v.area, "1;36") + " " + v.paint("["+state+"]", style)
-}
+type logLevel string
 
-func (v terminalView) status(state, text string) error {
-	_, err := fmt.Fprintf(v.out, "%s %s\n", v.prefix(state), safeTerminalText(text))
+const (
+	logInfo  logLevel = "INFO"
+	logError logLevel = "ERR!"
+	logWarn  logLevel = "WARN"
+	logDebug logLevel = "DEBG"
+)
+
+func (v terminalView) log(level logLevel, text string) error {
+	message := safeTerminalText(text)
+	tag, area := "["+string(level)+"]", "["+v.area+"]"
+	if level == logError {
+		_, err := fmt.Fprintln(v.out, v.paint(tag+" "+area+" "+message, "1;31"))
+		return err
+	}
+	style := "1;36"
+	switch level {
+	case logWarn:
+		style = "1;33"
+	case logDebug:
+		style = "2"
+	}
+	_, err := fmt.Fprintf(v.out, "%s %s %s\n", v.paint(tag, style), v.paint(area, "1"), message)
 	return err
 }
 

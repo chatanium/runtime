@@ -49,7 +49,7 @@ func Execute() {
 		view := commandView(command, command.ErrOrStderr())
 		machine, _ := command.Flags().GetBool("json")
 		if view.terminal && !machine {
-			_ = view.status("FAIL", err.Error())
+			_ = view.log(logError, err.Error())
 		} else {
 			fmt.Fprintln(command.ErrOrStderr(), "Error:", err)
 		}

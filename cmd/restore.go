@@ -12,7 +12,7 @@ func init() {
 		if err := install.BindRestoredVolumes(cmd.Context(), path, backupID, receiptDigest); err != nil {
 			return err
 		}
-		return operatorResult(cmd, "OK", "Restored volumes verified and bound.", map[string]string{"state": "RESTORED", "backup_id": backupID, "receipt_digest": receiptDigest})
+		return operatorResult(cmd, "Restored volumes verified and bound.", map[string]string{"state": "RESTORED", "backup_id": backupID, "receipt_digest": receiptDigest})
 	})
 	bind.Flags().String("backup-id", "", "ID of the sealed portable backup")
 	bind.Flags().String("receipt-digest", "", "trusted SHA-256 of the backup's exact inventory.json bytes (sha256:...)")

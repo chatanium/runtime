@@ -460,9 +460,10 @@ and disk limit. Answer `y` to set up and start the foreground worker. With no
 modules it waits without launching a container. Later runs reuse the existing
 configuration without asking again.
 
-Interactive status lines use a four-column command badge, such as
-`[SERV] [READY]`, `[DIAG] [INFO]`, or `[ NW ] [OK]`. `serve` shows when the
-runtime is ready, any module state changes, and when shutdown finishes.
+Interactive logs put the level first (`INFO`, `WARN`, `ERR!`, or `DEBG`), then
+the full area name. `serve` reports startup and shutdown as `[INFO] [RUNTIME]`,
+and labels module state changes separately, for example `[INFO] [MODULE]`.
+Error lines are red from the level through the message.
 Use `NO_COLOR=1` for the same layout without color. Redirected stdout and CI
 keep the existing JSON (newline-delimited events for `serve`). Use `--json`
 to request that format in a terminal. `generate-config` and `inspect-config`

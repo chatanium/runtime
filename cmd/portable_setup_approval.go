@@ -35,7 +35,7 @@ func setupApproval(cmd *cobra.Command, input *bufio.Reader, startFreshIdle bool)
 		if startFreshIdle {
 			question = "Set up and start Chatanium?"
 		}
-		yes, err := promptSetupApproval(commandView(cmd, cmd.ErrOrStderr()), input, summary, question)
+		yes, err := promptSetupApproval(commandView(cmd, cmd.ErrOrStderr()), logInfo, input, summary, question)
 		if err != nil {
 			return err
 		}
@@ -47,8 +47,8 @@ func setupApproval(cmd *cobra.Command, input *bufio.Reader, startFreshIdle bool)
 	}
 }
 
-func promptSetupApproval(view terminalView, input *bufio.Reader, summary install.SetupApprovalSummary, question string) (bool, error) {
-	if err := showApproval(view, summary); err != nil {
+func promptSetupApproval(view terminalView, level logLevel, input *bufio.Reader, summary install.SetupApprovalSummary, question string) (bool, error) {
+	if err := showApproval(view, level, summary); err != nil {
 		return false, err
 	}
 	if _, err := fmt.Fprintf(view.out, "      %s %s: ", question, view.paint("[y/N]", "1;33")); err != nil {
@@ -69,11 +69,11 @@ func readYesNo(input *bufio.Reader) (bool, error) {
 }
 
 func reportSetupDeclined(cmd *cobra.Command) error {
-	return commandView(cmd, cmd.ErrOrStderr()).status("CANCEL", "Setup canceled.")
+	return commandView(cmd, cmd.ErrOrStderr()).log(logInfo, "Setup canceled.")
 }
 
-func showApproval(view terminalView, summary install.SetupApprovalSummary) error {
-	if err := view.status("REVIEW", summary.Heading); err != nil {
+func showApproval(view terminalView, level logLevel, summary install.SetupApprovalSummary) error {
+	if err := view.log(level, summary.Heading); err != nil {
 		return err
 	}
 	for _, line := range summary.Lines {

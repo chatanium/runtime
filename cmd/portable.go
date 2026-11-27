@@ -25,7 +25,7 @@ func init() {
 		if err := service.Stop(cmd.Context(), path); err != nil {
 			return err
 		}
-		return operatorResult(cmd, "STOPPED", "Chatanium stopped.", map[string]string{"state": "STOPPED"})
+		return operatorResult(cmd, "Chatanium stopped.", map[string]string{"state": "STOPPED"})
 	})
 	configure := installedCommand("configure", "Review each prepared module and publish a stopped configuration", func(cmd *cobra.Command, path string) error {
 		candidatePath, _ := cmd.Flags().GetString("config")
@@ -63,7 +63,7 @@ func init() {
 		if err := install.Purge(cmd.Context(), path, approval(cmd)); err != nil {
 			return err
 		}
-		return operatorResult(cmd, "OK", "Installation and managed data deleted.", map[string]string{"state": "PURGED"})
+		return operatorResult(cmd, "Installation and managed data deleted.", map[string]string{"state": "PURGED"})
 	})
 	approvalFlag(purge)
 	for _, command := range []*cobra.Command{doctor, stop, configure, update, uninstall, purge} {
@@ -118,7 +118,11 @@ func approval(cmd *cobra.Command) install.Confirm {
 		if err != nil {
 			return err
 		}
-		if err := showApproval(view, summary); err != nil {
+		level := logInfo
+		if view.area == "PURGE" {
+			level = logWarn
+		}
+		if err := showApproval(view, level, summary); err != nil {
 			return err
 		}
 		if _, err := fmt.Fprintf(view.out, "      Type %s to approve: ", view.paint(digest, "1;33")); err != nil {
@@ -207,7 +211,7 @@ func prepareImageCommand() *cobra.Command {
 			return err
 		}
 		if view, human := operatorOutput(cmd); human {
-			if err := view.status("OK", "Image prepared for module review."); err != nil {
+			if err := view.log(logInfo, "Image prepared for module review."); err != nil {
 				return err
 			}
 			return view.detail("Image ID", g.ID)

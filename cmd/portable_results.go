@@ -13,9 +13,9 @@ import (
 	"github.com/thirdscam/chatanium/internal/portable/store"
 )
 
-func operatorResult(cmd *cobra.Command, label, message string, jsonValue any) error {
+func operatorResult(cmd *cobra.Command, message string, jsonValue any) error {
 	if view, human := operatorOutput(cmd); human {
-		return view.status(label, message)
+		return view.log(logInfo, message)
 	}
 	return printJSON(cmd, jsonValue)
 }
@@ -23,21 +23,21 @@ func operatorResult(cmd *cobra.Command, label, message string, jsonValue any) er
 func manifestStatus(view terminalView, cmd *cobra.Command, m install.Manifest) error {
 	switch cmd.Name() {
 	case "init":
-		if err := view.status("OK", "Installation ready to serve."); err != nil {
+		if err := view.log(logInfo, "Installation ready to serve."); err != nil {
 			return err
 		}
 		return view.detail("Next", "chatanium serve")
 	case "configure":
-		return view.status("OK", fmt.Sprintf("Saved configuration for %d module(s). Run chatanium serve to start.", len(m.Modules)))
+		return view.log(logInfo, fmt.Sprintf("Saved configuration for %d module(s). Run chatanium serve to start.", len(m.Modules)))
 	case "update":
 		if m.State == store.Initializing {
-			return view.status("OK", "Runtime is installed. Review the configuration before serving modules.")
+			return view.log(logInfo, "Runtime is installed. Review the configuration before serving modules.")
 		}
-		return view.status("OK", "Runtime is already up to date.")
+		return view.log(logInfo, "Runtime is already up to date.")
 	case "uninstall":
-		return view.status("OK", "Removed installed code. Configuration, image cache, module data and backups were kept.")
+		return view.log(logInfo, "Removed installed code. Configuration, image cache, module data and backups were kept.")
 	default:
-		return view.status("OK", m.State)
+		return view.log(logInfo, m.State)
 	}
 }
 
@@ -49,11 +49,11 @@ func doctorResult(cmd *cobra.Command, result map[string]any, checkErr error) err
 	if result == nil {
 		return checkErr
 	}
-	label, heading := "INFO", "Read-only runtime check"
+	level, heading := logInfo, "Read-only runtime check"
 	if checkErr != nil {
-		label, heading = "WARN", "Read-only runtime check did not complete"
+		level, heading = logWarn, "Read-only runtime check did not complete"
 	}
-	if err := view.status(label, heading); err != nil {
+	if err := view.log(level, heading); err != nil {
 		return errors.Join(checkErr, err)
 	}
 	if path, ok := result["installation_directory"].(string); ok {
@@ -91,8 +91,23 @@ func doctorResult(cmd *cobra.Command, result map[string]any, checkErr error) err
 	return view.detail("Not tested", "Write access, GVX execution and sandbox isolation")
 }
 
+type moduleDiagnostics struct {
+	view terminalView
+}
+
+func (d moduleDiagnostics) Write(p []byte) (int, error) {
+	view := d.view
+	view.area = "MODULE"
+	if err := view.log(logError, strings.TrimSuffix(string(p), "\n")); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
 func terminalWorkerEvents(view terminalView) func(session.WorkerEvent) error {
 	previous := make(map[string]session.ModuleStatus)
+	moduleView := view
+	moduleView.area = "MODULE"
 	return func(event session.WorkerEvent) error {
 		switch event.Type {
 		case "READY":
@@ -100,7 +115,7 @@ func terminalWorkerEvents(view terminalView) func(session.WorkerEvent) error {
 			if len(event.Modules) == 0 {
 				message = "Chatanium is running in the foreground. No modules are configured."
 			}
-			if err := view.status("READY", message); err != nil {
+			if err := view.log(logInfo, message); err != nil {
 				return err
 			}
 			if err := view.detail("Stop", "Ctrl+C or chatanium stop from another terminal"); err != nil {
@@ -108,12 +123,12 @@ func terminalWorkerEvents(view terminalView) func(session.WorkerEvent) error {
 			}
 		case "STATUS":
 			if event.Reason == "BACKEND_ERROR" {
-				if err := view.status("WARN", "A configured backend reported an error."); err != nil {
+				if err := view.log(logError, "A configured backend reported an error."); err != nil {
 					return err
 				}
 			}
 		case "DRAINED":
-			return view.status("INFO", "Worker drained. Finishing shutdown.")
+			return view.log(logDebug, "Worker drained. Finishing shutdown.")
 		case "FAILED":
 			// The command error reports the worker reason after cleanup.
 		}
@@ -122,11 +137,18 @@ func terminalWorkerEvents(view terminalView) func(session.WorkerEvent) error {
 				continue
 			}
 			previous[module.ModuleID] = module
-			message := "Module " + strconv.Quote(module.ModuleID)
+			level := logDebug
+			switch module.State {
+			case "RUNNING", "STOPPED":
+				level = logInfo
+			case "FAILED":
+				level = logError
+			}
+			message := strconv.Quote(module.ModuleID) + " · " + strings.ToLower(strings.ReplaceAll(module.State, "_", " "))
 			if module.Reason != "" {
 				message += " · " + strings.ToLower(strings.ReplaceAll(module.Reason, "_", " "))
 			}
-			if err := view.status(module.State, message); err != nil {
+			if err := moduleView.log(level, message); err != nil {
 				return err
 			}
 		}
