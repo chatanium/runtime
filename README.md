@@ -460,8 +460,8 @@ and disk limit. Answer `y` to set up and start the foreground worker. With no
 modules it waits without launching a container. Later runs reuse the existing
 configuration without asking again.
 
-Interactive status lines show the invoked command and a color-coded status,
-such as `[ SERVE ] [READY]` or `[ DOCTOR ] [INFO]`. `serve` shows when the
+Interactive status lines use a four-column command badge, such as
+`[SERV] [READY]`, `[DIAG] [INFO]`, or `[ NW ] [OK]`. `serve` shows when the
 runtime is ready, any module state changes, and when shutdown finishes.
 Use `NO_COLOR=1` for the same layout without color. Redirected stdout and CI
 keep the existing JSON (newline-delimited events for `serve`). Use `--json`

@@ -21,11 +21,7 @@ type terminalView struct {
 }
 
 func commandView(cmd *cobra.Command, out io.Writer) terminalView {
-	name := cmd.CalledAs()
-	if name == "" {
-		name = cmd.Name()
-	}
-	view := terminalView{out: out, area: "[ " + strings.ToUpper(name) + " ]"}
+	view := terminalView{out: out, area: commandArea(cmd)}
 	if f, ok := out.(*os.File); ok && os.Getenv("TERM") != "dumb" && os.Getenv("CI") == "" &&
 		(isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd())) {
 		view.terminal = true
@@ -35,6 +31,45 @@ func commandView(cmd *cobra.Command, out io.Writer) terminalView {
 		}
 	}
 	return view
+}
+
+func commandArea(cmd *cobra.Command) string {
+	name := cmd.CalledAs()
+	if name == "" {
+		name = cmd.Name()
+	}
+	switch name {
+	case "serve":
+		return "[SERV]"
+	case "doctor":
+		return "[DIAG]"
+	case "init":
+		return "[INIT]"
+	case "reset":
+		return "[RSET]"
+	case "stop":
+		return "[STOP]"
+	case "new":
+		return "[ NW ]"
+	case "prepare-image":
+		return "[IMAG]"
+	case "generate-config":
+		return "[GENC]"
+	case "configure":
+		return "[CONF]"
+	case "inspect-config":
+		return "[INSP]"
+	case "update":
+		return "[UPDT]"
+	case "uninstall":
+		return "[UNIN]"
+	case "purge":
+		return "[PRGE]"
+	case "bind-restored-volumes":
+		return "[BIND]"
+	default:
+		return "[CHAT]"
+	}
 }
 
 func jsonOutputFlag(cmd *cobra.Command) {
