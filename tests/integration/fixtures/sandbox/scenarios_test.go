@@ -21,6 +21,7 @@ func TestFixtureRejectsUnboundedWork(t *testing.T) {
 		{Lifecycle: &lifecycleConfig{FailStage: "unknown"}},
 		{Scenario: &scenarioConfig{Kind: "cpu", TimeoutSeconds: 121, Workers: 1}},
 		{Scenario: &scenarioConfig{Kind: "cpu", TimeoutSeconds: 1, Workers: 129}},
+		{Scenario: &scenarioConfig{Kind: "identity", TimeoutSeconds: 1, TriggerDelayMS: 60001}},
 		{Scenario: &scenarioConfig{Kind: "memory", TimeoutSeconds: 1, MemoryBytes: 2<<30 + 1}},
 		{Scenario: &scenarioConfig{Kind: "fork", TimeoutSeconds: 1, Attempts: 257, HoldMS: 1}},
 		{Scenario: &scenarioConfig{Kind: "thread", TimeoutSeconds: 1, Attempts: 1}},
@@ -130,12 +131,17 @@ func TestIPCProbeRequiresRunnerDirectoryAndRejectsSymlink(t *testing.T) {
 	if _, err := guestIPCDirectory(); err == nil {
 		t.Fatal("missing runner directory fell back to another mount")
 	}
-	actual := t.TempDir()
+	actual, err := os.MkdirTemp("/tmp", "plugin-dir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(actual) })
 	t.Setenv("PLUGIN_UNIX_SOCKET_DIR", actual)
 	if got, err := guestIPCDirectory(); err != nil || got != actual {
 		t.Fatal("runner directory was not used verbatim")
 	}
-	link := filepath.Join(t.TempDir(), "broker-link")
+	link := actual + ".link"
+	t.Cleanup(func() { os.Remove(link) })
 	if err := os.Symlink(actual, link); err != nil {
 		t.Fatal(err)
 	}

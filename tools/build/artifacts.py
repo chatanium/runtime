@@ -137,7 +137,7 @@ def elf_closure(executables, destination, exclude_system=False):
     return copied
 
 
-def check_elf_versions(executables):
+def check_elf_versions(executables, loader=None, library_directories=()):
     """Match each needed ELF version to the actual loader-selected provider.
 
     Distro version numbers are not ABI ceilings: EL9 glibc 2.34 exports some
@@ -146,6 +146,15 @@ def check_elf_versions(executables):
     environment = os.environ.copy()
     environment['LC_ALL'] = 'C'
     environment['LANG'] = 'C'
+    explicit_loader = Path(loader).resolve() if loader is not None else None
+    library_directories = tuple(Path(path).resolve() for path in library_directories)
+    loader_soname = None
+    if explicit_loader is not None:
+        dynamic = capture('readelf', '--wide', '--dynamic', explicit_loader, env=environment)
+        sonames = re.findall(r'\(SONAME\).*?\[(.*?)\]', dynamic)
+        if len(sonames) != 1 or '/' in sonames[0] or re.search(r'\(NEEDED\)', dynamic):
+            raise RuntimeError('Explicit ELF interpreter must have one SONAME and be self-contained')
+        loader_soname = sonames[0]
     queue = [Path(path) for path in executables]
     visited, definitions, evidence = set(), {}, {}
     while queue:
@@ -155,16 +164,37 @@ def check_elf_versions(executables):
         visited.add(item)
         output = capture('readelf', '--wide', '--version-info', item, env=environment)
         required = output.partition('Version needs section')[2]
-        loaded = capture('ldd', item, env=environment)
+        if explicit_loader is not None and item == explicit_loader:
+            # This interpreter is the already mapped executable, not another
+            # payload to run through itself. Its version needs still pass
+            # through the same definition checks below.
+            loaded = ''
+        elif explicit_loader is None:
+            loaded = capture('ldd', item, env=environment)
+        else:
+            loaded = capture(explicit_loader, '--inhibit-cache', '--library-path',
+                             ':'.join(map(str, library_directories)), '--list', item,
+                             env=environment)
         if 'not found' in loaded:
             raise RuntimeError('Unresolved target ELF dependency: ' + str(item))
-        providers = {}
+        # Direct invocation maps this exact interpreter even when --list omits
+        # it. Normalize slash-prefixed logical aliases, not provider paths.
+        providers = {loader_soname: explicit_loader} if explicit_loader is not None else {}
         for line in loaded.splitlines():
             words = line.split()
             if len(words) >= 3 and words[1] == '=>' and words[2].startswith('/'):
-                providers[words[0]] = Path(words[2]).resolve()
+                name, path = words[0], Path(words[2]).resolve()
             elif words and words[0].startswith('/'):
-                providers[Path(words[0]).name] = Path(words[0]).resolve()
+                name, path = words[0], Path(words[0]).resolve()
+            else:
+                continue
+            name = Path(name).name if name.startswith('/') else name
+            if explicit_loader is not None and name == loader_soname:
+                if path != explicit_loader:
+                    raise RuntimeError(f'{item}: trace names a different ELF interpreter: {path}')
+            elif explicit_loader is not None and path.parent not in library_directories:
+                raise RuntimeError(f'{item}: loader selected an unshipped provider: {name} => {path}')
+            providers[name] = path
         queue.extend(providers.values())
         current = None
         checked = {}
@@ -177,7 +207,7 @@ def check_elf_versions(executables):
                 continue
             name = version.group(1)
             if current not in providers:
-                raise RuntimeError(f'{item}: version provider not loaded: {current}')
+                raise RuntimeError(f'{item}: version provider not loaded: {current}; loader trace: {loaded!r}')
             path = providers[current]
             if path not in definitions:
                 provider_output = capture('readelf', '--wide', '--version-info', path, env=environment)

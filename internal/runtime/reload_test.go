@@ -29,7 +29,7 @@ var reloadNewImage = "registry.example/modules/test@sha256:" + strings.Repeat("b
 // Exercise the real host.Client wire boundary, not an injected manager launch
 // or cleanup hook. This supervisor peer owns no actual sandbox/storage claims.
 // Acquire deliberately rejects activation so these isolated tests need neither
-// root, Docker nor a substitute module transport.
+// root, a sandbox engine nor a substitute module transport.
 type reloadHostRequest struct {
 	Operation   string           `json:"operation"`
 	ImageDigest string           `json:"image_digest"`
@@ -112,7 +112,7 @@ func reloadSupervisor(t *testing.T, override func(reloadHostRequest, <-chan stru
 				h.mu.Lock()
 				h.requests = append(h.requests, request)
 				h.mu.Unlock()
-				response := reloadHostResponse{Version: 1}
+				response := reloadHostResponse{Version: 2}
 				switch request.Operation {
 				case "register":
 					response.EpochID = strings.Repeat("c", 32)

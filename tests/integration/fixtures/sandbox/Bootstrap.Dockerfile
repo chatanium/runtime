@@ -1,5 +1,5 @@
-# Fixture-only derived image. The production runner overrides Entrypoint/Cmd;
-# Docker merges these non-reserved image defaults with broker bootstrap Env.
+# Build-only derived fixture image. Approved image defaults reach the unchanged
+# child through the bridge INIT; no runtime builder or container daemon is used.
 ARG SANDBOX_BASE
 FROM ${SANDBOX_BASE}
 ARG FIXTURE_BOOTSTRAP_MODE

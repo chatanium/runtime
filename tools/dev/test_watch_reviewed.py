@@ -1,11 +1,12 @@
 import json
 import os
-from pathlib import Path
 import stat
 from types import SimpleNamespace
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import watch
+import control
 from test_watch import TemporaryTree, OLD, NEW, OTHER
 
 LATER = watch.repository(OLD) + '@sha256:' + '4' * 64
@@ -18,49 +19,124 @@ def records(image=OLD, committed=None, reloading=False, state='RUNNING'):
 
 
 class ConfigIdentityTests(TemporaryTree):
-    def metadata(self, uid):
-        info = self.config.stat()
-        return SimpleNamespace(st_uid=uid, st_mode=stat.S_IFREG | 0o640, st_size=info.st_size)
-
-    def test_runtime_owned_builder_readable_config_is_accepted(self):
-        metadata = self.metadata(2000)
-        with patch.object(watch.os, 'geteuid', return_value=1000), patch.object(watch.os, 'fstat', return_value=metadata):
-            installed, _, _, _ = watch.load_config(self.config, runtime_uid=2000)
+    def test_installed_root_response_needs_no_local_file_read(self):
+        raw = self.config.read_bytes()
+        self.identity.manage.side_effect = None
+        self.identity.manage.return_value = raw
+        with patch.object(watch.os, 'open', side_effect=PermissionError) as local_open:
+            inspected = watch.inspect_config(self.identity, ['--installation-id', 'fixture-installation'])
+            installed, _, _, _ = watch.load_config(inspected)
         self.assertIn('approved', installed)
+        self.assertEqual(inspected, raw)
+        local_open.assert_not_called()
+        self.identity.manage.assert_called_once_with(
+            ['inspect-config', '--installation-id', 'fixture-installation'], max_output_bytes=watch.MAX_JSON)
 
-    def test_builder_owned_config_is_rejected_for_distinct_runtime(self):
-        metadata = self.metadata(1000)
-        with patch.object(watch.os, 'geteuid', return_value=1000), patch.object(watch.os, 'fstat', return_value=metadata):
-            with self.assertRaisesRegex(watch.DevelopmentError, 'root/runtime-owned'):
-                watch.load_config(self.config, runtime_uid=2000)
+    def test_installed_config_response_is_bounded_and_binary(self):
+        self.identity.manage.side_effect = None
+        for invalid in (b'', b'x' * (watch.MAX_JSON + 1), '{}'):
+            with self.subTest(kind=type(invalid), length=len(invalid)):
+                self.identity.manage.return_value = invalid
+                with self.assertRaises(watch.DevelopmentError):
+                    watch.inspect_config(self.identity, ['--installation-id', 'fixture-installation'])
 
-    def test_builder_read_access_is_an_explicit_prerequisite(self):
-        with patch.object(watch.os, 'open', side_effect=PermissionError):
-            with self.assertRaisesRegex(watch.DevelopmentError, 'readable by builder'):
-                watch.load_config(self.config, runtime_uid=2000)
+    def test_denied_root_inspection_never_falls_back_to_local_files(self):
+        self.identity.manage.side_effect = watch.ExecutionError('root inspection denied')
+        with patch.object(watch.os, 'open') as local_open:
+            with self.assertRaises(watch.ExecutionError):
+                watch.inspect_config(self.identity, ['--installation-id', 'fixture-installation'])
+        local_open.assert_not_called()
+
+    def test_canonical_quota_backed_app_path_rejects_installation_alias(self):
+        raw = self.config.read_bytes()
+        self.assertEqual(watch.management_directory(raw), self.management)
+        document = json.loads(raw)
+        document['host']['management_directory'] = str(self.root / 'installation/app')
+        with self.assertRaises(watch.DevelopmentError):
+            watch.management_directory(json.dumps(document).encode())
+
+    def test_dev_socket_is_inside_native_without_builder_traversal(self):
+        identity = watch.Identity.__new__(watch.Identity)
+        identity.control = Mock()
+        with patch.object(Path, 'stat', side_effect=PermissionError), patch.object(Path, 'lstat', side_effect=PermissionError):
+            selected = identity.socket('', self.management)
+            self.assertEqual(selected, self.native / 'control.sock')
+            for outside in (str(self.root / 'control.sock'), str(self.native / 'nested/control.sock')):
+                with self.assertRaises(watch.ExecutionError):
+                    identity.socket(outside, self.management)
+        identity.control.assert_not_called()
 
     def test_identity_and_config_validation_precede_any_build_or_socket(self):
         identity = Mock()
-        identity.account = SimpleNamespace(pw_uid=2000)
+        identity.check_inputs.side_effect = lambda path: events.append('launcher')
         events = []
         def select_identity(*_args):
             events.append('identity')
             return identity
-        def reject_config(path, **kwargs):
+        raw = self.config.read_bytes()
+        def inspect(arguments, **kwargs):
+            events.append('inspect')
+            self.assertEqual(arguments, ['inspect-config', '--installation-id', 'fixture-installation'])
+            self.assertEqual(kwargs, {'max_output_bytes': watch.MAX_JSON})
+            return raw
+        identity.manage.side_effect = inspect
+        def reject_config(inspected):
             events.append('config')
-            self.assertEqual(path, self.config)
-            self.assertEqual(kwargs, {'runtime_uid': 2000})
-            raise watch.DevelopmentError('root/runtime-owned prerequisite')
-        args = ['--config', str(self.config), '--socket', '', '--supervisor-socket', '/supervisor/socket',
-                '--supervisor-uid', '0', '--supervisor-max-bytes', '65536']
+            self.assertEqual(inspected, raw)
+            raise watch.DevelopmentError('invalid installed config prerequisite')
         args = ['--runtime', '/usr/local/bin/chatanium-v1', '--socket', '', '--installation-id', 'fixture-installation']
         with patch.dict(os.environ, {'DEV_MODE': '1'}), patch.object(watch.os, 'geteuid', return_value=1000), patch.object(watch, 'Identity', side_effect=select_identity), patch.object(watch, 'load_config', side_effect=reject_config), patch.object(watch, 'Watcher') as start:
             with self.assertRaises(watch.DevelopmentError):
                 watch.main(args)
-        self.assertEqual(events, ['identity', 'config'])
+        self.assertEqual(events, ['identity', 'launcher', 'inspect', 'config'])
         start.assert_not_called()
         identity.socket.assert_not_called()
         identity.close.assert_called_once()
+
+
+class CoordinationLockTests(TemporaryTree):
+    def metadata(self):
+        return {'version': 1, 'path': '/var/lib/chatanium/installations/fixture-installation/dev-watch.lock',
+                'device': 7, 'inode': 12, 'uid': 0, 'gid': 4000, 'mode': 0o440}
+
+    def test_coordination_metadata_rejects_ambiguous_or_inexact_fields(self):
+        valid = self.metadata()
+        raw = json.dumps(valid).encode()
+        self.assertEqual(control.coordination_metadata(raw), valid)
+        malformed = [raw + b'{}', raw[:-1] + b',"version":1}', b'x' * (control.MAX_LOCK_JSON + 1)]
+        for field, value in (('version', True), ('uid', 1000), ('inode', 0),
+                             ('gid', 0), ('mode', 0o640), ('device', -1),
+                             ('path', '/var/lib/chatanium/../dev-watch.lock'), ('extra', 1)):
+            changed = dict(valid)
+            changed[field] = value
+            malformed.append(json.dumps(changed).encode())
+        for payload in malformed:
+            with self.subTest(payload=payload[:80]), self.assertRaises(control.ControlError):
+                control.coordination_metadata(payload)
+
+    def test_orphaned_lock_inode_is_rejected_after_flock(self):
+        metadata = self.metadata()
+        opened = SimpleNamespace(st_mode=stat.S_IFREG | 0o440, st_uid=0, st_gid=4000,
+                                 st_dev=7, st_ino=12, st_nlink=1, st_size=0)
+        reads = [0]
+        def lstat(path):
+            if str(path) == metadata['path']:
+                reads[0] += 1
+                result = SimpleNamespace(**vars(opened))
+                if reads[0] > 1:
+                    result.st_ino = 13
+                return result
+            return SimpleNamespace(st_mode=stat.S_IFDIR | 0o755, st_uid=0)
+        with patch.object(Path, 'lstat', lstat), patch.object(control.os, 'getegid', return_value=4000), patch.object(control.os, 'open', return_value=97) as open_file, patch.object(control.os, 'fstat', return_value=opened), patch.object(control.os, 'close') as close_file, patch.object(control.fcntl, 'flock') as flock, patch('builtins.print') as ready:
+            with self.assertRaisesRegex(control.ControlError, 'unsafe installed metadata'):
+                control.hold_coordination_lock(metadata)
+        self.assertEqual(reads[0], 2)
+        flags = open_file.call_args.args[1]
+        self.assertEqual(flags & os.O_ACCMODE, os.O_RDONLY)
+        self.assertFalse(flags & os.O_CREAT)
+        flock.assert_called_once_with(97, control.fcntl.LOCK_EX | control.fcntl.LOCK_NB)
+        close_file.assert_called_once_with(97)
+        ready.assert_not_called()
 
 
 class CommittedImageTests(TemporaryTree):
@@ -175,8 +251,8 @@ class CommittedImageTests(TemporaryTree):
 
 class StopReceiptTests(TemporaryTree):
     def runtime(self, code, receipt):
-        runtime = watch.RuntimeProcess(self.root, self.config, self.root / '.tools/dev/control.sock',
-                                       [], lambda: False, lambda: None, self.identity)
+        runtime = watch.RuntimeProcess(self.root, self.native / 'control.sock',
+                                       ['--installation-id', 'fixture-installation'], lambda: False, lambda: None, self.identity)
         process = Mock()
         process.poll.side_effect = [None, code, code]
         process.returncode = code

@@ -1,0 +1,472 @@
+{
+  "audit-libs": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "LGPLv2+",
+    "name": "audit-libs",
+    "release": "7.el9",
+    "sha256": "3550d2f54bc253a69bd5b467c3482299d5bfdc38cd798d014f7cb4ea7f6d400e",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/audit-libs-3.1.5-7.el9.x86_64.rpm",
+    "version": "3.1.5"
+  },
+  "conntrack-tools": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "GPLv2",
+    "name": "conntrack-tools",
+    "release": "4.el9_5",
+    "sha256": "a20be4d1e3bfb994f02d8fd8cbc0efc601c15b9c94cd979abbfefa9ff9721fe2",
+    "url": "https://repo.almalinux.org/vault/9.7/AppStream/x86_64/os/Packages/conntrack-tools-1.4.7-4.el9_5.x86_64.rpm",
+    "version": "1.4.7"
+  },
+  "elfutils-libelf": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "GPL-2.0-or-later OR LGPL-3.0-or-later",
+    "name": "elfutils-libelf",
+    "release": "1.el9.alma.1",
+    "sha256": "66c5b11b22dbf0821ed93956d62a4c76a3b4e92f4e094f1d365b763a9b87cd53",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/elfutils-libelf-0.193-1.el9.alma.1.x86_64.rpm",
+    "version": "0.193"
+  },
+  "glibc": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "LGPLv2+ and LGPLv2+ with exceptions and GPLv2+ and GPLv2+ with exceptions and BSD and Inner-Net and ISC and Public Domain and GFDL",
+    "name": "glibc",
+    "release": "231.el9_7.2",
+    "sha256": "2507c963f900eed0c53f21667e5611bfbc5e674dbc52b688b336b4ca91e4d23a",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/glibc-2.34-231.el9_7.2.x86_64.rpm",
+    "version": "2.34"
+  },
+  "inih": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "BSD",
+    "name": "inih",
+    "release": "6.el9",
+    "sha256": "b8db6005a8d59daeabe6236f4b68217d542f64294e93ba0951218ed26e51aa55",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/inih-49-6.el9.x86_64.rpm",
+    "version": "49"
+  },
+  "iproute": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "GPL-2.0-or-later AND NIST-PD",
+    "name": "iproute",
+    "release": "2.el9",
+    "sha256": "81f0c88eda56eb06d13626a653d75caba7d9557a85041c100c3b98af1e4c08f9",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/iproute-6.14.0-2.el9.x86_64.rpm",
+    "version": "6.14.0"
+  },
+  "iptables-libs": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "GPLv2 and Artistic 2.0 and ISC",
+    "name": "iptables-libs",
+    "release": "11.el9_5",
+    "sha256": "c37ff494b3165a99ddb1926853c081c80305f3a1957f5490a2874136d0a6a0f1",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/iptables-libs-1.8.10-11.el9_5.x86_64.rpm",
+    "version": "1.8.10"
+  },
+  "iptables-nft": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "GPLv2 and Artistic 2.0 and ISC",
+    "name": "iptables-nft",
+    "release": "11.el9_5",
+    "sha256": "d9efda94a378754bd11f50fb92eba8ae363f8e27f9363d3c47bf0b45720dabe2",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/iptables-nft-1.8.10-11.el9_5.x86_64.rpm",
+    "version": "1.8.10"
+  },
+  "keyutils-libs": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "GPLv2+ and LGPLv2+",
+    "name": "keyutils-libs",
+    "release": "1.el9",
+    "sha256": "b0f15b1712150c0634ebc4aba29671539dd9c94f2350190a83e34e678168d0ac",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/keyutils-libs-1.6.3-1.el9.x86_64.rpm",
+    "version": "1.6.3"
+  },
+  "krb5-libs": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "MIT",
+    "name": "krb5-libs",
+    "release": "9.el9_7",
+    "sha256": "937d746c1bb0afc656db6818167a9a24658dad435d77d6a93a95219f62874c4e",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/krb5-libs-1.21.1-9.el9_7.x86_64.rpm",
+    "version": "1.21.1"
+  },
+  "libbpf": {
+    "arch": "x86_64",
+    "epoch": "2",
+    "license": "LGPLv2 or BSD",
+    "name": "libbpf",
+    "release": "2.el9",
+    "sha256": "26be1d9fd72c84f11768cba43c1145d947fd45792442a413093b5193c76f32c0",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/libbpf-1.5.0-2.el9.x86_64.rpm",
+    "version": "1.5.0"
+  },
+  "libcap": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "BSD or GPLv2",
+    "name": "libcap",
+    "release": "10.el9_7.1",
+    "sha256": "a3f13a2d002ce0af61c8cae0a3e06166e55d9f42c8b52d90db5853efcaddda5a",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/libcap-2.48-10.el9_7.1.x86_64.rpm",
+    "version": "2.48"
+  },
+  "libcom_err": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "MIT",
+    "name": "libcom_err",
+    "release": "8.el9",
+    "sha256": "009bbd42ff1bb9f8810db18bbfac5114a31faab0ad02929a58fa266fc67b3132",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/libcom_err-1.46.5-8.el9.x86_64.rpm",
+    "version": "1.46.5"
+  },
+  "libdb": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "BSD and LGPLv2 and Sleepycat and MIT",
+    "name": "libdb",
+    "release": "57.el9_6",
+    "sha256": "d7525adc3413e965ef0e92e39d7e306d126f5c937833101aacb3cfea58fab35c",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/libdb-5.3.28-57.el9_6.x86_64.rpm",
+    "version": "5.3.28"
+  },
+  "libedit": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "BSD",
+    "name": "libedit",
+    "release": "38.20210216cvs.el9",
+    "sha256": "82b44c2653a9be837317a7eeae643d26f1fdbad28ac38a92949d4ec2b76fa4a8",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/libedit-3.1-38.20210216cvs.el9.x86_64.rpm",
+    "version": "3.1"
+  },
+  "libgcc": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "GPLv3+ and GPLv3+ with exceptions and GPLv2+ with exceptions and LGPLv2+ and BSD",
+    "name": "libgcc",
+    "release": "11.el9.alma.1",
+    "sha256": "ab628524b4569d68a54e671863489eb5cbaa546d045d0699117ebe58af7492d7",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/libgcc-11.5.0-11.el9.alma.1.x86_64.rpm",
+    "version": "11.5.0"
+  },
+  "libmnl": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "LGPLv2+",
+    "name": "libmnl",
+    "release": "16.el9_4",
+    "sha256": "c26aee05758e9bb8f6a5bb3dba9d4bc82bf798d9c97b66d4e42913d65f0d695a",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/libmnl-1.0.4-16.el9_4.x86_64.rpm",
+    "version": "1.0.4"
+  },
+  "libnetfilter_conntrack": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "GPLv2+",
+    "name": "libnetfilter_conntrack",
+    "release": "1.el9",
+    "sha256": "e25ba24329e14e76e82d9b324ac1472e3fdcd5f061e718f23e792e7f6397192e",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/libnetfilter_conntrack-1.0.9-1.el9.x86_64.rpm",
+    "version": "1.0.9"
+  },
+  "libnetfilter_cthelper": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "GPLv2",
+    "name": "libnetfilter_cthelper",
+    "release": "22.el9",
+    "sha256": "94f4f7269975f2226a902c43f10a46564f3a4c4ae40e5046aaabbcb2459a7765",
+    "url": "https://repo.almalinux.org/vault/9.7/AppStream/x86_64/os/Packages/libnetfilter_cthelper-1.0.0-22.el9.x86_64.rpm",
+    "version": "1.0.0"
+  },
+  "libnetfilter_cttimeout": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "GPLv2+",
+    "name": "libnetfilter_cttimeout",
+    "release": "19.el9",
+    "sha256": "a1b67e6f44dcc0b0eb3f8ba357c67d5bdd234a0925f0790fca906f7bc2c7ff1f",
+    "url": "https://repo.almalinux.org/vault/9.7/AppStream/x86_64/os/Packages/libnetfilter_cttimeout-1.0.0-19.el9.x86_64.rpm",
+    "version": "1.0.0"
+  },
+  "libnfnetlink": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "GPLv2+",
+    "name": "libnfnetlink",
+    "release": "23.el9_5",
+    "sha256": "6ed14fa51fd1f83ed31a09fa69ae94f43bd99aa429bed8885fe32575fd717541",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/libnfnetlink-1.0.1-23.el9_5.x86_64.rpm",
+    "version": "1.0.1"
+  },
+  "libnftnl": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "GPLv2+",
+    "name": "libnftnl",
+    "release": "4.el9_4",
+    "sha256": "193ec5d3de80f839eaa130fdd99efdf29cb3fa792bd823a693a1398edfdc1f77",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/libnftnl-1.2.6-4.el9_4.x86_64.rpm",
+    "version": "1.2.6"
+  },
+  "libnl3": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "LGPL-2.1-only",
+    "name": "libnl3",
+    "release": "1.el9",
+    "sha256": "ba8ed44812339d64242920179dc2b84576a5812e87496875938f7e48ad6ceb8c",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/libnl3-3.11.0-1.el9.x86_64.rpm",
+    "version": "3.11.0"
+  },
+  "libpcap": {
+    "arch": "x86_64",
+    "epoch": "14",
+    "license": "BSD with advertising",
+    "name": "libpcap",
+    "release": "4.el9",
+    "sha256": "31aeb00b57d7fa6e323fba25c7aec4fb20fc59e6de276ba0d3fae220d16bf92b",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/libpcap-1.10.0-4.el9.x86_64.rpm",
+    "version": "1.10.0"
+  },
+  "libselinux": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "Public Domain",
+    "name": "libselinux",
+    "release": "3.el9",
+    "sha256": "636371a0ead5a8c5e5dfcad34c35d95d1ad2c328a654fa2c2cbd12b7bd6948c3",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/libselinux-3.6-3.el9.x86_64.rpm",
+    "version": "3.6"
+  },
+  "libstdc++": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "GPLv3+ and GPLv3+ with exceptions and GPLv2+ with exceptions and LGPLv2+ and BSD",
+    "name": "libstdc++",
+    "release": "11.el9.alma.1",
+    "sha256": "177116c016ad145b9c76cf576ef2df1f7517dca97a848cb78a19e045c4eefb38",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/libstdc++-11.5.0-11.el9.alma.1.x86_64.rpm",
+    "version": "11.5.0"
+  },
+  "libtirpc": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "SISSL and BSD",
+    "name": "libtirpc",
+    "release": "9.el9",
+    "sha256": "50a43d3f82ae213adb67349ba17721d99f159dbe870c9a59e21ff89e9558494a",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/libtirpc-1.3.3-9.el9.x86_64.rpm",
+    "version": "1.3.3"
+  },
+  "libuuid": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "BSD",
+    "name": "libuuid",
+    "release": "21.el9_7",
+    "sha256": "64ab80ca9881503d1c586b503ae9397d5981ed3c42d128894e1696ad3829f6e2",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/libuuid-2.37.4-21.el9_7.x86_64.rpm",
+    "version": "2.37.4"
+  },
+  "libverto": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "MIT",
+    "name": "libverto",
+    "release": "3.el9",
+    "sha256": "c0efaf592ca113e3c5a439bb1cd5b19a9d8581cbc5df0a1c41064fff1f020467",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/libverto-0.3.2-3.el9.x86_64.rpm",
+    "version": "0.3.2"
+  },
+  "libxcrypt": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "LGPLv2+ and BSD and Public Domain",
+    "name": "libxcrypt",
+    "release": "3.el9",
+    "sha256": "a0d439a44585ba94577302fdea641c94d31467fe1e0c43c97a094ad0b3a881ac",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/libxcrypt-4.4.18-3.el9.x86_64.rpm",
+    "version": "4.4.18"
+  },
+  "libzstd": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "BSD and GPLv2",
+    "name": "libzstd",
+    "release": "1.el9",
+    "sha256": "33006cb9736d17f74c7a30cf9375438a9228023639239bf69c84b2530ad97462",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/libzstd-1.5.5-1.el9.x86_64.rpm",
+    "version": "1.5.5"
+  },
+  "lz4-libs": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "GPLv2+ and BSD",
+    "name": "lz4-libs",
+    "release": "5.el9",
+    "sha256": "439e701491af6a957ac4d7dc69cccee1a945333f19d8bfcbd896b5119af01aab",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/lz4-libs-1.9.3-5.el9.x86_64.rpm",
+    "version": "1.9.3"
+  },
+  "ncurses-libs": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "MIT",
+    "name": "ncurses-libs",
+    "release": "12.20210508.el9",
+    "sha256": "438287dae19b0519960b9346be49ecbd3a7b34592452887deecef3f3f2261f7b",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/ncurses-libs-6.2-12.20210508.el9.x86_64.rpm",
+    "version": "6.2"
+  },
+  "openssl-libs": {
+    "arch": "x86_64",
+    "epoch": "1",
+    "license": "Apache-2.0",
+    "name": "openssl-libs",
+    "release": "7.el9_7",
+    "sha256": "ee20515b9d11b141d70460dbedad0985875c1dc1aa4806dc5d0e28f7bcb97759",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/openssl-libs-3.5.1-7.el9_7.x86_64.rpm",
+    "version": "3.5.1"
+  },
+  "pcre2": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "BSD",
+    "name": "pcre2",
+    "release": "6.el9",
+    "sha256": "0cde5e36e904affa6feb6ce92f5c166774ddaaa6c7ffb4fbd1ff26881cde8b5a",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/pcre2-10.40-6.el9.x86_64.rpm",
+    "version": "10.40"
+  },
+  "readline": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "GPLv3+",
+    "name": "readline",
+    "release": "4.el9",
+    "sha256": "9255afa1a678af404a5a6a739d67444c1404789e952ec34b84899019d76282d6",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/readline-8.1-4.el9.x86_64.rpm",
+    "version": "8.1"
+  },
+  "userspace-rcu": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "LGPLv2+",
+    "name": "userspace-rcu",
+    "release": "6.el9",
+    "sha256": "e40cdc547f586de61738bd2c796ffa7292f10b9a1054f98db227ca472effb4f8",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/userspace-rcu-0.12.1-6.el9.x86_64.rpm",
+    "version": "0.12.1"
+  },
+  "xfsprogs": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "GPL+ and LGPLv2+",
+    "name": "xfsprogs",
+    "release": "7.el9",
+    "sha256": "e04bcfe2746c4ab2961d077ddd7152126b660d7749b0407058c3c371344ec110",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/xfsprogs-6.4.0-7.el9.x86_64.rpm",
+    "version": "6.4.0"
+  },
+  "shadow-utils": {
+    "name": "shadow-utils", "epoch": "2", "version": "4.9", "release": "15.el9", "arch": "x86_64",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/shadow-utils-4.9-15.el9.x86_64.rpm",
+    "sha256": "56c41107f88bb222e049140b7a77a890b06682e17740c0b8a7c2b64de37c8e1a", "license": "BSD and GPLv2+"
+  },
+  "libsemanage": {
+    "name": "libsemanage", "epoch": "0", "version": "3.6", "release": "5.el9_6", "arch": "x86_64",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/libsemanage-3.6-5.el9_6.x86_64.rpm",
+    "sha256": "2cb56aabec8939b0024269297d57f116794e70dcba376ff8e61d7542388c4c98", "license": "LGPLv2+"
+  },
+  "libsepol": {
+    "name": "libsepol", "epoch": "0", "version": "3.6", "release": "3.el9", "arch": "x86_64",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/libsepol-3.6-3.el9.x86_64.rpm",
+    "sha256": "56143c91aec874070cd4c404ed4c6bfd4be672b4741deee1fb79133a39e5066c", "license": "LGPLv2+"
+  },
+  "pam": {
+    "name": "pam", "epoch": "0", "version": "1.5.1", "release": "26.el9_6", "arch": "x86_64",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/pam-1.5.1-26.el9_6.x86_64.rpm",
+    "sha256": "132e962e69c73eb79668332a588e223a6c74fabe4a9486f1f8d95534c0d639c8", "license": "BSD and GPLv2+"
+  },
+  "libpwquality": {
+    "name": "libpwquality", "epoch": "0", "version": "1.4.4", "release": "8.el9", "arch": "x86_64",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/libpwquality-1.4.4-8.el9.x86_64.rpm",
+    "sha256": "71f55997aef67d1a58608e1b1047115d6b2693a9f1f7e05dac759db66a72bcda", "license": "BSD or GPLv2+"
+  },
+  "cracklib": {
+    "name": "cracklib", "epoch": "0", "version": "2.9.6", "release": "27.el9", "arch": "x86_64",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/cracklib-2.9.6-27.el9.x86_64.rpm",
+    "sha256": "c8d3fb92675c72332f02bd28933fc1beea57cc2c9990e5abaf607a26f60d06ff", "license": "LGPLv2+"
+  },
+  "libeconf": {
+    "name": "libeconf", "epoch": "0", "version": "0.4.1", "release": "4.el9", "arch": "x86_64",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/libeconf-0.4.1-4.el9.x86_64.rpm",
+    "sha256": "11464e955e108d782c68355e163eede4b00f40d50a9fd7f8d3598386e0fc86f1", "license": "MIT"
+  },
+  "bzip2-libs": {
+    "name": "bzip2-libs", "epoch": "0", "version": "1.0.8", "release": "10.el9_5", "arch": "x86_64",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/bzip2-libs-1.0.8-10.el9_5.x86_64.rpm",
+    "sha256": "6284777a7e01fe8c2a0734aa207f875a9ba8549283e3be9abc3bee39873c3e6e", "license": "BSD"
+  },
+  "libacl": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "LGPLv2+",
+    "name": "libacl",
+    "release": "4.el9",
+    "sha256": "8412086dee714db21802aacceea3b515ab21e5247a9703df72829fa23a6be042",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/libacl-2.3.1-4.el9.x86_64.rpm",
+    "version": "2.3.1"
+  },
+  "libattr": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "LGPLv2+",
+    "name": "libattr",
+    "release": "3.el9",
+    "sha256": "48e5ecb6d335b9e4facb7be2e50de010885f733026abbc007ee29550db91ee47",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/libattr-2.5.1-3.el9.x86_64.rpm",
+    "version": "2.5.1"
+  },
+  "libblkid": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "LGPLv2+",
+    "name": "libblkid",
+    "release": "21.el9_7",
+    "sha256": "f350afe491bebc8a44304fce538cceef42d5080cede8d2e4366fc53afd0b3d5f",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/libblkid-2.37.4-21.el9_7.x86_64.rpm",
+    "version": "2.37.4"
+  },
+  "libcap-ng": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "LGPLv2+",
+    "name": "libcap-ng",
+    "release": "7.el9",
+    "sha256": "2186dd2969f77d2779b02a98204177439488bf6c87454c5c57296fbda7910e60",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/libcap-ng-0.8.2-7.el9.x86_64.rpm",
+    "version": "0.8.2"
+  },
+  "zlib": {
+    "arch": "x86_64",
+    "epoch": "0",
+    "license": "zlib and Boost",
+    "name": "zlib",
+    "release": "40.el9",
+    "sha256": "90d7d5d145c6d397645ffefdff40e3d2783e3bf3bfa7b6c1f089c2cad81a3191",
+    "url": "https://repo.almalinux.org/vault/9.7/BaseOS/x86_64/os/Packages/zlib-1.2.11-40.el9.x86_64.rpm",
+    "version": "1.2.11"
+  }
+}

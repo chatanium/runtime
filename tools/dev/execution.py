@@ -77,7 +77,6 @@ class Identity:
         self.sudo = trusted('sudo') if self.cross_user else None
         self.python = trusted('python3')
         self.directory = None
-        self.generated_socket_directory = None
         self.launcher = None
         self.safe_env = {'PATH': '/usr/bin:/bin', 'HOME': self.account.pw_dir,
                          'USER': self.account.pw_name, 'LOGNAME': self.account.pw_name,
@@ -123,7 +122,7 @@ class Identity:
         try:
             result = subprocess.run(self.argv(command, secrets or ()), input=payload,
                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                    env=environment, timeout=timeout, check=False)
+                                    env=environment, cwd='/', timeout=timeout, check=False)
         except (OSError, subprocess.TimeoutExpired):
             raise ExecutionError('preauthorized noninteractive runtime run-as prerequisite unavailable') from None
         if result.returncode != 0 or len(result.stdout) > (2 << 20):
@@ -146,40 +145,54 @@ class Identity:
                              '--socket', str(path), '--timeout', str(timeout), operation],
                             payload=payload, timeout=timeout + 5)
 
-    def socket(self, supplied, root):
-        if supplied:
-            path = Path(supplied)
-        elif self.cross_user:
-            raw = self.command([trusted('mktemp'), '-d', '-p', '/var/tmp', 'chatanium-dev-runtime.XXXXXXXX'])
-            self.generated_socket_directory = Path(os.fsdecode(raw.strip()))
-            path = self.generated_socket_directory / 'control.sock'
-        else:
-            parent = root / '.tools/dev'
-            if not parent.exists():
-                parent.mkdir(mode=0o700)
-            path = parent / 'control.sock'
-        self.control(path, 'available')
+    def socket(self, supplied, management_directory):
+        native = Path(management_directory) / 'native'
+        path = Path(supplied) if supplied else native / 'control.sock'
+        if (not path.is_absolute() or path.parent != native or
+                supplied and str(path) != supplied or
+                any(ord(char) < 32 for char in str(path))):
+            raise ExecutionError('development socket must be a canonical direct child of installed app/native')
         return path
 
-    def check_inputs(self, config, supervisor):
-        if not self.test('-r', config):
-            raise ExecutionError('operator config must already be readable by runtime account')
-        if not self.test('-w', supervisor):
-            raise ExecutionError('supervisor socket must already be accessible by runtime account')
+    def check_inputs(self, launcher):
+        path = Path(launcher)
         if not path.is_absolute() or path.resolve(strict=True) != path:
             raise ExecutionError('existing v1 launcher must have an absolute canonical path')
+        for node in (path, *path.parents):
+            info = node.lstat()
+            if stat.S_ISLNK(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+                raise ExecutionError('installed launcher requires protected root-owned ancestry')
+        if not path.is_file() or not os.access(path, os.X_OK):
+            raise ExecutionError('installed self-managed launcher unavailable')
         self.launcher = path
 
+    def management_argv(self, arguments, secrets=()):
         if self.launcher is None:
             raise ExecutionError('explicit legacy launcher must be verified before management')
+        names = sorted(secrets)
+        return [trusted('sudo'), '-n',
+                *(['--preserve-env=' + ','.join(names)] if names else []),
                 '--', str(self.launcher), *map(str, arguments)]
+
+    def manage(self, arguments, timeout=300, input_file=None, max_output_bytes=2 << 20):
+        try:
+            result = subprocess.run(self.management_argv(arguments),
+                                    stdin=input_file if input_file is not None else subprocess.DEVNULL,
+                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                    env=self.safe_env, timeout=timeout, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            raise ExecutionError('installed root-management operation unavailable') from None
+        if result.returncode != 0 or len(result.stdout) > max_output_bytes:
+            raise ExecutionError('installed root-management operation failed')
+        return result.stdout
+
     def stage(self, artifact):
         # Only executable/native artifacts and the small public client are
         # staged. No source checkout, config, .env, or credentials are copied.
         self.directory.chmod(0o755)
         directory = Path(tempfile.mkdtemp(prefix='generation-', dir=self.directory))
         try:
-            shutil.copy2(artifact / 'chatanium', directory / 'chatanium')
+            shutil.copy2(artifact / 'chatanium-worker', directory / 'chatanium-worker')
             native = artifact / 'voice-runtime'
             if native.exists():
                 for path in native.rglob('*'):

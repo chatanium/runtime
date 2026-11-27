@@ -5,14 +5,12 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
 	_ "embed"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -21,13 +19,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/hashicorp/go-hclog"
-	"github.com/hashicorp/go-plugin"
-	"github.com/hashicorp/go-plugin/runner"
-	"github.com/thirdscam/chatanium/internal/host"
+	"github.com/thirdscam/chatanium/internal/bootstrap"
 	runtime "github.com/thirdscam/chatanium/internal/runtime"
 	wire "github.com/thirdscam/chatanium/proto/core-v2"
-	core "github.com/thirdscam/chatanium/shared/core-v2"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
@@ -59,19 +53,16 @@ func run(args []string) error {
 	flags := flag.NewFlagSet(scenario, flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	configPath := flags.String("config", "", "absolute operator runtime JSON")
-	executable := flags.String("runtime", "", "built runtime executable")
-	socket := flags.String("supervisor-socket", "", "absolute real supervisor socket")
-	uid := flags.Int64("supervisor-uid", -1, "trusted supervisor UID")
-	maxBytes := flags.Int("supervisor-max-bytes", 0, "supervisor packet bound")
+	executable := flags.String("runtime", "", "installed static launcher executable")
 	deadline := flags.Duration("deadline", 0, "required total scenario deadline")
 	observation := flags.Duration("observe", 0, "required running observation interval")
 	policyPlan := flags.String("policy-plan", "", "absolute trusted sandbox policy selection/prerequisite JSON; requires root observer")
 	policyRunner := flags.String("policy-runner", "", "absolute installed permanent sandbox-policy.py")
 	evidence := flags.String("evidence", "", "existing private root-owned policy evidence directory")
-	imageCheckOnly := flags.Bool("image-check-only", false, "verify canonical sandbox manifests as the configured non-root peer, without launching modules")
-	ipcComponentOnly := flags.Bool("ipc-component-only", false, "exercise actual supervisor retained-socket capture using the canonical fixture")
-	if flags.Parse(args[1:]) != nil || flags.NArg() != 0 || *deadline <= 0 || *observation <= 0 || *observation >= *deadline || *uid < 0 || *uid > 1<<32-1 || *maxBytes <= 0 || !filepath.IsAbs(*configPath) || !filepath.IsAbs(*socket) || *executable == "" {
-		return errors.New("finite deadline/observe, runtime/config and explicit supervisor flags required")
+	imageCheckOnly := flags.Bool("image-check-only", false, "verify committed canonical sandbox image declarations without launching modules")
+	prepareImages := flags.Bool("prepare-images", false, "explicitly prepare already-approved exact images through the installed launcher")
+	if flags.Parse(args[1:]) != nil || flags.NArg() != 0 || *deadline <= 0 || *observation <= 0 || *observation >= *deadline || !filepath.IsAbs(*configPath) || !filepath.IsAbs(*executable) {
+		return errors.New("finite deadline/observe and absolute installed runtime/config required")
 	}
 	file, err := os.Open(*configPath)
 	if err != nil {
@@ -87,6 +78,9 @@ func run(args []string) error {
 	if err != nil {
 		return errors.New("invalid operator configuration")
 	}
+	if err := bootstrap.ValidateInstalledConfig(context.Background(), bootstrap.RuntimeInstallationID(config.Host.RuntimeInstallationID), *configPath, raw); err != nil {
+		return errors.New("configuration is not the active installed revision")
+	}
 	if len(config.Modules) == 0 {
 		return errors.New("scenario requires installed real OCI modules")
 	}
@@ -95,9 +89,6 @@ func run(args []string) error {
 	}
 	if *imageCheckOnly && (scenario != "sandbox" || *policyPlan != "") {
 		return errors.New("image-check-only requires sandbox without policy orchestration")
-	}
-	if *ipcComponentOnly && (scenario != "sandbox" || *policyPlan != "" || *imageCheckOnly) {
-		return errors.New("ipc-component-only requires dedicated sandbox mode")
 	}
 	if *policyPlan != "" || *policyRunner != "" || *evidence != "" {
 		if scenario != "sandbox" || !filepath.IsAbs(*policyPlan) || !filepath.IsAbs(*policyRunner) || !filepath.IsAbs(*evidence) {
@@ -130,33 +121,38 @@ func run(args []string) error {
 	ctx, cancel := context.WithTimeout(parent, *deadline)
 	defer cancel()
 	if *policyPlan != "" {
-		return runSandboxPolicy(ctx, *policyRunner, *policyPlan, *evidence, *configPath, *executable, *socket, *uid, *maxBytes, *deadline)
+		return runSandboxPolicy(ctx, *policyRunner, *policyPlan, *evidence, *configPath, *executable, *deadline)
 	}
-	if scenario == "sandbox" && !*ipcComponentOnly {
-		client, err := host.Dial(ctx, host.ClientConfig{SocketPath: *socket, SupervisorUID: uint32(*uid), MaxMessageBytes: *maxBytes, OperationTimeout: time.Duration(config.Limits.DockerAPIDeadline)})
-		if err != nil {
-			return errors.New("sandbox image verification supervisor unavailable")
+	if *prepareImages {
+		for _, spec := range config.Modules {
+			command := exec.CommandContext(ctx, *executable, "prepare-image", "--installation-id", config.Host.RuntimeInstallationID,
+				"--module-id", string(spec.ModuleID), "--image", spec.ImageDigest,
+				"--config-revision", spec.ConfigRevision, "--approval-revision", spec.ApprovalRevision)
+			command.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C", "HOME=/nonexistent"}
+			command.Stdout, command.Stderr = io.Discard, io.Discard
+			if err := command.Run(); err != nil {
+				return errors.New("approved image preparation failed")
+			}
 		}
-		defer client.Close()
+	}
+	if scenario == "sandbox" {
 		expected := new(wire.ModuleManifest)
 		if protojson.Unmarshal(sandboxManifest, expected) != nil {
 			return errors.New("invalid embedded sandbox fixture manifest")
 		}
 		for _, spec := range config.Modules {
-			raw, e := client.ImageManifest(ctx, spec.ImageDigest)
+			image, err := bootstrap.InspectPreparedImage(ctx, bootstrap.RuntimeInstallationID(config.Host.RuntimeInstallationID), spec.ImageDigest)
 			actual := new(wire.ModuleManifest)
-			if e != nil || protojson.Unmarshal(raw, actual) != nil || !proto.Equal(expected, actual) {
-				return errors.New("sandbox scenario requires canonical sandbox fixture images")
+			if err != nil || protojson.Unmarshal(image.Declaration, actual) != nil || !proto.Equal(expected, actual) {
+				return errors.New("sandbox scenario requires committed canonical sandbox fixture images")
 			}
 		}
 	}
 	if *imageCheckOnly {
 		return nil
 	}
-	if *ipcComponentOnly {
-		return runIPCComponent(ctx, config, *socket, uint32(*uid), *maxBytes)
-	}
-	command := exec.CommandContext(ctx, *executable, "start", "--config", *configPath, "--supervisor-socket", *socket, "--supervisor-uid", strconv.FormatInt(*uid, 10), "--supervisor-max-bytes", strconv.Itoa(*maxBytes))
+	command := exec.CommandContext(ctx, *executable, "start", "--foreground", "--installation-id", config.Host.RuntimeInstallationID, "--config", *configPath)
+	command.Env = os.Environ() // The installed launcher alone selects approved secret bindings.
 	command.Stderr = io.Discard
 	command.WaitDelay = time.Second
 	stdout, err := command.StdoutPipe()
@@ -260,7 +256,7 @@ func run(args []string) error {
 				return errors.New("cleanup evidence missing")
 			}
 			if scenario == "sandbox" {
-				record("sandbox.boundaries", "PASS", "sandbox fixture INIT checked non-root, read-only rootfs, approved mount I/O, persistent sentinel, absent host environment/Docker socket and configured IPv4/IPv6 NONE-egress denials")
+				record("sandbox.boundaries", "PASS", "fixture INIT and authenticated bridge reached RUNNING with approved guest roots, non-root identity and NONE topology")
 				record("sandbox.full_policy", "NOT_RUN", "baseline only; select --policy-plan, --policy-runner and --evidence for finite host-observed policy cases")
 				return nil
 			}
@@ -286,7 +282,7 @@ func run(args []string) error {
 // Policy execution deliberately remains outside the production control plane.
 // The installed observer validates root ownership of itself and every operator
 // input, pins exact child identities, and never accepts imported evidence.
-func runSandboxPolicy(ctx context.Context, observer, plan, evidence, config, executable, socket string, uid int64, maxBytes int, deadline time.Duration) error {
+func runSandboxPolicy(ctx context.Context, observer, plan, evidence, config, executable string, deadline time.Duration) error {
 	if os.Geteuid() != 0 {
 		record("sandbox.full_policy", "NOT_RUN", "explicit root-side observer and trusted installed operator inputs required")
 		return errors.New("policy observer requires root")
@@ -317,8 +313,6 @@ func runSandboxPolicy(ctx context.Context, observer, plan, evidence, config, exe
 	// environment (including credentials) is inherited by the observer/runtime.
 	command := exec.CommandContext(ctx, "/usr/bin/python3", observer,
 		"--plan", plan, "--output", evidence, "--config", config, "--runtime", executable, "--image-checker", checker,
-		"--supervisor-socket", socket, "--supervisor-uid", strconv.FormatInt(uid, 10),
-		"--supervisor-max-bytes", strconv.Itoa(maxBytes),
 		"--overall-seconds", strconv.FormatInt(int64(deadline/time.Second), 10))
 	command.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C", "HOME=/nonexistent"}
 	command.Stdout = os.Stdout
@@ -331,145 +325,5 @@ func runSandboxPolicy(ctx context.Context, observer, plan, evidence, config, exe
 	if err := command.Run(); err != nil {
 		return errors.New("selected sandbox policy cases did not all pass; see private evidence")
 	}
-	return nil
-}
-
-// This component case uses real go-plugin bootstrap and the production runner,
-// but never Dispense/INIT: only the retained-socket boundary is under test.
-func runIPCComponent(ctx context.Context, config runtime.Config, socket string, uid uint32, maxBytes int) (retErr error) {
-	if os.Geteuid() == 0 || len(config.Modules) != 1 {
-		return errors.New("one canonical fixture and configured non-root peer required")
-	}
-	spec, l := config.Modules[0], config.Limits
-	if len(spec.Args) != 1 || spec.Args[0] != "--fixture-ipc-component" || spec.Approval.EgressPolicy != wire.EgressPolicy_EGRESS_POLICY_NONE {
-		return errors.New("dedicated IPC fixture arguments and NONE grant required")
-	}
-	client, err := host.Dial(ctx, host.ClientConfig{SocketPath: socket, SupervisorUID: uid, MaxMessageBytes: maxBytes, OperationTimeout: time.Duration(l.DockerAPIDeadline)})
-	if err != nil {
-		return errors.New("IPC supervisor connection failed")
-	}
-	defer client.Close()
-	expected, actual := new(wire.ModuleManifest), new(wire.ModuleManifest)
-	declaration, err := client.ImageManifest(ctx, spec.ImageDigest)
-	if err != nil || protojson.Unmarshal(sandboxManifest, expected) != nil || protojson.Unmarshal(declaration, actual) != nil || !proto.Equal(expected, actual) {
-		return errors.New("IPC component requires canonical sandbox fixture image")
-	}
-	random := make([]byte, 16)
-	if _, err = rand.Read(random); err != nil {
-		return errors.New("IPC instance identity unavailable")
-	}
-	r := spec.Approval.ResourceLimits
-	lease, err := client.Acquire(ctx, host.LaunchSpec{ModuleID: string(spec.ModuleID), InstanceID: fmt.Sprintf("%x", random), ImageDigest: spec.ImageDigest,
-		Entrypoint: spec.Entrypoint, Args: spec.Args, UID: spec.UID, GID: spec.GID, InitialEgress: host.EgressNone,
-		ConfigRevision: spec.ConfigRevision, ApprovalRevision: spec.ApprovalRevision,
-		Resources: host.ResourceLimits{NanoCPUs: int64(r.CpuMillicores) * 1000000, MemoryBytes: int64(r.MemoryBytes), Pids: int64(r.MaxPids),
-			PersistentBytes: int64(r.PersistentBytes), ScratchBytes: int64(r.ScratchBytes), PersistentInodes: l.PersistentInodeLimit,
-			ScratchInodes: l.ScratchInodeLimit, ControlMessageMaxBytes: int64(l.ControlMessageMaxBytes), LogBufferBytes: l.LogBufferBytes,
-			LogFileMaxBytes: l.LogFileMaxBytes, LogRetainedFiles: l.LogRetainedFiles}})
-	if err != nil {
-		return errors.New("IPC allocation failed")
-	}
-	defer func() {
-		cleanup, cancel := context.WithTimeout(context.Background(), 40*time.Second)
-		defer cancel()
-		retErr = errors.Join(retErr, client.Terminate(cleanup, lease.Ownership.InstanceID), client.Release(cleanup, lease.Ownership.InstanceID))
-	}()
-	factory := host.NewRunnerFactory(client, lease)
-	var socketDir string
-	deadline, _ := ctx.Deadline()
-	p := plugin.NewClient(&plugin.ClientConfig{HandshakeConfig: core.HandshakeConfig(), Plugins: plugin.PluginSet{},
-		RunnerFunc: func(logger hclog.Logger, cmd *exec.Cmd, dir string) (runner.Runner, error) {
-			socketDir = dir
-			return factory.RunnerFunc(logger, cmd, dir)
-		}, AutoMTLS: true, SkipHostEnv: true, GRPCBrokerMultiplex: true, AllowedProtocols: []plugin.Protocol{plugin.ProtocolGRPC},
-		StartTimeout: time.Until(deadline), Logger: hclog.NewNullLogger(), Stderr: io.Discard,
-		SyncStdout: io.Discard, SyncStderr: io.Discard, PluginLogBufferSize: l.ControlMessageMaxBytes,
-		UnixSocketConfig: &plugin.UnixSocketConfig{TempDir: lease.IPCPath, Group: strconv.FormatUint(uint64(lease.SocketGID), 10)}})
-	defer func() {
-		p.Kill()
-		retErr = errors.Join(retErr, factory.CloseTransport())
-	}()
-	if _, err = p.Start(); err != nil {
-		return errors.New("real IPC fixture bootstrap failed")
-	}
-	emit := func(phase string, data map[string]any) error {
-		data["phase"], data["modules"], data["voice"] = phase, 1, false
-		data["pid"], data["instance_id"], data["epoch_id"] = os.Getpid(), lease.Ownership.InstanceID, lease.Ownership.EpochID
-		data["installation_id"] = lease.Ownership.InstallationID
-		return json.NewEncoder(os.Stdout).Encode(data)
-	}
-	if err = emit("RUNNING", map[string]any{}); err != nil {
-		return err
-	}
-	// Parent inspects exact lease/container/cgroup before allowing this one use.
-	input := make(chan bool, 1)
-	go func() {
-		scanner := bufio.NewScanner(os.Stdin)
-		scanner.Buffer(make([]byte, 32), 32)
-		input <- scanner.Scan() && scanner.Text() == "exercise"
-	}()
-	select {
-	case ok := <-input:
-		if !ok {
-			return errors.New("IPC observer command missing")
-		}
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	name := filepath.Join(filepath.Base(socketDir), "original")
-	held, err := client.CaptureSocket(ctx, lease.Ownership.InstanceID, name)
-	if err != nil {
-		return errors.New("original socket capture failed")
-	}
-	defer held.Close()
-	st, err := held.Stat()
-	if err != nil {
-		return err
-	}
-	dial := func(path string) (net.Conn, error) {
-		return (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "unix", path)
-	}
-	control, err := dial(filepath.Join(socketDir, "control"))
-	if err != nil {
-		return errors.New("fixture control unavailable")
-	}
-	defer control.Close()
-	_ = control.SetDeadline(time.Now().Add(10 * time.Second))
-	if _, err = fmt.Fprintln(control, "replace "+filepath.Join(lease.ScratchPath, "outside")); err != nil {
-		return err
-	}
-	reader := bufio.NewScanner(control)
-	reader.Buffer(make([]byte, 128), 128)
-	if !reader.Scan() || reader.Text() != "replaced" {
-		return errors.New("ordered replacement acknowledgement missing")
-	}
-	conn, err := dial(fmt.Sprintf("/proc/self/fd/%d", held.Fd()))
-	if err != nil {
-		return errors.New("retained descriptor dial failed")
-	}
-	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
-	response := bufio.NewScanner(conn)
-	response.Buffer(make([]byte, 128), 128)
-	original := response.Scan() && response.Text() == "original"
-	_ = conn.Close()
-	fresh, captureErr := client.CaptureSocket(ctx, lease.Ownership.InstanceID, name)
-	if fresh != nil {
-		_ = fresh.Close()
-	}
-	if !original || captureErr == nil {
-		return errors.New("retained identity or replaced-name rejection failed")
-	}
-	if _, err = fmt.Fprintln(control, "complete"); err != nil || !reader.Scan() || reader.Text() != "complete" {
-		return errors.New("fixture completion acknowledgement missing")
-	}
-	native, ok := st.Sys().(*syscall.Stat_t)
-	if !ok {
-		return errors.New("retained inode identity unavailable")
-	}
-	if err = emit("IPC_COMPONENT", map[string]any{"order": []string{"captured", "replacement-ack", "held-dial-original", "fresh-capture-rejected", "complete-ack"},
-		"device": native.Dev, "inode": native.Ino, "original_reached": original, "fresh_capture_rejected": captureErr != nil}); err != nil {
-		return err
-	}
-	<-ctx.Done()
 	return nil
 }

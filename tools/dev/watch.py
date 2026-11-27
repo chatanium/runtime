@@ -19,14 +19,14 @@ import time
 import uuid
 from dataclasses import dataclass
 
-from control import ControlError, request as control_request
+from control import ControlError, MAX_LOCK_JSON, coordination_metadata, request as control_request
 from execution import ExecutionError, Identity, trusted
 from observations import ObservationError, RuntimeObservations
 from processes import BuildCleanupError, capture_tree, spawn_owned, terminate_tree
 
 LABEL = 'org.chatanium.flexmodule.manifest.v2'
 IMAGE = re.compile(r'^([a-z0-9][a-z0-9._:/-]*)@sha256:[0-9a-f]{64}$')
-MAX_JSON = 2 << 20
+MAX_JSON = 16 << 20
 IGNORED = {'.git', '.tools', 'bin', 'logs', '__pycache__', 'node_modules',
            'vendor', 'storage', 'runtime-storage', '.musicbot'}
 # Compiler/build tools receive no application tokens or arbitrary inherited env.
@@ -35,7 +35,6 @@ BUILD_ENV = {'PATH', 'HOME', 'USER', 'LOGNAME', 'TMPDIR', 'LANG', 'LC_ALL',
              'DOCKER_TLS_VERIFY', 'XDG_RUNTIME_DIR',
              'GOOS', 'GOARCH', 'GO_TOOLCHAIN', 'BUF_VERSION',
              'PROTOC_GEN_GO_VERSION', 'PROTOC_GEN_GO_GRPC_VERSION', 'BUILD_JOBS',
-             'BUILD_OUTPUTS', 'MODULE', 'DISABLE_VOICE'}
              'BUILD_OUTPUTS', 'MODULE', 'DISABLE_VOICE', 'LEGACY_RUNTIME', 'BOOTSTRAP_GO'}
 
 
@@ -100,15 +99,32 @@ def private_directory(path):
 
 
 class SessionLock:
-    def __init__(self, control, identity):
+    def __init__(self, metadata, identity):
         self.identity = identity
-        command = [identity.python, '-I', str(identity.directory / 'control.py'),
-                   '--socket', str(control), 'lock']
+        payload = json.dumps(metadata, separators=(',', ':')).encode() + b'\n'
+        if len(payload) > MAX_LOCK_JSON:
+            raise DevelopmentError('installed coordination metadata exceeds helper bound')
+        command = [identity.python, '-I', str(identity.directory / 'control.py'), 'lock']
         self.process = subprocess.Popen(identity.argv(command), env=identity.safe_env,
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                        stderr=subprocess.DEVNULL, start_new_session=True)
+                                        stderr=subprocess.DEVNULL, cwd='/', start_new_session=True)
         try:
-            readable, _, _ = select.select([self.process.stdout], [], [], 15)
+            deadline = time.monotonic() + 15
+            fd, offset = self.process.stdin.fileno(), 0
+            os.set_blocking(fd, False)
+            while offset < len(payload):
+                _, writable, _ = select.select([], [fd], [], max(0, deadline - time.monotonic()))
+                if not writable:
+                    raise DevelopmentError('runtime session lock input deadline exceeded')
+                try:
+                    written = os.write(fd, memoryview(payload)[offset:])
+                except BlockingIOError:
+                    continue
+                if written <= 0:
+                    raise DevelopmentError('runtime session lock input closed')
+                offset += written
+            os.set_blocking(fd, True)
+            readable, _, _ = select.select([self.process.stdout], [], [], max(0, deadline - time.monotonic()))
             if not readable or self.process.stdout.readline(16) != b'READY\n':
                 raise DevelopmentError('runtime session lock unavailable or already held')
         except BaseException:
@@ -160,25 +176,39 @@ class Binding:
     source: Source
 
 
-def load_config(path, excluded_paths=None, runtime_uid=None):
-    runtime_uid = os.geteuid() if runtime_uid is None else runtime_uid
+def inspect_config(identity, args):
+    raw = identity.manage(['inspect-config', *args], max_output_bytes=MAX_JSON)
+    if not isinstance(raw, bytes) or not raw or len(raw) > MAX_JSON:
+        raise DevelopmentError('invalid or oversized installed configuration response')
+    return raw
+
+
+def inspect_dev_lock(identity, args):
     try:
-        no_symlinks(path)
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
-    except PermissionError:
-        raise DevelopmentError('operator config must already be readable by builder') from None
-    try:
-        info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_JSON:
-            raise DevelopmentError('unsafe or oversized operator configuration')
-        if info.st_uid not in (0, runtime_uid) or info.st_mode & 0o022:
-            raise DevelopmentError('operator config must be root/runtime-owned and not group/world writable')
-        with os.fdopen(fd, 'rb', closefd=False) as stream:
-            raw = stream.read(MAX_JSON + 1)
-    finally:
-        os.close(fd)
-    if len(raw) > MAX_JSON:
-        raise DevelopmentError('oversized operator configuration')
+        return coordination_metadata(identity.manage(
+            ['inspect-dev-lock', *args], max_output_bytes=MAX_LOCK_JSON))
+    except ControlError:
+        raise DevelopmentError('invalid installed development coordination metadata') from None
+
+
+def management_directory(raw):
+    doc = decode(raw)
+    host = doc.get('host') if isinstance(doc, dict) else None
+    if not isinstance(host, dict):
+        raise DevelopmentError('installed app storage is missing')
+    storage, management = host.get('storage_root'), host.get('management_directory')
+    if (not isinstance(storage, str) or not isinstance(management, str) or
+            not storage.startswith('/') or str(PurePosixPath(storage)) != storage or
+            '..' in PurePosixPath(storage).parts or
+            management != str(PurePosixPath(storage) / 'app') or
+            any(ord(char) < 32 for char in storage)):
+        raise DevelopmentError('installed management directory must be canonical StorageRoot/app')
+    return Path(management)
+
+
+def load_config(raw, excluded_paths=None):
+    if not isinstance(raw, bytes) or not raw or len(raw) > MAX_JSON:
+        raise DevelopmentError('invalid or oversized installed configuration')
     doc = decode(raw)
     if not isinstance(doc, dict):
         raise DevelopmentError('operator configuration must be an object')
@@ -235,8 +265,8 @@ def file_stamp(path):
         return None
 
 
-def snapshot(root, config, excluded_paths=()):
-    result = {'@config': file_stamp(config)}
+def snapshot(root, config_digest, excluded_paths=()):
+    result = {'@config': config_digest}
     for parent, dirs, files in os.walk(root, followlinks=False):
         dirs[:] = [name for name in dirs if name not in IGNORED and not name.startswith('.') and not (Path(parent) / name).is_symlink() and Path(parent) / name not in excluded_paths]
         for name in files:
@@ -506,27 +536,30 @@ def bind(installed, sources, publisher, overrides):
 
 
 class RuntimeProcess:
-    def __init__(self, root, config, control, args, cancelled, tick, identity):
-        self.root, self.config, self.control, self.args = root, config, control, args
+    def __init__(self, root, control, args, cancelled, tick, identity):
+        self.root, self.control, self.args = root, control, args
         self.cancelled, self.tick, self.identity = cancelled, tick, identity
         self.environment = dict(identity.safe_env)
         self.process = None
         self.artifact = None
         self.observations = None
         self.expected_repositories = {}
+        self.candidates = {}
 
     def start(self, artifact, overrides):
         if self.process is not None:
             raise DevelopmentError('runtime overlap refused')
-        self.identity.control(self.control, 'available')
-        command = [trusted('env'), '-C', str(self.control.parent),
-                   str(artifact / 'chatanium'), 'start', '--config', str(self.config),
-                   '--dev-mode', '--dev-socket', str(self.control), *self.args]
+        revision = self.candidates.get(artifact)
+        if not revision:
+            raise DevelopmentError('worker candidate has not been published by the installed owner')
+        command = ['start', '--foreground', '--dev-mode', '--dev-revision', revision,
+                   '--dev-socket', str(self.control), *self.args]
         for module_id, image in sorted(overrides.items()):
             command += ['--dev-module-image', module_id + '=' + image]
         secrets = {key: value for key, value in self.environment.items() if key not in self.identity.safe_env}
-        self.process = subprocess.Popen(self.identity.argv(command, secrets), env=self.environment,
-                                        stdout=subprocess.PIPE, start_new_session=True)
+        self.process = subprocess.Popen(self.identity.management_argv(command, secrets), env=self.environment,
+                                        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                        cwd='/', start_new_session=True)
         self.artifact = artifact
         try:
             self.observations = RuntimeObservations(self.process.stdout, self.expected_repositories)
@@ -562,11 +595,35 @@ class RuntimeProcess:
         receipt = self.finish_observations()
         if receipt is None:
             raise DevelopmentError('runtime cleanup receipt missing or invalid; replacement refused')
+        self.confirm_root_cleanup(grace)
         self.process = None
-        if self.artifact is not None:
-            self.identity.remove_generation(self.artifact)
-            self.artifact = None
+        self.artifact = None
         return receipt
+
+    def confirm_root_cleanup(self, grace):
+        report = decode(self.identity.manage(['stop', *self.args], timeout=max(60, grace)))
+        installation = self.args[self.args.index('--installation-id') + 1]
+        if (not isinstance(report, dict) or report.get('installation_id') != installation or
+                report.get('complete') is not True or report.get('desired_run_state') != 'STOPPED' or
+                report.get('pending') or report.get('failures')):
+            raise DevelopmentError('root owner cleanup remains incomplete; replacement refused')
+
+    def discard_candidate(self, artifact):
+        revision = self.candidates.get(artifact)
+        if revision is None:
+            raise DevelopmentError('unknown prepared worker candidate; cleanup refused')
+        report = decode(self.identity.manage(['discard-dev-revision', *self.args, '--revision', revision]))
+        installation = self.args[self.args.index('--installation-id') + 1]
+        if (not isinstance(report, dict) or report.get('installation_id') != installation or
+                report.get('complete') is not True or report.get('pending') or report.get('failures')):
+            raise DevelopmentError('worker generation reclamation remains incomplete')
+        self.candidates.pop(artifact)
+        self.identity.remove_generation(artifact)
+
+    def discard_superseded(self, keep):
+        for artifact in tuple(self.candidates):
+            if artifact != keep:
+                self.discard_candidate(artifact)
 
     def finish_observations(self):
         if self.observations is None:
@@ -576,50 +633,108 @@ class RuntimeProcess:
         except ObservationError:
             raise DevelopmentError('runtime observation cleanup failed; replacement refused') from None
 
-    def join_on_exit(self, grace):
+    def join_on_exit(self, grace, retain=False):
         if self.alive():
             self.stop(grace)
         elif self.process is not None:
             self.process.wait()
-            self.finish_observations()
+            receipt = self.finish_observations()
+            if not retain:
+                if receipt is None:
+                    raise DevelopmentError('worker exited without a complete cleanup receipt')
+                self.confirm_root_cleanup(grace)
+                self.process = None
+                self.artifact = None
+        if not retain:
+            self.discard_superseded(None)
 
 
 class Watcher:
     def __init__(self, root, config, control, args, identity, poll=.2, debounce=.35):
         self.root, self.config, self.control = root, config, control
         self.identity = identity
+        self.args = tuple(args)
         self.poll_interval, self.cancelled = poll, False
         self.excluded_paths = set()
-        load_config(config, self.excluded_paths, runtime_uid=identity.account.pw_uid)
-        self.changes = Changes(lambda: snapshot(root, config, self.excluded_paths), debounce)
+        load_config(config, self.excluded_paths)
+        self.config_digest = hashlib.sha256(config).digest()
+        self.config_poll_at = 0
+        self.changes = Changes(lambda: snapshot(root, self.config_digest, self.excluded_paths), debounce)
         self.runner = Runner(root, self.tick, lambda: self.cancelled)
         self.work = Path(tempfile.mkdtemp(prefix='session-', dir=root / '.tools/dev'))
         self.publisher = Publisher(root, self.work, self.runner)
-        self.runtime = RuntimeProcess(root, config, control, args, lambda: self.cancelled, self.tick, identity)
+        self.runtime = RuntimeProcess(root, control, args, lambda: self.cancelled, self.tick, identity)
         self.overrides, self.installed_images = {}, {}
         self.grace, self.startup = 30, 30
         self.ready = False
         self.fatal = False
+        self.worker_preparation_uncertain = False
 
-    def tick(self):
+    def tick(self, force_config=False):
+        now = time.monotonic()
+        if force_config or now >= self.config_poll_at:
+            config = inspect_config(self.identity, self.args)
+            if config != self.config:
+                self.config, self.config_digest = config, hashlib.sha256(config).digest()
+            self.config_poll_at = now + 1
         self.changes.poll()
 
     def stable(self, generation):
-        self.tick()
+        self.tick(force_config=True)
         if self.cancelled:
             raise Cancelled()
         if generation != self.changes.generation:
             raise Stale()
 
     def prepare_runtime(self):
-        self.runner.run(['make', '--no-print-directory', 'build-runtime'])
-        directory = Path(tempfile.mkdtemp(prefix='runtime-', dir=self.work))
+        if self.worker_preparation_uncertain:
+            raise DevelopmentError('worker publication outcome is unresolved; automatic resubmission refused')
+        # Only the nonroot worker/native closure is a development candidate.
+        self.runner.run(['make', '--no-print-directory', 'build-dev-worker'])
+        directory = Path(tempfile.mkdtemp(prefix='worker-', dir=self.work))
         try:
-            shutil.copy2(self.root / 'bin/chatanium', directory / 'chatanium')
+            shutil.copy2(self.root / 'bin/chatanium-worker', directory / 'chatanium-worker')
             native = self.root / 'bin/voice-runtime'
             if os.environ.get('DISABLE_VOICE') != '1' and native.exists():
                 shutil.copytree(native, directory / 'voice-runtime')
-            return self.identity.stage(directory)
+            public = self.identity.stage(directory)
+            archive = self.work / ('worker-' + uuid.uuid4().hex + '.tar')
+            submitted = False
+            try:
+                base = decode(self.config)['host']['bundle_digest']
+                arguments = ['python3', 'tools/build/development.py', '--source', str(public),
+                             '--output', str(archive), '--base-bundle-digest', base]
+                if os.environ.get('DISABLE_VOICE') == '1':
+                    arguments.append('--disable-voice')
+                identity = decode(self.runner.run(arguments, capture=True))
+                if (not isinstance(identity, dict) or set(identity) != {'archive_digest', 'archive_bytes', 'manifest_digest'} or
+                        not re.fullmatch(r'sha256:[0-9a-f]{64}', str(identity['archive_digest'])) or
+                        not re.fullmatch(r'sha256:[0-9a-f]{64}', str(identity['manifest_digest'])) or
+                        type(identity['archive_bytes']) is not int or
+                        not 0 < identity['archive_bytes'] <= 4 << 30 or identity['archive_bytes'] % 4096):
+                    raise DevelopmentError('invalid worker artifact receipt')
+                with archive.open('rb') as data:
+                    submitted = True
+                    record = decode(self.identity.manage(['prepare-dev-worker', *self.args,
+                        '--input', '-', '--sha256', identity['archive_digest'],
+                        '--size', str(identity['archive_bytes'])], input_file=data, max_output_bytes=64 << 20))
+                if not isinstance(record, dict):
+                    raise DevelopmentError('installed owner returned a non-record worker result')
+                revision = record.get('id')
+                binding = record.get('development_worker')
+                if (not isinstance(revision, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', revision) or
+                        record.get('bundle_digest') != base or not isinstance(binding, dict) or
+                        binding.get('artifact_digest') != identity['manifest_digest']):
+                    raise DevelopmentError('installed owner returned an invalid worker revision binding')
+                self.runtime.candidates[public] = revision
+                return public
+            except BaseException:
+                if submitted:
+                    self.worker_preparation_uncertain = True
+                self.identity.remove_generation(public)
+                raise
+            finally:
+                archive.unlink(missing_ok=True)
         finally:
             shutil.rmtree(directory)
 
@@ -666,7 +781,7 @@ class Watcher:
 
     def apply(self, paths):
         generation = self.changes.generation
-        installed, grace, startup, secret_environment = load_config(self.config, self.excluded_paths, runtime_uid=self.identity.account.pw_uid)
+        installed, grace, startup, secret_environment = load_config(self.config, self.excluded_paths)
         for name in secret_environment:
             self.runner.env.pop(name, None)
         # Approval/config changes are consumed only by a whole-runtime restart.
@@ -707,6 +822,10 @@ class Watcher:
                 note('building and publishing mapped module candidate')
                 candidates[module_id] = self.publisher.publish(binding, base)
                 candidate_bases[module_id] = base
+                # Root preparation must commit a complete candidate before the
+                # nonroot reload controller can stop a healthy module.
+                self.identity.manage(['prepare-image', *self.args,
+                                      '--module-id', module_id, '--image', candidates[module_id]])
             self.stable(generation)
             if rebuild_runtime:
                 # All candidates exist before the healthy runtime is disturbed.
@@ -737,6 +856,11 @@ class Watcher:
                     raise
                 artifact = None
                 self.await_ready()
+                try:
+                    self.runtime.discard_superseded(self.runtime.artifact)
+                except (DevelopmentError, ExecutionError, OSError):
+                    self.fatal = True
+                    raise
                 note('runtime candidate active')
             else:
                 for module_id, image in candidates.items():
@@ -749,8 +873,12 @@ class Watcher:
                     self.overrides[module_id] = image
                     note('module candidate active')
         finally:
-            if artifact is not None and (self.runtime.artifact != artifact or not self.runtime.alive()):
-                self.identity.remove_generation(artifact)
+            if artifact is not None and not self.fatal and (self.runtime.artifact != artifact or not self.runtime.alive()):
+                try:
+                    self.runtime.discard_candidate(artifact)
+                except (DevelopmentError, ExecutionError, OSError):
+                    self.fatal = True
+                    raise
 
     def run(self):
         previous = {}
@@ -786,7 +914,7 @@ class Watcher:
             pass
         finally:
             try:
-                self.runtime.join_on_exit(self.grace)
+                self.runtime.join_on_exit(self.grace, retain=self.fatal)
             finally:
                 for number, handler in previous.items():
                     signal.signal(number, handler)
@@ -797,42 +925,36 @@ class Watcher:
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--config', required=True)
     parser.add_argument('--runtime', required=True, help='verified, already installed v1 launcher')
     parser.add_argument('--socket', required=True)
-    parser.add_argument('--supervisor-socket', required=True)
-    parser.add_argument('--supervisor-uid', required=True)
-    parser.add_argument('--supervisor-max-bytes', required=True)
+    parser.add_argument('--installation-id', required=True)
     args = parser.parse_args(argv)
     if os.environ.get('DEV_MODE') != '1':
         raise DevelopmentError('watching requires explicit DEV_MODE=1')
     if os.geteuid() == 0:
         raise DevelopmentError('refusing to execute writable checkout builds as root')
     root = Path(__file__).resolve().parents[2]
-    config = Path(args.config)
     identity = Identity(root, os.environ.get('DEV_RUNTIME_USER', ''))
     lock = None
     watcher = None
     try:
-        load_config(config, runtime_uid=identity.account.pw_uid)
         identity.check_inputs(args.runtime)
         os.environ['LEGACY_RUNTIME'] = args.runtime
+        config = inspect_config(identity, ['--installation-id', args.installation_id])
+        load_config(config)
         # All source/compiler/native work stays under /home. Public execution
         # generations contain no secrets and require no home permission changes.
         tools = root / '.tools'
         no_symlinks(tools)
         tools.mkdir(exist_ok=True)
         private_directory(tools / 'dev')
-        identity.check_inputs(config, Path(args.supervisor_socket))
-        control = identity.socket(args.socket, root)
-        no_symlinks(control)
+        control = identity.socket(args.socket, management_directory(config))
         if len(os.fsencode(control)) >= 108:
             raise DevelopmentError('development socket path exceeds Unix socket limit')
-        lock = SessionLock(control, identity)
+        metadata = inspect_dev_lock(identity, ['--installation-id', args.installation_id])
+        lock = SessionLock(metadata, identity)
         watcher = Watcher(root, config, control,
-                          ['--supervisor-socket', args.supervisor_socket,
-                           '--supervisor-uid', args.supervisor_uid,
-                           '--supervisor-max-bytes', args.supervisor_max_bytes], identity)
+                          ['--installation-id', args.installation_id], identity)
         watcher.run()
     finally:
         if lock is not None:

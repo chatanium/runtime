@@ -15,8 +15,8 @@ import (
 
 // Reports contain observations, never verdicts about host enforcement. In
 // particular, the last durable record before fatal task/OOM termination remains
-// an intent, not a successful result. The parent must correlate container exit,
-// cgroup events, project accounting, and its ownership journal.
+// an intent, not a successful result. Correlate exact unit exits, cgroup events,
+// native project accounting and the authoritative Store journal.
 type probeSession struct {
 	mu         sync.Mutex
 	file       *os.File
@@ -124,13 +124,12 @@ func (p *probeSession) close() {
 	}
 }
 
-// PLUGIN_UNIX_SOCKET_DIR is injected by the authenticated go-plugin runner and
-// translated to the guest broker directory by bootstrapEnvironment. Do not use
-// guessed mount aliases, TMPDIR, host socket paths, or unrelated environment.
+// PLUGIN_UNIX_SOCKET_DIR is a guest-private direct child of scratch-backed /tmp,
+// supplied by the authenticated bridge. It is never a native IPC mount/path.
 func guestIPCDirectory() (string, error) {
 	path := os.Getenv("PLUGIN_UNIX_SOCKET_DIR")
-	if !canonicalDirectory(path) {
-		return "", errors.New("runner broker directory is unavailable")
+	if !canonicalDirectory(path) || filepath.Dir(path) != "/tmp" {
+		return "", errors.New("guest-private bootstrap directory is unavailable")
 	}
 	info, err := os.Lstat(path)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {

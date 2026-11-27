@@ -12,6 +12,7 @@ import struct
 import sys
 
 MAX_JSON = 2 << 20
+MAX_LOCK_JSON = 16 << 10
 
 
 class ControlError(Exception):
@@ -27,8 +28,8 @@ def private_directory(path):
         if current.is_symlink():
             raise ControlError('control symlink traversal refused')
     info = path.stat()
-    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o700:
-        raise ControlError('control directory must be runtime-owned mode 0700')
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_gid != os.getegid() or stat.S_IMODE(info.st_mode) != 0o700:
+        raise ControlError('control directory must be runtime UID/GID-owned mode 0700')
 
 
 class UnixHTTP(http.client.HTTPConnection):
@@ -66,31 +67,93 @@ def request(path, timeout, method, route, payload=None):
         connection.close()
 
 
+def coordination_metadata(raw):
+    if not isinstance(raw, bytes) or not raw or len(raw) > MAX_LOCK_JSON:
+        raise ControlError('invalid coordination metadata bound')
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ControlError('duplicate coordination metadata')
+            result[key] = value
+        return result
+    try:
+        data = json.loads(raw.decode('utf-8'), object_pairs_hook=unique)
+    except (ValueError, UnicodeError, RecursionError):
+        raise ControlError('invalid coordination metadata JSON') from None
+    keys = {'version', 'path', 'device', 'inode', 'uid', 'gid', 'mode'}
+    if not isinstance(data, dict) or set(data) != keys:
+        raise ControlError('invalid coordination metadata fields')
+    for name in keys - {'path'}:
+        if type(data[name]) is not int or not 0 <= data[name] < 1 << 64:
+            raise ControlError('invalid coordination metadata integer')
+    if (data['version'] != 1 or data['uid'] != 0 or
+            not 0 < data['gid'] < 1 << 32 or not data['inode'] or data['mode'] != 0o440):
+        raise ControlError('invalid coordination metadata identity')
+    value = data['path']
+    if not isinstance(value, str):
+        raise ControlError('invalid coordination metadata path')
+    path = Path(value)
+    if (not path.is_absolute() or str(path) != value or value.startswith('//') or
+            '..' in path.parts or path.name != 'dev-watch.lock' or
+            any(ord(char) < 32 for char in value)):
+        raise ControlError('noncanonical coordination metadata path')
+    return data
+
+
+def coordination_file(data):
+    path = Path(data['path'])
+    for parent in reversed(path.parents):
+        info = parent.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+            raise ControlError('coordination lock requires protected root-owned ancestry')
+    info = path.lstat()
+    expected = (data['device'], data['inode'], data['uid'], data['gid'], data['mode'])
+    actual = (info.st_dev, info.st_ino, info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode))
+    if (not stat.S_ISREG(info.st_mode) or actual != expected or
+            info.st_gid != os.getegid() or info.st_nlink != 1 or info.st_size != 0):
+        raise ControlError('unsafe installed metadata coordination lock')
+    return info
+
+
+def hold_coordination_lock(data):
+    before = coordination_file(data)
+    fd = os.open(data['path'], os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+    try:
+        opened = os.fstat(fd)
+        if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+            raise ControlError('coordination lock changed while opening')
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        # Purge may have won after open but before flock. Never authorize an
+        # orphaned inode even though its old descriptor accepted the lock.
+        current = coordination_file(data)
+        if (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino):
+            raise ControlError('coordination lock changed while acquiring')
+        print('READY', flush=True)
+        sys.stdin.buffer.read(1)
+    finally:
+        os.close(fd)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--socket', required=True)
+    parser.add_argument('--socket')
     parser.add_argument('--timeout', type=float, default=60)
     parser.add_argument('operation', choices=['directory', 'available', 'lock', 'modules', 'reload'])
     args = parser.parse_args()
+    if args.operation == 'lock':
+        if args.socket:
+            raise ControlError('coordination lock does not accept a native socket path')
+        raw = sys.stdin.buffer.readline(MAX_LOCK_JSON + 1)
+        if not raw.endswith(b'\n'):
+            raise ControlError('coordination metadata framing required')
+        hold_coordination_lock(coordination_metadata(raw))
+        return
+    if not args.socket:
+        raise ControlError('native control operation requires a socket')
     path = Path(args.socket)
     private_directory(path.parent)
     if args.operation == 'directory':
-        return
-    if args.operation == 'lock':
-        lock = path.parent / (path.name + '.watch.lock')
-        fd = os.open(lock, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
-        try:
-            info = os.fstat(fd)
-            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1:
-                raise ControlError('unsafe development session lock')
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            if path.exists() or path.is_symlink():
-                raise ControlError('development socket already exists')
-            print('READY', flush=True)
-            # Parent closing this pipe releases the per-socket session lock.
-            sys.stdin.buffer.read()
-        finally:
-            os.close(fd)
         return
     if args.operation == 'available':
         if path.exists() or path.is_symlink():

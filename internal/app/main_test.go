@@ -3,6 +3,7 @@
 package app
 
 import (
+	"github.com/thirdscam/chatanium/internal/configgen"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,12 +35,13 @@ func TestHostSecretSourcesAreExplicitAndDiagnosticsAreSafe(t *testing.T) {
 	const name = "FLEXMODULE_TEST_HOST_SECRET"
 	const value = "not-a-real-credential"
 	t.Setenv(name, value)
-	got, err := hostSecret("env:" + name)
+	secrets := map[string]string{"discord:bot_token": value}
+	got, err := hostSecret(secrets, "discord:bot_token")
 	if err != nil || got != value {
-		t.Fatal("explicit host environment binding failed")
+		t.Fatal("explicit worker secret binding failed")
 	}
-	for _, source := range []string{name, "file:/tmp/secret", "env:", "env:../secret", "env:MISSING_FLEXMODULE_TEST_SECRET"} {
-		got, err = hostSecret(source)
+	for _, source := range []string{name, "env:" + name, "file:/tmp/secret", "", "discord:missing"} {
+		got, err = hostSecret(secrets, source)
 		if err == nil || got != "" {
 			t.Fatal("unsupported or missing secret source accepted")
 		}
@@ -59,13 +61,13 @@ func TestOperatorFileRejectsSymlinkAndWritableInput(t *testing.T) {
 	if err := os.Symlink(path, link); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readOperatorFile(link); err == nil {
+	if _, err := configgen.ReadOperatorFile(link); err == nil {
 		t.Fatal("operator config symlink accepted")
 	}
 	if err := os.Chmod(path, 0620); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readOperatorFile(path); err == nil {
+	if _, err := configgen.ReadOperatorFile(path); err == nil {
 		t.Fatal("group-writable operator config accepted")
 	}
 }

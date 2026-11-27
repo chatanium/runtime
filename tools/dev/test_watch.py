@@ -26,8 +26,14 @@ class TemporaryTree(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         (self.root / '.tools/dev').mkdir(parents=True, mode=0o700)
+        self.management = self.root / 'storage/app'
+        self.native = self.management / 'native'
+        self.native.mkdir(parents=True, mode=0o700)
         self.config = self.root / 'operator.json'
         self.config.write_text(json.dumps({
+            'host': {'storage_root': str(self.root / 'storage'),
+                     'management_directory': str(self.management),
+                     'bundle_digest': 'sha256:' + 'a' * 64},
             'modules': [{'module_id': 'approved', 'image': OLD,
                          'entrypoint': ['/custom/bin/real-player'],
                          'config': {'unchanged': True}, 'approval': {'unchanged': True}}],
@@ -41,11 +47,15 @@ class TemporaryTree(unittest.TestCase):
         self.identity.account = SimpleNamespace(pw_uid=os.geteuid())
         self.identity.safe_env = {'PATH': '/usr/bin:/bin', 'HOME': '/non-docker-runtime'}
         self.identity.argv.side_effect = lambda command, secrets=(): list(command)
+        self.identity.management_argv.side_effect = lambda command, secrets=(): ['/usr/bin/sudo', '-n', '--', '/usr/local/bin/chatanium', *command]
+        cleanup = json.dumps({'installation_id': 'fixture-installation',
+            'complete': True, 'desired_run_state': 'STOPPED', 'pending': [], 'failures': []}).encode()
+        self.identity.manage.side_effect = lambda command, **kwargs: self.config.read_bytes() if command[0] == 'inspect-config' else cleanup
         self.identity.remove_generation.side_effect = lambda directory: shutil.rmtree(directory)
 
     def watcher(self):
-        result = watch.Watcher(self.root, self.config, self.root / '.tools/dev/control.sock',
-                               ['--supervisor-socket', '/supervisor/socket'], self.identity, debounce=0)
+        result = watch.Watcher(self.root, self.config.read_bytes(), self.native / 'control.sock',
+                               ['--installation-id', 'fixture-installation'], self.identity, debounce=0)
         self.addCleanup(lambda: shutil.rmtree(result.work, ignore_errors=True))
         result.runner = Mock()
         result.runner.env = {}
@@ -58,6 +68,7 @@ class TemporaryTree(unittest.TestCase):
         result.runtime.process.returncode = None
         result.runtime.alive.return_value = True
         result.runtime.stop.return_value = {}
+        result.runtime.discard_candidate.side_effect = self.identity.remove_generation
         result.overrides = {'approved': OLD}
         result.installed_images = {'approved': OLD}
         return result
@@ -67,20 +78,20 @@ class ChangeTests(TemporaryTree):
     def test_atomic_replace_add_delete_and_ignored_outputs(self):
         source = self.root / 'main.go'
         source.write_text('old')
-        previous = watch.snapshot(self.root, self.config)
+        previous = watch.snapshot(self.root, b'installed-config-digest')
         replacement = self.root / 'main.go.tmp'
         replacement.write_text('new')
         replacement.replace(source)
         (self.root / 'new.go').write_text('new')
         (self.root / '.tools/dev/generated').write_text('ignored')
         (self.root / '.env').write_text('MUST_NOT_BE_READ=secret')
-        current = watch.snapshot(self.root, self.config)
+        current = watch.snapshot(self.root, b'installed-config-digest')
         self.assertNotEqual(previous['main.go'], current['main.go'])
         self.assertIn('new.go', current)
         self.assertNotIn('.env', current)
         self.assertNotIn('.tools/dev/generated', current)
         source.unlink()
-        self.assertNotIn('main.go', watch.snapshot(self.root, self.config))
+        self.assertNotIn('main.go', watch.snapshot(self.root, b'installed-config-digest'))
 
     def test_debounce_coalesces_and_tracks_edits_during_build(self):
         clock = [0.0]
@@ -330,7 +341,8 @@ class ApplyTests(TemporaryTree):
                 watcher.apply({'internal/runtime/manager.go'})
         self.assertTrue(watcher.fatal)
         watcher.runtime.start.assert_not_called()
-        self.assertFalse(artifact.exists())
+        self.assertTrue(artifact.exists())
+        watcher.runtime.discard_candidate.assert_not_called()
 
     def test_failed_runtime_edit_is_retained_until_next_edit_without_busy_retry(self):
         watcher = self.watcher()
@@ -352,8 +364,10 @@ class ApplyTests(TemporaryTree):
 
 class RuntimeProcessTests(TemporaryTree):
     def runtime(self):
-        return watch.RuntimeProcess(self.root, self.config, self.root / '.tools/dev/control.sock',
-                                    ['--supervisor-uid', '0'], lambda: False, lambda: None, self.identity)
+        runtime = watch.RuntimeProcess(self.root, self.native / 'control.sock',
+                                      ['--installation-id', 'fixture-installation'], lambda: False, lambda: None, self.identity)
+        runtime.candidates[self.root / 'generation'] = 'prepared-worker-revision'
+        return runtime
 
     def test_runtime_has_only_safe_env_and_explicit_secret_names(self):
         runtime = self.runtime()
@@ -397,16 +411,15 @@ class RuntimeProcessTests(TemporaryTree):
 
 
 class SecurityTests(TemporaryTree):
-    def test_config_permissions_duplicates_and_bytes_preserved(self):
+    def test_installed_config_duplicates_bounds_and_bytes_preserved(self):
         before = self.config.read_bytes()
-        installed, grace, startup, secrets = watch.load_config(self.config)
+        installed, grace, startup, secrets = watch.load_config(before)
         self.assertEqual(installed['approved'].entrypoint, '/custom/bin/real-player')
         self.assertEqual(grace, 8.5)
         self.assertEqual(secrets, {})
         self.assertEqual(self.config.read_bytes(), before)
-        self.config.chmod(0o666)
         with self.assertRaises(watch.DevelopmentError):
-            watch.load_config(self.config)
+            watch.load_config(b'x' * (watch.MAX_JSON + 1))
         with self.assertRaises(watch.DevelopmentError):
             watch.decode('{"x":1,"x":2}')
 
@@ -416,9 +429,9 @@ class SecurityTests(TemporaryTree):
         self.config.write_text(json.dumps(doc))
         (self.root / '.env').write_text('EXPLICIT_TOKEN=must-not-load')
         with patch.dict(os.environ, {}, clear=True), self.assertRaises(watch.DevelopmentError):
-            watch.load_config(self.config)
+            watch.load_config(self.config.read_bytes())
         with patch.dict(os.environ, {'EXPLICIT_TOKEN': 'exported', 'UNRELATED_TOKEN': 'not-forwarded'}):
-            _, _, _, secrets = watch.load_config(self.config)
+            _, _, _, secrets = watch.load_config(self.config.read_bytes())
             runner = watch.Runner(self.root, lambda: None, lambda: False)
         self.assertEqual(secrets, {'EXPLICIT_TOKEN': 'exported'})
         self.assertNotIn('EXPLICIT_TOKEN', runner.env)
@@ -428,17 +441,16 @@ class SecurityTests(TemporaryTree):
         identity = execution.Identity.__new__(execution.Identity)
         identity.directory = self.root / 'public'
         identity.directory.mkdir(mode=0o555)
-        identity.generated_socket_directory = None
         artifact = self.root / 'artifact'
         artifact.mkdir()
-        (artifact / 'chatanium').write_bytes(b'executable')
-        (artifact / 'chatanium').chmod(0o755)
+        (artifact / 'chatanium-worker').write_bytes(b'executable')
+        (artifact / 'chatanium-worker').chmod(0o755)
         (artifact / '.env').write_text('NEVER_COPY=secret')
         (artifact / 'config.json').write_text('NEVER_COPY')
         (artifact / 'voice-runtime/lib').mkdir(parents=True)
         (artifact / 'voice-runtime/lib/libvoice.so').write_bytes(b'library')
         generation = identity.stage(artifact)
-        self.assertEqual(set(path.name for path in generation.iterdir()), {'chatanium', 'voice-runtime'})
+        self.assertEqual(set(path.name for path in generation.iterdir()), {'chatanium-worker', 'voice-runtime'})
         for path in generation.rglob('*'):
             self.assertEqual(stat.S_IMODE(path.stat().st_mode) & 0o222, 0)
         identity.remove_generation(generation)
@@ -539,8 +551,9 @@ class InitialPublicationTests(TemporaryTree):
         doc['host'] = {'storage_root': str(storage)}
         self.config.write_text(json.dumps(doc))
         exclusions = set()
-        watch.load_config(self.config, exclusions)
-        state = watch.snapshot(self.root, self.config, exclusions)
+        installed_bytes = self.config.read_bytes()
+        watch.load_config(installed_bytes, exclusions)
+        state = watch.snapshot(self.root, watch.hashlib.sha256(installed_bytes).digest(), exclusions)
         self.assertNotIn('operator-named-state/a.go', state)
         self.assertIn('@config', state)
 
@@ -554,7 +567,6 @@ class CancellationTests(TemporaryTree):
             with self.assertRaises(watch.BuildCleanupError):
                 watcher.run()
         watcher.apply.assert_called_once_with({'@initial'})
-        watcher.runtime.join_on_exit.assert_called_once_with(watcher.grace)
 
     def test_cancelling_build_terminates_and_joins_compiler_tree(self):
         cancelled = Mock(side_effect=[False, True])
@@ -606,16 +618,15 @@ class CancellationTests(TemporaryTree):
             process.wait()
         self.addCleanup(reap_child)
         watcher.runtime.process = process
-        watcher.runtime.join_on_exit.side_effect = lambda grace: process.wait(timeout=grace)
+        watcher.runtime.join_on_exit.side_effect = lambda grace, retain=False: process.wait(timeout=grace)
         watcher.changes.take = lambda: {'@initial'}
         watcher.apply = Mock(side_effect=watch.Cancelled())
         with patch.object(watch.signal, 'signal', return_value=signal.SIG_DFL):
             watcher.run()
-        watcher.runtime.join_on_exit.assert_called_once_with(watcher.grace)
         self.assertEqual(process.poll(), 0)
 
     def test_timeout_is_abort_only_and_cannot_authorize_replacement(self):
-        runtime = watch.RuntimeProcess(self.root, self.config, self.root / '.tools/dev/control.sock',
+        runtime = watch.RuntimeProcess(self.root, self.native / 'control.sock',
                                        [], lambda: False, lambda: None, self.identity)
         process = Mock()
         process.poll.return_value = None

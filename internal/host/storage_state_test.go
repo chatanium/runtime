@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -44,7 +43,7 @@ func TestPartialPersistentCheckpointSurvivesCleanupAndRestart(t *testing.T) {
 					break
 				}
 			}
-			if err := f.journal.state(ctx, f.lease.Spec.InstanceID, "FAILED", "HOST_PREREQUISITE_FAILED"); err != nil {
+			if err := f.journal.state(ctx, f.lease.Spec.InstanceID, "CLEANUP_PENDING", "HOST_PREREQUISITE_FAILED"); err != nil {
 				t.Fatal(err)
 			}
 			if err := f.journal.cleanup(ctx, f.lease.Spec.InstanceID, true, nil); err != nil {
@@ -60,7 +59,7 @@ func TestPartialPersistentCheckpointSurvivesCleanupAndRestart(t *testing.T) {
 			f.reopen(t)
 			next := f.lease.Spec
 			next.InstanceID = strings.Repeat("d", 32)
-			lease, err := f.journal.allocate(ctx, f.lease.Ownership.EpochID, next, SupervisorConfig{StorageRoot: filepath.Join(f.directory, "storage"), IPCRoot: filepath.Join(f.directory, "ipc"), ManagementDirectory: f.directory})
+			lease, err := f.journal.allocate(ctx, f.lease.Ownership.EpochID, next, f.config())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -87,7 +86,7 @@ func TestCompletedPersistentDirectoryIsNeverRecreated(t *testing.T) {
 	if err := f.journal.persistentTransition(ctx, f.lease, "RESERVED", "READY", 1<<30, 65536); err != nil {
 		t.Fatal(err)
 	}
-	s := storage{journal: f.journal, quota: &quotaFS{blockBytes: 4096}}
+	s := Storage{store: f.journal, quota: &quotaFS{blockBytes: 4096}}
 	err := s.provisionPersistent(ctx, f.lease)
 	if err == nil || !strings.Contains(err.Error(), "completed persistent directory is missing") {
 		t.Fatalf("missing completed ownership did not fail closed: %v", err)
@@ -144,12 +143,112 @@ func TestPersistentCollisionCannotBecomeRecoverableIntent(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.reopen(t)
-	s := storage{journal: f.journal, quota: &quotaFS{blockBytes: 4096}}
+	s := Storage{store: f.journal, quota: &quotaFS{blockBytes: 4096}}
 	if err := s.provisionPersistent(ctx, f.lease); err == nil || !strings.Contains(err.Error(), "foreign allocation") {
 		t.Fatalf("collision became resumable ownership: %v", err)
 	}
 	got, err := f.journal.persistentProvision(ctx, f.lease)
 	if err != nil || got.State != "COLLISION" {
 		t.Fatalf("collision evidence lost: %+v %v", got, err)
+	}
+}
+
+func TestNativeAppReservationPersistsInsideDataPool(t *testing.T) {
+	ctx := context.Background()
+	f := newCreateStateFixture(t, EgressNone)
+	project, err := f.journal.AppStorageProject(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := f.journal.ReserveAppStorage(ctx)
+	if err != nil || again != project {
+		t.Fatalf("app reservation was not immutable: %d %d %v", project, again, err)
+	}
+	var bytes, inodes int64
+	if err = f.journal.db.QueryRowContext(ctx, "SELECT sum(bytes),sum(inodes) FROM storage_claims WHERE state!='RELEASED' AND kind IN ('native-app','persistent','scratch')").Scan(&bytes, &inodes); err != nil {
+		t.Fatal(err)
+	}
+	if bytes != 3<<30 || inodes != 3*65536 {
+		t.Fatalf("app subreservation is not charged exactly once: %d/%d", bytes, inodes)
+	}
+	if err = f.journal.CheckStorageRelease(ctx, f.journal.productID+":app"); err == nil {
+		t.Fatal("ordinary cleanup retired persistent app quota")
+	}
+	f.reopen(t)
+	reopened, err := f.journal.AppStorageProject(ctx)
+	if err != nil || reopened != project {
+		t.Fatalf("app quota identity did not survive reopen: %d %v", reopened, err)
+	}
+}
+
+func TestStorageReservationRequiresLiveReservedProject(t *testing.T) {
+	ctx := context.Background()
+	f := newPersistentStateFixture(t)
+	manifest, err := f.journal.Installation(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest.Budget.CacheBytes = 4096
+	manifest.Budget.CacheInodes = 16
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.journal.db.ExecContext(ctx, "UPDATE runtime_installations SET manifest=? WHERE id=?", raw, f.journal.productID); err != nil {
+		t.Fatal(err)
+	}
+	claim := "fixture-job:cache"
+	project, err := f.journal.ReserveStorage(ctx, claim, "cache", 4096, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.journal.CheckStorageReservation(ctx, claim, project); err != nil {
+		t.Fatalf("exact reserved project rejected: %v", err)
+	}
+	for _, wrong := range []struct {
+		id      string
+		project uint32
+	}{{claim, project + 1}, {claim, 0}, {"", project}, {"missing:cache", project}} {
+		if err = f.journal.CheckStorageReservation(ctx, wrong.id, wrong.project); err == nil {
+			t.Fatalf("inexact reservation accepted: %+v", wrong)
+		}
+	}
+	if err = f.journal.CheckStorageRelease(ctx, claim); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.journal.CheckStorageReservation(ctx, claim, project); err == nil {
+		t.Fatal("RETIRING project admitted for native birth")
+	}
+	if actual, exists, err := f.journal.StorageProject(ctx, claim); err != nil || !exists || actual != project {
+		t.Fatalf("retiring identity lost for disposal: %d %v %v", actual, exists, err)
+	}
+	var state string
+	if err = f.journal.db.QueryRowContext(ctx, "SELECT state FROM storage_claims WHERE id=?", claim).Scan(&state); err != nil || state != "RETIRING" {
+		t.Fatalf("reservation check mutated retirement: %q %v", state, err)
+	}
+	boot, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof := CleanupEvidence{BootID: strings.TrimSpace(string(boot)), JobsAbsent: true, ProcessesAbsent: true, TransportsClosed: true, MountsAbsent: true, OpenReferencesAbsent: true, QuotaReclaimed: true}
+	if err = f.journal.ReleaseStorage(ctx, claim, proof); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.journal.CheckStorageReservation(ctx, claim, project); err == nil {
+		t.Fatal("RELEASED project admitted for native birth")
+	}
+	if actual, exists, err := f.journal.StorageProject(ctx, claim); err != nil || !exists || actual != project {
+		t.Fatalf("released historical identity changed: %d %v %v", actual, exists, err)
+	}
+	liveClaim := "fixture-live:cache"
+	liveProject, err := f.journal.ReserveStorage(ctx, liveClaim, "cache", 4096, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.journal.installationLease.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.journal.CheckStorageReservation(ctx, liveClaim, liveProject); err == nil {
+		t.Fatal("reserved project admitted a closed installation lease")
 	}
 }

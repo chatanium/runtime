@@ -17,10 +17,6 @@ import (
 // argv is also supported for an operator running the fixture executable directly.
 // Neither route pretends config can be fetched before the go-plugin handshake.
 func fixtureProcessMode(args []string) bool {
-	if len(args) == 1 && args[0] == "--fixture-ipc-component" {
-		ipcComponentBootstrap()
-		return false
-	}
 	if len(args) == 1 && strings.HasPrefix(args[0], "--fixture-child-hold-ms=") {
 		ms, err := strconv.Atoi(strings.TrimPrefix(args[0], "--fixture-child-hold-ms="))
 		if err != nil || ms < 1 || ms > 120000 {
@@ -92,9 +88,8 @@ func floodProbe(ctx context.Context, c *scenarioConfig, p *probeSession) error {
 		wg.Add(1)
 		go func(i int, target int64) {
 			defer wg.Done()
-			// Serve replaces os.Stdout/os.Stderr with broker pipes; those are
-			// intentionally discarded by the runtime. Exercise Docker attach
-			// using the original process descriptors, not the broker streams.
+			// Exercise the original process descriptors transported in bridge
+			// DATA/diagnostic frames, not go-plugin broker stream copies.
 			fd := unix.Stdout
 			if i == 1 {
 				fd = unix.Stderr
@@ -112,8 +107,7 @@ func floodProbe(ctx context.Context, c *scenarioConfig, p *probeSession) error {
 	return errs[1]
 }
 
-// Raw nonblocking writes are important: an ordinary os.File.Write may remain
-// stuck behind a stopped attach reader despite the scenario's finite deadline.
+// Raw nonblocking writes keep cancellation finite when the bridge reader stops.
 // No unbounded log string is allocated; all output is a fixed synthetic pattern.
 func boundedOutput(ctx context.Context, fd int, target int64) (int64, error) {
 	block := make([]byte, 4096)

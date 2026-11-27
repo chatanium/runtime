@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "rungv": {
+    "repository": "gfire-sigs/gvx",
+    "repository_id": "1426636867",
+    "owner_id": "201134404",
+    "certificate_sha256": "9a5df6dad91beda5d95e23cdb2928c999ddcc31ed0d4976f4130fc799cd64d23",
+    "commit": "a9bfd06c2c07a16e76972ff43379e0ebe0d4223a",
+    "tag": "v0.16.10002026110900",
+    "workflow": "gfire-sigs/gvx/.github/workflows/release.yml",
+    "archive_url": "https://github.com/gfire-sigs/gvx/releases/download/v0.16.10002026110900/rungv-v0.16.10002026110900-linux-amd64.tar.gz",
+    "archive_sha256": "ac4322c24718da0aafa992b88ac6d228e896c0e207b48785864294735f16d4c2",
+    "archive_size": 14157324,
+    "executable_sha256": "5c174669ee911ec5f0dcbebb1770a679f0d5585f602de7a85f742d593f224034",
+    "bundle_url": "https://github.com/gfire-sigs/gvx/releases/download/v0.16.10002026110900/rungv-v0.16.10002026110900.sigstore.json",
+    "bundle_sha256": "550e88aab16f33cffd5484b1e1f3063cd69e891895edb395884d069b8edd1573",
+    "bundle_size": 12135,
+    "members": ["rungv", "LICENSE", "README.md", "THIRD_PARTY_LICENSES.txt"],
+    "cpu_baseline": "amd64-v2"
+  },
+  "product": {
+    "repository": "chatanium/runtime",
+    "repository_id": "695180706",
+    "owner_id": "253326933",
+    "workflow": "chatanium/runtime/.github/workflows/release.yml",
+    "source_baseline": "3b9465d4bb5e55a2e94a06f92d9bfa85b3fb774e",
+    "verification": "External trusted gh attestation verify with repository/workflow/source-ref/source-digest and deny-self-hosted-runners; verify repository and owner IDs before execution. Local builds are not attested releases."
+  }
+}

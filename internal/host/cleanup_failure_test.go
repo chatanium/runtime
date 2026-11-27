@@ -49,7 +49,7 @@ func TestFirstCleanupStepSurvivesSuccessfulReaperAndRestart(t *testing.T) {
 			if err := f.journal.db.QueryRowContext(ctx, "SELECT state,reason,cleanup FROM instances WHERE id=?", f.lease.Spec.InstanceID).Scan(&state, &reason, &cleanup); err != nil {
 				t.Fatal(err)
 			}
-			if state != "FAILED" || cleanup != "COMPLETE" || reason != string(PhaseCleanup)+":"+string(tc.reason) {
+			if state != "STOPPED" || cleanup != "COMPLETE" || reason != string(PhaseCleanup)+":"+string(tc.reason) {
 				t.Fatalf("first cleanup cause lost: %s/%s/%s", state, reason, cleanup)
 			}
 		})

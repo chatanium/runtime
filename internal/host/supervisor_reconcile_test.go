@@ -28,11 +28,11 @@ func TestStaleReaperSnapshotDoesNotReopenCompletedCleanup(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 				f := newCreateStateFixture(t, EgressNone)
-				if err := f.journal.state(ctx, f.lease.Spec.InstanceID, "STARTED", ""); err != nil {
+				if err := f.journal.state(ctx, f.lease.Spec.InstanceID, "READY", ""); err != nil {
 					t.Fatal(err)
 				}
 				if failed {
-					if err := f.journal.state(ctx, f.lease.Spec.InstanceID, "FAILED", "HOST_PREREQUISITE_FAILED"); err != nil {
+					if err := f.journal.state(ctx, f.lease.Spec.InstanceID, "CLEANUP_PENDING", "HOST_PREREQUISITE_FAILED"); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -67,7 +67,7 @@ func TestStaleReaperSnapshotDoesNotReopenCompletedCleanup(t *testing.T) {
 				}
 				expectedState, expectedReason := "STOPPED", ""
 				if failed {
-					expectedState, expectedReason = "FAILED", "HOST_PREREQUISITE_FAILED"
+					expectedState, expectedReason = "STOPPED", "HOST_PREREQUISITE_FAILED"
 				}
 				if state != expectedState || reason != expectedReason || cleanup != "COMPLETE" {
 					t.Fatalf("stale snapshot changed terminal outcome: %s/%s/%s", state, reason, cleanup)

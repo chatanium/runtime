@@ -44,7 +44,7 @@ for name in ['tmp', 'home', 'downloads', 'vcpkg-cache', 'go-cache', 'go-modcache
 # Native BoringSSL code generation needs the same pinned Go compiler even
 # when application compilation is intentionally deferred.
 os.environ.update(PATH='/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
-                  GOTOOLCHAIN='local', GOWORK='off', GOENV='off', GOFLAGS='',
+                  GOTOOLCHAIN='local', GOWORK='off', GOENV='off', GOFLAGS='', GOAMD64='v2',
                   GOPATH='/work/go', GOCACHE='/work/go-cache', GOMODCACHE='/work/go-modcache')
 if capture('/go/bin/go', 'env', 'GOVERSION') != os.environ['GO_TOOLCHAIN']:
     raise RuntimeError('Pinned Go compiler mismatch')
@@ -54,6 +54,20 @@ resolved_sdk = resolve_sdk('/go/bin/go', source, prepare=False)
 if (Path(resolved_sdk['Dir']) != sdk_source
         or sdk_provenance(resolved_sdk) != sdk_provenance(sdk)):
     raise RuntimeError('Prepared SDK differs from the host-approved dependency')
+if os.environ.get('NATIVE_ONLY') == '2':
+    worker = source / 'bin/chatanium-worker'
+    arguments = [sys.executable, source / 'tools/native/runtime.py', '--worker', worker]
+    if os.environ.get('DISABLE_VOICE', '0') != '1':
+        libraries = source / 'bin/voice-runtime/lib'
+        receipt = json.loads((source / 'bin/voice-runtime/provenance/bundle-sha256.json').read_text())
+        inputs = {'chatanium-worker': worker}
+        inputs.update({'voice-runtime/lib/' + path.name: path for path in libraries.iterdir()})
+        for logical, path in inputs.items():
+            if path.is_symlink() or not path.is_file() or receipt.get(logical) != digest(path):
+                raise RuntimeError('Published native artifact differs from its build receipt: ' + logical)
+        arguments += ['--voice-libraries', libraries]
+    run(*arguments)
+    sys.exit(0)
 # Fresh checkout per invocation: patched worktrees never masquerade as upstream.
 checkout_dir = work / 'libdave'
 if checkout_dir.exists():
@@ -144,6 +158,7 @@ shutil.copy2('/opt/flexmodule-builder/packages.txt', provenance / 'builder-packa
 (provenance / 'native-symbols.txt').write_text(symbols)
 (provenance / 'configure-cache.txt').write_text((build / 'CMakeCache.txt').read_text())
 (provenance / 'source.patch').write_text(capture('git', '-C', repo, 'diff', '--binary'))
+shutil.copyfile(work / 'vcpkg-installed/vcpkg/status', provenance / 'vcpkg-status.txt')
 write_json(provenance / 'compiler-inputs.json', {
     'go_codegen': capture('/go/bin/go', 'version'),
     'cc': capture('gcc', '--version'),
@@ -156,7 +171,8 @@ write_json(provenance / 'builder-source-sha256.json', {
     path: digest(source / path) for path in [
         'tools/native/build.py', 'tools/native/Builder.Dockerfile',
         'tools/native/repositories.repo', 'tools/build/artifacts.py', 'tools/build/voice.sh',
-        'tools/native/check_abi.py', 'tools/sdk.py', 'tools/versions.mk',
+        'tools/native/check_abi.py', 'tools/native/runtime.py',
+        'tools/native/runtime-packages.lock.json', 'tools/sdk.py', 'tools/versions.mk',
     ]
 })
 write_json(provenance / 'downloads.json', inventory(work / 'downloads'))
@@ -171,6 +187,7 @@ write_json(provenance / 'sdk-source-sha256.json', {
 })
 if os.environ.get('NATIVE_ONLY') == '1':
     write_json(provenance / 'bundle-sha256.json', inventory(bundle))
+    run(sys.executable, source / 'tools/native/runtime.py', '--voice-libraries', bundle / 'lib')
     print('Native-only source build complete: /work/prefix and /work/bundle; no root Go packages compiled.')
     sys.exit(0)
 
@@ -180,10 +197,14 @@ env.update(CGO_ENABLED='1', GOOS='linux', GOARCH='amd64', GOTOOLCHAIN='local', G
            GOPATH='/work/go', GOCACHE='/work/go-cache', GOMODCACHE='/work/go-modcache',
            CGO_CFLAGS='-I' + str(prefix / 'include'),
            CGO_LDFLAGS='-L' + str(lib.parent) + ' -Wl,-rpath,$ORIGIN/voice-runtime/lib')
-run('/go/bin/go', '-C', source, 'build', '-mod=readonly', '-trimpath', '-tags=voice', '-o', bundle / 'chatanium', '.', env=env)
+dependencies = capture('/go/bin/go', '-C', source, 'list', '-mod=readonly',
+                       '-tags=voice', '-deps', './cmd/chatanium-worker', env=env)
+if 'github.com/thirdscam/chatanium/internal/releasepayload' in dependencies.splitlines():
+    raise RuntimeError('Native worker must never recursively embed releasepayload')
+run('/go/bin/go', '-C', source, 'build', '-mod=readonly', '-trimpath', '-tags=voice', '-o', bundle / 'chatanium-worker', './cmd/chatanium-worker', env=env)
 env['LD_LIBRARY_PATH'] = str(bundle / 'lib')
-run('/lib64/ld-linux-x86-64.so.2', '--list', bundle / 'chatanium', env=env)
-(provenance / 'go-build-info.txt').write_text(capture('/go/bin/go', 'version', '-m', bundle / 'chatanium'))
+run('/lib64/ld-linux-x86-64.so.2', '--list', bundle / 'chatanium-worker', env=env)
+(provenance / 'go-build-info.txt').write_text(capture('/go/bin/go', 'version', '-m', bundle / 'chatanium-worker'))
 go_sources = {}
 for directory, children, files in os.walk(source):
     children[:] = [name for name in children if not name.startswith('.') and name not in ('bin', 'temp_audio')]
@@ -194,6 +215,10 @@ for directory, children, files in os.walk(source):
 write_json(provenance / 'go-source-sha256.json', go_sources)
 # Voice receipt paths are relative to the published bin/ layout, not /work/bundle.
 write_json(provenance / 'bundle-sha256.json', {
-    path if path == 'chatanium' else 'voice-runtime/' + path: checksum
+    path if path == 'chatanium-worker' else 'voice-runtime/' + path: checksum
     for path, checksum in inventory(bundle).items()
 })
+# Seed the pinned RPM closure only after the real worker exists, including all
+# adjacent native DSOs. No system dependency is inferred from libdave alone.
+run(sys.executable, source / 'tools/native/runtime.py',
+    '--worker', bundle / 'chatanium-worker', '--voice-libraries', bundle / 'lib')

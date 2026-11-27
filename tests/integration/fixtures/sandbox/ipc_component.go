@@ -1,94 +1,120 @@
 package main
 
 import (
-	"bufio"
+	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
-// These endpoints belong only to this fixture's leased mounts. Serve still
-// supplies the genuine AutoMTLS handshake; no bootstrap line is forged.
-func ipcComponentBootstrap() {
+// Exercise the actual go-plugin listener after authenticated INIT/START. The
+// established bridge/core-v2 connection must still deliver STOP after this race.
+func ipcComponentProbe(ctx context.Context, p *probeSession) error {
 	dir, err := guestIPCDirectory()
 	if err != nil {
-		os.Exit(87)
+		return err
 	}
-	gid, err := strconv.Atoi(os.Getenv("PLUGIN_UNIX_SOCKET_GROUP"))
-	if err != nil || gid <= 0 {
-		os.Exit(87)
-	}
-	const persistent = "/var/lib/flexmodule/data"
-	const scratch = "/var/lib/flexmodule/scratch"
-	if probeStorage(persistent, scratch) != nil {
-		os.Exit(87)
-	}
-	p, err := newProbeSession(persistent, scratch)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		os.Exit(87)
+		return err
 	}
-	listen := func(path string) *net.UnixListener {
-		l, e := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
-		if e != nil || os.Chown(path, -1, gid) != nil || os.Chmod(path, 0660) != nil {
-			os.Exit(87)
-		}
-		l.SetUnlinkOnClose(false)
-		_ = l.SetDeadline(time.Now().Add(90 * time.Second))
-		return l
-	}
-	primary := filepath.Join(dir, "original")
-	original := listen(primary)
-	outside := listen(filepath.Join(scratch, "outside"))
-	control := listen(filepath.Join(dir, "control"))
-	serve := func(l *net.UnixListener, identity string) {
-		defer l.Close()
-		for range 4 {
-			c, e := l.AcceptUnix()
-			if e != nil {
-				return
+	var path string
+	for _, entry := range entries {
+		if entry.Type()&os.ModeSocket != 0 {
+			if path != "" {
+				return errors.New("ambiguous guest primary socket")
 			}
-			_ = c.SetDeadline(time.Now().Add(5 * time.Second))
-			_, _ = fmt.Fprintln(c, identity)
-			_ = c.Close()
-			p.record("ipc-component", "endpoint-accepted", nil, map[string]any{"endpoint": identity})
+			path = filepath.Join(dir, entry.Name())
 		}
 	}
-	go serve(original, "original")
-	go serve(outside, "outside")
-	go func() {
-		defer control.Close()
-		c, e := control.AcceptUnix()
-		if e != nil {
-			return
-		}
-		defer c.Close()
-		_ = c.SetDeadline(time.Now().Add(30 * time.Second))
-		r := bufio.NewScanner(c)
-		r.Buffer(make([]byte, 512), 512)
-		if !r.Scan() {
-			return
-		}
-		line := r.Text()
-		// The supplied path is the exact host-visible counterpart of our own
-		// scratch endpoint, not a pathname selected by the guest or an outsider.
-		parts := strings.Split(line, " ")
-		if len(parts) != 2 || parts[0] != "replace" || !filepath.IsAbs(parts[1]) || filepath.Base(parts[1]) != "outside" {
-			return
-		}
-		if os.Rename(primary, primary+".retained") != nil || os.Symlink(parts[1], primary) != nil {
-			return
-		}
-		p.record("ipc-component", "pathname-replaced", nil, map[string]any{"original_retained": true})
-		if _, e = fmt.Fprintln(c, "replaced"); e != nil {
-			return
-		}
-		if r.Scan() && r.Text() == "complete" {
-			p.record("ipc-component", "returned-not-policy-proof", nil, nil)
-			_, _ = fmt.Fprintln(c, "complete")
-		}
-	}()
+	if path == "" {
+		return errors.New("guest primary socket unavailable")
+	}
+	dirfd, err := unix.Open(dir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(dirfd)
+	fd, err := unix.Openat(dirfd, filepath.Base(path), unix.O_PATH|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(fd)
+	var original unix.Stat_t
+	if err = unix.Fstat(fd, &original); err != nil || original.Mode&unix.S_IFMT != unix.S_IFSOCK ||
+		original.Uid != uint32(os.Getuid()) || original.Gid != uint32(os.Getgid()) || original.Mode&07777 != 0660 {
+		return errors.New("guest primary pin identity mismatch")
+	}
+	p.record("ipc-component", "pin-opened", nil, map[string]any{
+		"opath": true, "pid": os.Getpid(), "device": uint64(original.Dev), "inode": original.Ino})
+	outsidePath := filepath.Join(p.scratch, "endpoint-replacement")
+	outside, err := net.ListenUnix("unix", &net.UnixAddr{Net: "unix", Name: outsidePath})
+	if err != nil {
+		return err
+	}
+	defer outside.Close()
+	if err = os.Rename(path, path+".retained"); err != nil {
+		return err
+	}
+	if err = os.Symlink(outsidePath, path); err != nil {
+		return err
+	}
+	replaced, err := os.Lstat(path)
+	if err != nil || replaced.Mode()&os.ModeSymlink == 0 {
+		return errors.New("ordered socket replacement not observed")
+	}
+	p.record("ipc-component", "pathname-replaced", nil, map[string]any{"replacement_symlink": true})
+	conn, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, "unix", fmt.Sprintf("/proc/self/fd/%d", fd))
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	raw, err := conn.(*net.UnixConn).SyscallConn()
+	if err != nil {
+		return err
+	}
+	var peer *unix.Ucred
+	var peerErr error
+	if err = raw.Control(func(fd uintptr) { peer, peerErr = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED) }); err != nil || peerErr != nil {
+		return errors.New("retained socket peer unavailable")
+	}
+	p.record("ipc-component", "retained-connect", nil, map[string]any{"peer_pid": peer.Pid, "peer_uid": peer.Uid, "peer_gid": peer.Gid})
+	if int(peer.Pid) != os.Getpid() {
+		return errors.New("retained socket connected replacement")
+	}
+	fresh, err := unix.Openat(dirfd, filepath.Base(path), unix.O_PATH|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+	var changed unix.Stat_t
+	err = unix.Fstat(fresh, &changed)
+	unix.Close(fresh)
+	if err != nil {
+		return err
+	}
+	p.record("ipc-component", "fresh-path-inspection", nil, map[string]any{"is_symlink": changed.Mode&unix.S_IFMT == unix.S_IFLNK})
+	if changed.Mode&unix.S_IFMT != unix.S_IFLNK {
+		return errors.New("replacement was not rejected by confined inspection")
+	}
+	if err = outside.SetDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
+		return err
+	}
+	unexpected, acceptErr := outside.AcceptUnix()
+	if unexpected != nil {
+		unexpected.Close()
+	}
+	p.record("ipc-component", "replacement-connect", acceptErr, map[string]any{"outside_accepted": unexpected != nil})
+	if unexpected != nil {
+		return errors.New("replacement listener unexpectedly reached")
+	}
+	if timeout, ok := acceptErr.(net.Error); !ok || !timeout.Timeout() {
+		return errors.New("replacement listener observation incomplete")
+	}
+	p.record("ipc-component", "returned-not-policy-proof", nil, nil)
+	return nil
 }

@@ -4,13 +4,11 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 )
 
 // All controls are integration-fixture-only config, obtained through authenticated INIT.
-// A missing control preserves the original baseline. No workload starts on a timer.
+// A missing control preserves the baseline. Explicit workloads start after START.
 type lifecycleConfig struct {
 	InitDelayMS      int    `json:"init_delay_ms"`
 	ReadinessDelayMS int    `json:"readiness_delay_ms"`
@@ -22,6 +20,7 @@ type lifecycleConfig struct {
 type scenarioConfig struct {
 	Kind           string         `json:"kind"`
 	TimeoutSeconds int            `json:"timeout_seconds"`
+	TriggerDelayMS int            `json:"trigger_delay_ms"`
 	Workers        int            `json:"workers"`
 	MemoryBytes    int64          `json:"memory_bytes"`
 	Attempts       int            `json:"attempts"`
@@ -45,6 +44,9 @@ type quotaConfig struct {
 
 func validateControls(c probeConfig) error {
 	invalid := errors.New("invalid finite fixture controls")
+	if c.EndpointRace && (c.Scenario == nil || c.Scenario.Kind != "identity") {
+		return invalid
+	}
 	if l := c.Lifecycle; l != nil {
 		for _, ms := range []int{l.InitDelayMS, l.ReadinessDelayMS, l.StartDelayMS} {
 			if ms < 0 || ms > 60000 {
@@ -61,7 +63,7 @@ func validateControls(c probeConfig) error {
 	if s == nil {
 		return nil
 	}
-	if s.TimeoutSeconds < 1 || s.TimeoutSeconds > 120 || s.HoldMS < 0 || s.HoldMS > s.TimeoutSeconds*1000 {
+	if s.TimeoutSeconds < 1 || s.TimeoutSeconds > 120 || s.TriggerDelayMS < 0 || s.TriggerDelayMS > 60000 || s.HoldMS < 0 || s.HoldMS > s.TimeoutSeconds*1000 {
 		return invalid
 	}
 	switch s.Kind {
@@ -150,34 +152,36 @@ func lifecycleStep(ctx context.Context, p *probeSession, stage string, ms int, f
 	return nil
 }
 
-func fixtureSignals() (<-chan os.Signal, func()) {
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, syscall.SIGUSR1)
-	return ch, func() { signal.Stop(ch) }
-}
-
 func (m *module) awaitTrigger(ctx context.Context, done chan struct{}, c *scenarioConfig, p *probeSession) {
 	defer close(done)
-	// Ignore signals received before START. The parent must observe RUNNING first.
-	// The buffered signal channel is installed before Serve so SIGUSR1 cannot kill
-	// the fixture during its handshake. A single START admits one workload only.
-	gate := time.NewTimer(time.Duration(c.TimeoutSeconds) * time.Second)
+	// Only authenticated, installation-approved config can arm this timer.
+	// The delay is outside the workload budget; cancellation joins it on STOP.
+	gate := time.NewTimer(time.Duration(c.TriggerDelayMS) * time.Millisecond)
 	defer gate.Stop()
-	p.record(c.Kind, "signal-gate-open", nil, map[string]any{"gate_timeout_seconds": c.TimeoutSeconds})
+	p.record(c.Kind, "approved-trigger-armed", nil, map[string]any{"delay_ms": c.TriggerDelayMS})
 	select {
 	case <-ctx.Done():
 		p.record(c.Kind, "cancelled-before-trigger", ctx.Err(), nil)
 		return
 	case <-gate.C:
-		p.record(c.Kind, "untriggered-gate-deadline", context.DeadlineExceeded, nil)
-		return
-	case <-m.signals:
 	}
-	gate.Stop()
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(c.TimeoutSeconds)*time.Second)
 	defer cancel()
 	p.record(c.Kind, "triggered", nil, map[string]any{"timeout_seconds": c.TimeoutSeconds, "termination_requires_host_evidence": c.Kind == "memory" || c.Kind == "fork" || c.Kind == "thread" || c.Kind == "crash"})
 	var err error
+	if m.config.EndpointRace {
+		err = ipcComponentProbe(ctx, p)
+		if err != nil {
+			p.record("ipc-component", "operation-failed", err, nil)
+			return
+		}
+		config, rpcErr := m.core.GetConfig(ctx)
+		p.record("ipc-component", "core-rpc-after-replacement", rpcErr,
+			map[string]any{"response_received": rpcErr == nil && config != nil && len(config.Json) > 0})
+		if rpcErr != nil || config == nil || len(config.Json) == 0 {
+			return
+		}
+	}
 	switch c.Kind {
 	case "cpu", "memory", "fork", "thread", "identity":
 		err = resourceProbe(ctx, c, p)

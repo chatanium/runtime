@@ -3,7 +3,7 @@ set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/../common.sh"
 [[ "${GOOS:-linux}/${GOARCH:-amd64}" == linux/amd64 ]] || fail 'Native lock supports Linux AMD64 only'
 mode=${1:-voice}
-[[ "$mode" == voice || "$mode" == native ]] || fail 'Expected voice or native build mode'
+[[ "$mode" == voice || "$mode" == native || "$mode" == runtime ]] || fail 'Expected voice, native or runtime build mode'
 # BoringSSL uses Go for native code generation in BOTH modes. Native-only
 # excludes application Go compilation, not the pinned generator toolchain.
 use_go
@@ -12,10 +12,11 @@ GO_ROOT=$("$GO_BINARY" env GOROOT)
 go_mount=(--mount "type=bind,src=$GO_ROOT,dst=/go,readonly")
 native_only=1
 if [[ "$mode" == voice ]]; then native_only=0; fi
+if [[ "$mode" == runtime ]]; then native_only=2; fi
 safe_path .tools/native
 safe_path bin/voice-runtime
 [[ ! -e bin/voice-runtime || -d bin/voice-runtime ]] || fail 'Native bundle output must be a directory'
-safe_file bin/chatanium
+safe_file bin/chatanium-worker
 if [[ "$mode" == voice ]]; then
     safe_file .tools/build.lock
     exec 7>.tools/build.lock
@@ -116,7 +117,11 @@ cleanup_container || fail 'Cannot reclaim previous native build container; recei
 # Prepare before mounting /source read-only. The local build-wide lock and
 # maintained native patches stay outside the SDK and compiler image layers.
 safe_file .tools/native/sdk-module.json
-run python3 tools/sdk.py --go "$GO_BINARY"
+if [[ "$mode" == runtime ]]; then
+    run python3 tools/sdk.py --go "$GO_BINARY" --verify-only
+else
+    run python3 tools/sdk.py --go "$GO_BINARY"
+fi
 # Publication needs this same lock exclusively; hold our shared lease across
 # the read-only container build and all resulting provenance/output copies.
 safe_file .tools/deps/discordgo.lock
@@ -147,6 +152,7 @@ run timeout --signal=KILL 5s docker container create --init --name "chatanium-na
     --mount "type=bind,src=$ROOT/.tools/native,dst=/work" \
     "${go_mount[@]}" \
     -e BUILD_JOBS -e GO_TOOLCHAIN -e NATIVE_ONLY="$native_only" -e TMPDIR=/work/tmp \
+    -e DISABLE_VOICE="${DISABLE_VOICE:-0}" \
     -e PYTHONDONTWRITEBYTECODE=1 \
     "$builder" python3 /source/tools/native/build.py > "$cid_file"
 container_id=$(< "$cid_file")
@@ -159,6 +165,11 @@ result=$(docker_bounded container inspect --format '{{.State.Status}} {{.State.E
 native_status=${BASH_REMATCH[1]}
 cleanup_container || fail 'Native container cleanup unconfirmed; receipt retained'
 [[ "$attach_status" == 0 && "$native_status" == 0 ]] || fail 'Native compiler container failed'
+if [[ "$mode" == runtime ]]; then
+    printf '%s\n' "$builder" > .tools/native/runtime-bundle/provenance/builder-image-id.txt
+    printf 'Pinned EL9 runtime closure ready: .tools/native/runtime-bundle\n'
+    exit 0
+fi
 printf '%s\n' "$builder" > .tools/native/bundle/provenance/builder-image-id.txt
 # Inspect actual target providers and force eager relocation before publishing.
 # This verifies the current host, not an unobserved generic EL9 installation.
@@ -170,13 +181,13 @@ if [[ "$mode" == native ]]; then
     exit 0
 fi
 # Validate on the actual EL9 target loader too, before publishing any output.
-LD_LIBRARY_PATH="$ROOT/.tools/native/bundle/lib" /lib64/ld-linux-x86-64.so.2 --list .tools/native/bundle/chatanium
+LD_LIBRARY_PATH="$ROOT/.tools/native/bundle/lib" /lib64/ld-linux-x86-64.so.2 --list .tools/native/bundle/chatanium-worker
 LD_LIBRARY_PATH="$ROOT/.tools/native/bundle/lib" /lib64/ld-linux-x86-64.so.2 --list .tools/native/bundle/lib/libdave.so
 staging=$(mktemp -d "$ROOT/bin/.voice-runtime.XXXXXXXX")
 cp -a -- .tools/native/bundle/lib .tools/native/bundle/licenses .tools/native/bundle/provenance "$staging/"
 printf '%s\n' "$builder" > "$staging/provenance/builder-image-id.txt"
-binary=$(mktemp "$ROOT/bin/.chatanium.XXXXXXXX")
-cp -p -- .tools/native/bundle/chatanium "$binary"
+binary=$(mktemp "$ROOT/bin/.chatanium-worker.XXXXXXXX")
+cp -p -- .tools/native/bundle/chatanium-worker "$binary"
 if [[ -e bin/voice-runtime ]]; then
     backup=$(mktemp -d "$ROOT/bin/.voice-runtime-backup.XXXXXXXX")
     rmdir -- "$backup"
@@ -184,8 +195,8 @@ if [[ -e bin/voice-runtime ]]; then
 fi
 mv -T -- "$staging" bin/voice-runtime
 staging=
-safe_file bin/chatanium
-mv -fT -- "$binary" bin/chatanium
+safe_file bin/chatanium-worker
+mv -fT -- "$binary" bin/chatanium-worker
 binary=
 if [[ -n "$backup" ]]; then rm -rf -- "$backup"; backup=; fi
-printf 'Published voice-enabled bin/chatanium and bin/voice-runtime/{lib,licenses,provenance}/\n'
+printf 'Published voice-enabled bin/chatanium-worker and bin/voice-runtime/{lib,licenses,provenance}/\n'

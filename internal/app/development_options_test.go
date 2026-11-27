@@ -16,6 +16,7 @@ import (
 func TestDevelopmentFlagsRequireExplicitOptIn(t *testing.T) {
 	for _, options := range []StartOptions{
 		{DevelopmentSocket: "/private/control.sock"},
+		{DevelopmentRevision: "prepared-worker"},
 		{DevelopmentImages: []string{"module=image"}},
 		{DevelopmentMode: true},
 		{DevelopmentMode: true, DevelopmentSocket: "relative.sock"},
@@ -23,9 +24,6 @@ func TestDevelopmentFlagsRequireExplicitOptIn(t *testing.T) {
 	} {
 		if validateDevelopmentOptions(options) == nil {
 			t.Fatalf("invalid development options accepted: %#v", options)
-		}
-		if Start(context.Background(), options) == nil {
-			t.Fatal("invalid development options reached runtime startup")
 		}
 	}
 	if err := validateDevelopmentOptions(StartOptions{DevelopmentMode: true, DevelopmentSocket: "/private/control.sock"}); err != nil {

@@ -14,7 +14,7 @@ RUN set -eu; \
       echo "$hash  /tmp/repomd.xml" | sha256sum -c -; \
     done; \
     dnf -y --disablerepo='*' --enablerepo='flexmodule-*' --setopt=install_weak_deps=False install \
-      python3 gcc gcc-c++ glibc-devel git cmake ninja-build make nasm perl tar gzip unzip zip patch pkgconf-pkg-config diffutils autoconf automake libtool; \
+      python3 gcc gcc-c++ glibc-devel git cmake ninja-build make nasm perl tar gzip unzip zip patch pkgconf-pkg-config diffutils autoconf automake libtool cpio rpm-build; \
     mkdir -p /opt/flexmodule-builder; \
     rpm -qa --qf '%{NAME} %{EPOCHNUM}:%{VERSION}-%{RELEASE}.%{ARCH}\n' | sort > /opt/flexmodule-builder/packages.txt; \
     cp /etc/yum.repos.d/flexmodule-pinned.repo /opt/flexmodule-builder/; \

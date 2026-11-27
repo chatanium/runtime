@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
-mode=${1:?Expected build, module, modules, test-binary or clean}
+mode=${1:?Expected build, module, modules or clean}
 shift
 : "${BUILD_OUTPUTS:?Run through make}"
 safe_file .tools/build.lock
@@ -60,8 +60,8 @@ case "$mode" in
         export CGO_ENABLED=0
         mode=build
         ;;
-    build|test-binary)
-        [[ $# -gt 0 ]] || fail 'Expected build or test-binary targets'
+    build)
+        [[ $# -gt 0 ]] || fail 'Expected build targets'
         targets=("$@")
         ;;
     *) fail "Unknown build mode: $mode" ;;
@@ -101,11 +101,7 @@ for target in "${targets[@]}"; do
     run python3 tools/sdk.py --go "$GO_BINARY" --module-dir "$ROOT/$module" --verify-only
     mkdir -p -- "$(dirname -- "$output")"
     temporary=$(mktemp "$ROOT/$output.tmp.XXXXXXXX")
-    if [[ "$mode" == test-binary ]]; then
-        run "$GO_BINARY" -C "$ROOT/$module" test -c -mod=readonly -trimpath -tags= -o "$temporary" "$package"
-    else
-        run "$GO_BINARY" -C "$ROOT/$module" build -mod=readonly -trimpath -tags= -o "$temporary" "$package"
-    fi
+    run "$GO_BINARY" -C "$ROOT/$module" build -mod=readonly -trimpath -tags= -o "$temporary" "$package"
     safe_file "$output"
     mv -fT -- "$temporary" "$output"
     temporary=

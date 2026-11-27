@@ -32,6 +32,7 @@ type probeConfig struct {
 	ForbiddenEnvironmentNames []string         `json:"forbidden_environment_names"`
 	Lifecycle                 *lifecycleConfig `json:"lifecycle,omitempty"`
 	Scenario                  *scenarioConfig  `json:"scenario,omitempty"`
+	EndpointRace              bool             `json:"endpoint_race,omitempty"`
 }
 type module struct {
 	mu      sync.Mutex
@@ -44,7 +45,6 @@ type module struct {
 	runCtx  context.Context
 	cancel  context.CancelFunc
 	done    chan struct{}
-	signals <-chan os.Signal
 }
 
 func (m *module) GetManifest(context.Context) (*wire.ModuleManifest, error) {
@@ -158,18 +158,12 @@ func (m *module) OnStage(ctx context.Context, r *wire.StageRequest) error {
 		m.mu.Lock()
 		m.started = true
 		if c.Scenario != nil {
-			// Discard the one buffered pre-START signal; subsequent admission is
-			// driven only by the parent's explicit post-RUNNING SIGUSR1.
-			select {
-			case <-m.signals:
-			default:
-			}
 			m.runCtx, m.cancel = context.WithCancel(context.Background())
 			m.done = make(chan struct{})
 			go m.awaitTrigger(m.runCtx, m.done, c.Scenario, session)
 		}
 		m.mu.Unlock()
-		session.record("start", "returned-awaiting-parent-signal", nil, nil)
+		session.record("start", "returned-awaiting-approved-trigger", nil, nil)
 		return nil
 	case wire.Stage_STAGE_DRAIN, wire.Stage_STAGE_STOP:
 		m.mu.Lock()
@@ -212,9 +206,9 @@ func probe(ctx context.Context, c probeConfig, persistentDir, scratchDir string)
 			return errors.New("host environment leaked")
 		}
 	}
-	for _, path := range []string{"/var/run/docker.sock", "/run/docker.sock"} {
+	for _, path := range []string{"/run/chatanium/control", "/var/lib/chatanium", "/run/netns"} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			return errors.New("Docker socket unexpectedly accessible")
+			return errors.New("native management or IPC path unexpectedly accessible")
 		}
 	}
 	var stat unix.Statfs_t
@@ -240,8 +234,8 @@ func probe(ctx context.Context, c probeConfig, persistentDir, scratchDir string)
 			ipv6 = true
 		}
 		if expectedFixtureEgress(c) == wire.EgressPolicy_EGRESS_POLICY_PUBLIC_INTERNET {
-			// PUBLIC scenarios observe real network operations after the explicit
-			// signal gate; INIT retains baseline validation, not NONE semantics.
+			// PUBLIC operations run only after the approved post-START delay.
+			// INIT retains baseline validation, not NONE semantics.
 			continue
 		}
 		bounded, cancel := context.WithTimeout(ctx, time.Duration(c.ConnectTimeoutSeconds)*time.Second)
@@ -273,9 +267,6 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	m := &module{ready: wire.Readiness_READINESS_NOT_READY}
-	signals, stopSignals := fixtureSignals()
-	defer stopSignals()
-	m.signals = signals
 	p, err := core.NewModulePlugin(ctx, m, func(_ context.Context, conn grpc.ClientConnInterface) error {
 		var e error
 		m.core, e = core.NewCoreClient(conn, core.JSONLimits{MaxBytes: 256 << 10, MaxDepth: 32})
