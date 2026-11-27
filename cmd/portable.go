@@ -107,7 +107,7 @@ func approvalFlag(cmd *cobra.Command) {
 
 func approval(cmd *cobra.Command) install.Confirm {
 	input := approvalInput(cmd)
-	view := runtimeView(cmd.ErrOrStderr())
+	view := commandView(cmd, cmd.ErrOrStderr())
 	_, human := operatorOutput(cmd)
 	jsonMode, _ := cmd.Flags().GetBool("json-approvals")
 	if !human || !view.terminal || jsonMode || cmd.Flags().Changed("approve") {

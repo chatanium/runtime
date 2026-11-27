@@ -15,12 +15,17 @@ import (
 
 type terminalView struct {
 	out      io.Writer
+	area     string
 	terminal bool
 	color    bool
 }
 
-func runtimeView(out io.Writer) terminalView {
-	view := terminalView{out: out}
+func commandView(cmd *cobra.Command, out io.Writer) terminalView {
+	name := cmd.CalledAs()
+	if name == "" {
+		name = cmd.Name()
+	}
+	view := terminalView{out: out, area: "[ " + strings.ToUpper(name) + " ]"}
 	if f, ok := out.(*os.File); ok && os.Getenv("TERM") != "dumb" && os.Getenv("CI") == "" &&
 		(isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd())) {
 		view.terminal = true
@@ -37,7 +42,7 @@ func jsonOutputFlag(cmd *cobra.Command) {
 }
 
 func operatorOutput(cmd *cobra.Command) (terminalView, bool) {
-	view := runtimeView(cmd.OutOrStdout())
+	view := commandView(cmd, cmd.OutOrStdout())
 	machine, _ := cmd.Flags().GetBool("json")
 	return view, view.terminal && !machine
 }
@@ -59,7 +64,7 @@ func (v terminalView) prefix(state string) string {
 	case "FAIL", "FAILED":
 		style = "1;31"
 	}
-	return v.paint("[ RT ]", "1;36") + " " + v.paint("["+state+"]", style)
+	return v.paint(v.area, "1;36") + " " + v.paint("["+state+"]", style)
 }
 
 func (v terminalView) status(state, text string) error {

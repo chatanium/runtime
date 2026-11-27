@@ -35,7 +35,7 @@ func setupApproval(cmd *cobra.Command, input *bufio.Reader, startFreshIdle bool)
 		if startFreshIdle {
 			question = "Set up and start Chatanium?"
 		}
-		yes, err := promptSetupApproval(runtimeView(cmd.ErrOrStderr()), input, summary, question)
+		yes, err := promptSetupApproval(commandView(cmd, cmd.ErrOrStderr()), input, summary, question)
 		if err != nil {
 			return err
 		}
@@ -69,7 +69,7 @@ func readYesNo(input *bufio.Reader) (bool, error) {
 }
 
 func reportSetupDeclined(cmd *cobra.Command) error {
-	return runtimeView(cmd.ErrOrStderr()).status("CANCEL", "Setup canceled.")
+	return commandView(cmd, cmd.ErrOrStderr()).status("CANCEL", "Setup canceled.")
 }
 
 func showApproval(view terminalView, summary install.SetupApprovalSummary) error {

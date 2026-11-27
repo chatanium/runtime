@@ -40,7 +40,7 @@ var newCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		view := runtimeView(cmd.OutOrStdout())
+		view := commandView(cmd, cmd.OutOrStdout())
 		if err := view.status("OK", "Created a v2 module"); err != nil {
 			return err
 		}

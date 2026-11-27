@@ -37,8 +37,8 @@ class BuildProgress:
 
     def label(self, step, style='36'):
         if self.color:
-            return f'\x1b[1;{style}m[ RT ]\x1b[0m \x1b[1m[{step}]\x1b[0m'
-        return f'[ RT ] [{step}]'
+            return f'\x1b[1;{style}m[ BUILD ]\x1b[0m \x1b[1m[{step}]\x1b[0m'
+        return f'[ BUILD ] [{step}]'
 
     def clear_detail(self):
         if self.detail_visible:
@@ -52,7 +52,7 @@ class BuildProgress:
     def detail(self, step, total, message):
         if self.live:
             columns = shutil.get_terminal_size().columns
-            line = f'       {step}/{total}  {message}'
+            line = f'          {step}/{total}  {message}'
             print('\r\x1b[2K' + line[:max(0, columns - 1)], end='', flush=True)
             self.detail_visible = True
 

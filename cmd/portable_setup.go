@@ -55,7 +55,7 @@ func serveCommand() *cobra.Command {
 		}
 		if m != nil && m.State == store.Ready {
 			if initialModuleRequested(cmd) || cmd.Flags().Changed("budget-bytes") || cmd.Flags().Changed("approve") {
-				if err := runtimeView(cmd.ErrOrStderr()).status("INFO", "Using the existing configuration; first-use options were not applied."); err != nil {
+				if err := commandView(cmd, cmd.ErrOrStderr()).status("INFO", "Using the existing configuration; first-use options were not applied."); err != nil {
 					return err
 				}
 			}

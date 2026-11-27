@@ -10,9 +10,9 @@ if [[ -t 1 && -n "${TERM:-}" && "$TERM" != dumb && -z "${CI:-}" ]]; then
     export CHATANIUM_BUILD_TTY=1
 fi
 if [[ "$CHATANIUM_BUILD_TTY" == 1 && -z "${NO_COLOR:-}" ]]; then
-    printf '\033[1;36m[ RT ]\033[0m \033[1m[1/3]\033[0m Prepare the Go toolchain and SDK\n'
+    printf '\033[1;36m[ BUILD ]\033[0m \033[1m[1/3]\033[0m Prepare the Go toolchain and SDK\n'
 else
-    printf '[ RT ] [1/3] Prepare the Go toolchain and SDK\n'
+    printf '[ BUILD ] [1/3] Prepare the Go toolchain and SDK\n'
 fi
 use_go
 export GO_BINARY

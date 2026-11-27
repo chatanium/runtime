@@ -46,7 +46,7 @@ func Execute() {
 	defer stop()
 	command, err := rootCmd.ExecuteContextC(ctx)
 	if err != nil {
-		view := runtimeView(command.ErrOrStderr())
+		view := commandView(command, command.ErrOrStderr())
 		machine, _ := command.Flags().GetBool("json")
 		if view.terminal && !machine {
 			_ = view.status("FAIL", err.Error())
