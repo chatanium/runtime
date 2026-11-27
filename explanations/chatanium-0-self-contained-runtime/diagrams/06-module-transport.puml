@@ -1,0 +1,33 @@
+@startuml
+title NONE 네트워크의 기존 모듈 연결
+hide stereotype
+top to bottom direction
+
+package "기존 AutoMTLS / yamux 연결" {
+  package "호스트 token app" {
+    rectangle "기존 go-plugin\nRPC와 reverse RPC" as Plugin <<primary>>
+    rectangle "native Unix socket\n관리 프로그램이 생성한 host endpoint" as NativeSocket <<data>>
+    rectangle "GvxRunner\npeer와 endpoint 식별 대조" as Runner
+  }
+  package "원본 rungv 게스트" {
+    rectangle "guest bridge\n전송 bytes 중계" as Bridge
+    rectangle "guest Unix socket\n모듈 전용 guest endpoint" as GuestSocket <<data>>
+    rectangle "기존 모듈\nAutoMTLS / yamux 유지" as Module <<primary>>
+  }
+}
+
+Plugin <--> NativeSocket : 단일 논리 연결
+NativeSocket <--> Runner : 인증한 native 연결 하나
+Runner <--> Bridge : stdio frame과 backpressure
+Bridge <--> GuestSocket : 고정 경로와 inode 확인 후 연결
+GuestSocket <--> Module : 기존 Unix listener
+
+note right of Runner
+rungv stdout: frame 전용
+handshake 한 줄과 진단 출력 분리
+end note
+note right of Bridge
+고정 DATA buffer 사용
+전송 종료 후 scratch 회수
+end note
+@enduml

@@ -1,0 +1,56 @@
+@startuml
+title 배포 갱신과 개발 흐름
+actor "사용자" as User
+participant "관리 프로그램\nroot supervisor" as Manager
+participant "개발 watcher" as Watcher
+User -> Manager : 새 bundle의 출처와 승인 digest 확인
+Manager -> Manager : 검증한 bundle B를 보호된 경로에 준비
+note right of Manager
+  정적 launcher의 내장 배포물
+  * native voice worker
+  * 원본 rungv
+  * 고정 native helper closure
+end note
+Manager -> Manager : B의 비활성 이미지 준비와 fresh receipt 기록
+note right of Manager
+  비활성 준비 중 기존 상태 유지
+  * active / pending revision
+  * launch 권한
+  * RECOVERY_REQUIRED 상태
+end note
+Manager -> Manager : 준비 작업의 실제 cleanup과 detach
+User -> Manager : 호환 launcher로 명시적 stop과 복구 요청
+Manager -> Manager : drain / stop 후 unmount
+Manager -> Manager : 저장 형식 호환과 backup 확인
+Manager --> User : 모든 의도한 module과 정확한 receipt의 전체 candidate 제시
+User -> Manager : 전체 candidate 별도 승인
+Manager -> Manager : 승인된 update로 revision과 bundle B 활성화
+note right of Manager
+  갱신 대상별 확인 기준
+  * 구 준비 이력: 유효한 과거 증거에 따른 관리와 정리
+  * 현재 READY / reuse: 원래 획득의 현재 준비 증거
+  * binary rollback과 데이터 복원: 각각의 확인 조건
+end note
+== 개발 설정과 DATA 분리 ==
+Watcher -> Manager : 보호된 launcher의 inspect-config 호출
+Manager --> Watcher : 확정 설정의 정확한 JSON bytes
+Watcher -> Manager : inspect-dev-lock --installation-id ID
+Manager --> Watcher : metadata-side dev-watch.lock의 경로와 identity
+Watcher -> Watcher : read-only 열기와 잠금 취득 후 canonical inode 재확인
+note right of Watcher
+  watcher 보유 참조: metadata-side 잠금
+  설정 파일: root 소유 0600 유지
+end note
+User -> Manager : 일반 stop 요청
+Watcher -> Manager : detach 대기 전 client socket 닫기
+Manager -> Manager : app backing을 포함한 DATA detach
+User -> Manager : purge 요청
+alt 활성 잠금 holder 또는 waiter 존재
+  Manager -> Manager : purge 중지와 동일 잠금 inode 보존
+else 잠금 사용자 해소
+  Manager -> Manager : 승인한 파기 범위와 실제 참조 해소 확인
+end
+note over Manager, Watcher
+  build / CI Docker: 별도 빌드 도구
+end note
+@enduml

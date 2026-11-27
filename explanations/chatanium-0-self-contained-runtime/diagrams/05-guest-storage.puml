@@ -1,0 +1,36 @@
+@startuml
+title 게스트 저장소 확인과 계정 전환
+hide stereotype
+participant "호스트 확인 경로\nroot supervisor / Runner" as Manager
+participant "trusted bridge" as Bridge
+participant "기존 모듈" as Module
+
+group 게스트 저장소 준비
+  note over Manager, Bridge
+  호스트 파일 소유자: sandbox UID/GID
+  hostfs 기본 guest 소유자: 0:0
+  end note
+  Manager -> Bridge : INIT: 고정 root 계획과 최종 guest UID/GID
+  alt 새 저장소 또는 기록한 준비 단계
+    Bridge -> Bridge : 승인한 최상위 디렉터리 속성 설정
+    Bridge -> Bridge : 동기화 후 속성 재확인
+  else 보존한 저장소
+    Bridge -> Bridge : 예상한 virtual 속성 대조
+    note right of Bridge
+    속성 불일치 시 시작 중지
+    end note
+  end
+  Bridge -> Manager : ROOTS_READY: 초기화 결과 보고
+  Manager -> Manager : 관리 프로그램의 intent와 host 식별 대조
+  Manager -> Manager : 관리 프로그램의 확인 결과 영속 저장
+  Manager -> Bridge : 영속 승인 후 Runner의 ROOTS_COMMIT
+end
+
+Bridge -> Bridge : bridge 전체 thread를 nonzero guest UID/GID로 전환
+Bridge -> Bridge : 전체 thread의 권한 확인 후 초기화 FD 닫기
+Bridge -> Module : 기존 바이너리 직접 시작
+note over Bridge, Module
+virtual metadata 보존
+저장 공간 예산에 반영
+end note
+@enduml

@@ -1,0 +1,48 @@
+@startuml
+title 서비스 운영과 데이터 제거
+actor "사용자" as User
+participant "관리 프로그램\nroot supervisor" as Manager
+participant "설치의 소유 대상" as Owned
+User -> Manager : service install --enable --now
+Manager -> Manager : desired RUNNING 기록 후 maintenance lease 반환
+Manager -> Owned : 서비스 enable과 start
+== 중지와 제거 선택 ==
+alt stop
+  User -> Manager : 중지 요청
+  Manager -> Owned : drain과 실제 참조 정리
+  Manager -> Owned : persistent와 app 데이터 보존
+else uninstall
+  User -> Manager : 설치 코드 제거 요청
+  Manager -> Owned : stop 정리 후 maintenance lease 재취득
+  Manager -> Owned : 자기 unit과 code 제거
+  note right of Owned
+    유지 대상
+    * config와 secret
+    * 설치 identity와 데이터
+    * 필요한 recovery bundle
+  end note
+else purge
+  User -> Manager : 정확한 설치 ID와 파기 범위의 별도 승인
+  User -> Manager : preflight probe 두 개 승인
+  note over Manager, Owned
+    uninstall 이후: 재검증한 호환 launcher 사용
+  end note
+  Manager -> Owned : probe로 익명 공개와 exchange 확인
+  Manager -> Owned : probe의 durable absence 확인
+  alt probe와 내구성 확인 충족
+    Manager -> Owned : 실제 process 해소 후 mount와 열린 참조 해소 확인
+    Manager -> Owned : 기록으로 입증한 소유 대상만 파기
+    Manager -> Manager : 정확한 승인과 scope의 terminal receipt 영속화
+    Manager -> Owned : journal과 설치 ID 마지막 제거
+    Manager -> Owned : DB 제거 후 receipt에 기록한 유한한 최종 정리
+    Manager -> Owned : 선택 대상의 실제 부재와 fsync 확인 후 receipt 제거
+  else probe 또는 내구성 확인 오류
+    Manager -> Manager : 파기 중지와 기록 보존
+  end
+end
+note over Manager, Owned
+  공유 /var/lib/chatanium/.management.lock 유지
+  NONE도 동일한 관리 잠금 사용
+  공유 IPAM 잠금: 다른 설치와 대기자를 위해 유지
+end note
+@enduml

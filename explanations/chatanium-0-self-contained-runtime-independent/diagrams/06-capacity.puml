@@ -1,0 +1,19 @@
+@startuml
+title 저장 공간과 실행 예산
+rectangle "운영자가 승인한 자원 한도" as Budget
+rectangle "파일 예산" {
+  rectangle "유한한 XFS 데이터 공간" as Pool
+  rectangle "용도별 바이트와 inode 상한" as Quota
+  Pool -down-> Quota : 공간과 파일 수 배정
+}
+rectangle "실행 예산" {
+  rectangle "systemd의 서비스별 cgroup" as Cgroup
+  rectangle "승인한 CPU와 메모리 등 적용" as Limits
+  Cgroup -down-> Limits : 실행 단위 상한
+}
+Budget -down-> Pool
+Budget -down-> Cgroup
+rectangle "한도 적용 후 모듈 실행" as Start
+Quota -down-> Start : 필요한 저장 공간 확보
+Limits -down-> Start : 실제 적용값 대조
+@enduml

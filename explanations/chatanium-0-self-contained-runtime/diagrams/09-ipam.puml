@@ -1,0 +1,27 @@
+@startuml
+title IPAM 주소 예약
+participant "설치 A의 관리 프로그램" as A
+participant "공유 디렉터리와 잠금\n/var/lib/chatanium/network-ipam" as Shared
+participant "설치 B의 관리 프로그램" as B
+note over A, Shared
+  PUBLIC 초기화: 사용자의 공유 공간 승인
+  NONE 준비 범위: 공유 IPAM 객체 제외
+end note
+A -> Shared : 동일 잠금 취득
+B -> Shared : 동일 잠금 취득 대기
+A -> A : 호스트 주소와 비기본 route 확인
+A -> A : 다른 예약 확인 후 자기 주소 범위 예약
+A -> Shared : 예약 기록 갱신 후 잠금 반환
+Shared --> B : 다음 잠금 취득
+B -> B : 앞선 예약을 반영해 충돌 확인
+B -> B : 자기 주소 범위 예약과 기록 갱신
+B -> Shared : 잠금 반환
+A -> A : 자기 설치의 실제 네트워크 정리 확인
+A -> Shared : 동일 잠금 취득
+A -> A : 자기 설치의 주소 예약만 반환
+A -> Shared : 잠금 반환
+note over A, B
+  공유 디렉터리와 동일 잠금 inode 유지
+  다른 설치와 기존 대기자의 조정점 보존
+end note
+@enduml

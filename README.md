@@ -8,9 +8,9 @@ Ordinary management and message bots do not require music, voice or native DAVE.
 
 Chatanium v2 integrates the module system from
 [thirdscam/chatanium-flexmodule](https://github.com/thirdscam/chatanium-flexmodule).
-Modules run as independent executables in immutable OCI images under
-Docker/runsc (gVisor), communicating over authenticated bidirectional gRPC with
-explicitly approved capabilities, resource scopes and finite limits.
+Modules run as independent executables in immutable OCI images under the bundled
+original `rungv` (gVisor), with authenticated bidirectional gRPC, explicitly
+approved capabilities, resource scopes and finite limits. Docker is build-only.
 
 **Clean cutover:** the old standard-library `plugin.Open`/`.so` loader, symbol
 lookup and direct `discordgo.Session` callback interfaces are removed. There is
@@ -38,18 +38,14 @@ It is historical design context, not the current process or security topology:
 ```text
 Operator-approved configuration and immutable OCI images
     |
-    +-- privileged flexmodule-supervisor (independent host service)
-    |     Docker/runsc, quota, network policy, cleanup/reconciliation
     +-- portable foreground supervisor (ordinary installation-owner account)
     |     verified local bundle and image generations, SQLite admission/cleanup ledger
     |     one managed GVX engine per instance; authenticated gvx-ctrl/2
-    +-- unprivileged runtime
+    +-- unprivileged bundled worker
           core manager, ordered event admission, uploads, credentials
           optional Discord backend (host-only bot token and Gateway)
-          optional voice service (separate native-enabled artifact)
           native voice only if the target bundle advertises it
               |
-              +-- runsc module instances
               +-- original rungv -> trusted guest bridge -> nonroot module
                     authenticated core-v2 Hook
                     one fixed reverse connection for core/file/backend helpers
@@ -84,11 +80,9 @@ Current entry points:
 
 | Path | Responsibility |
 |---|---|
-| `main.go`, `cmd/` | Root Cobra CLI: `start`, `generate-config`, `new` |
-| `internal/app/` | Runtime orchestration, configuration generation and optional backend/voice composition |
-| `src/Database/`, `src/Backends/Discord/Database/` | Chatanium-owned in-memory database and host guild/message recording |
-| `cmd/flexmodule-supervisor/`, `internal/host/` | Privileged host control and Docker/runsc execution |
 | `main.go`, `cmd/`, `internal/portable/install/` | User-local doctor, initialization, review, foreground start/stop, offline update, uninstall and purge |
+| `internal/app/`, `cmd/chatanium-worker/` | Separately compiled nonroot worker, optional backend/voice composition |
+| `internal/configgen/` | Configuration generation from explicitly prepared image records |
 | `internal/portable/{engine,process,service,session,sandbox,images,store}/` | Native child lifetime, authenticated controls, guest grants, verified images and the installation ledger |
 | `internal/runtime/`, `internal/runtime/upload/` | Backend-neutral instance lifecycle, grants, admission and file ownership |
 | `proto/core-v2/`, `shared/core-v2/` | Lifecycle, configuration, file transfer and authenticated transport |
@@ -174,8 +168,6 @@ Commit the SQL changes together with all three generated Go files
 |---|---|
 | `make prepare-sdk` | Download the pinned upstream DiscordGo module, verify its original checksums and apply the maintained patches; no application/native compilation |
 | `make list-module` | Display detailed manifest blocks with name/version, author, description, backend protocols and grouped capability names; no Go/native/SDK preparation, module build or runtime query |
-| `make build-runtime` | Voice-enabled `bin/chatanium` (CGO=1, pinned native DAVE), adjacent `bin/voice-runtime/` libraries/licenses/provenance, and `bin/flexmodule-supervisor`; no application modules |
-| `DISABLE_VOICE=1 make build-runtime` | Runtime and supervisor only, CGO=0 without native voice or its library dependency |
 | `TRUSTED_GH=/usr/bin/gh make build-runtime GOOS=linux GOARCH=amd64` | Build the offline portable launcher, target-matched original GVX and worker, Linux guest bridge/preparer and their provenance |
 | `TRUSTED_GH=/usr/bin/gh make build-runtime GOOS=windows GOARCH=arm64` | Cross-build a Windows arm64 artifact on the Linux build host; this is not a WHPX execution test |
 | `make build` | Build the portable runtime plus direct v2 module directories under `modules/` |
@@ -183,7 +175,7 @@ Commit the SQL changes together with all three generated Go files
 | `make build-module examples/general-bot` | Explicitly build the root-module example into `bin/examples/general-bot/module` |
 | `make build-native BUILD_JOBS=2` | Independent native C++/ABI/loader/license gate; `.tools/native/prefix` and `.tools/native/bundle`, no application Go compilation or `bin/voice-runtime` publication |
 | `make buf` / `make buf-check` | Transactional owned protobuf publication / non-mutating generation comparison; see [protocol maintenance](proto/README.md) |
-| `make build-integration` | `bin/flexmodule-integration` from `tests/integration` and the `internal/app`-package `bin/flexmodule-runtime-return-holder`; CGO=0, no test execution |
+| `make build-integration` | `bin/flexmodule-integration` from `tests/integration`; CGO=0, no runtime/test execution |
 | `make build-module tests/integration/fixtures/sandbox` | Explicitly build the backendless integration fixture into `bin/tests/integration/fixtures/sandbox/module` |
 | `make check-offline` | Focused SDK-preparation tests, Buf schema/generation comparison and bounded ordinary tests in the prepared SDK, root and discovered local Go modules; no live Discord or native build |
 | `make clean` | Owned runtime/integration binaries and directory-derived module outputs only; no native bundle deletion or Docker prune |
@@ -296,17 +288,18 @@ There is no separate `/sdk` mount or SDK-owned native input.
 It is a **source-patched fork**, not an upstream libdave release binary.
 Publication requires its actual ELF providers, eager relocation and target loader
 checks; a distro glibc version alone is not an ABI compatibility guarantee.
-The default runtime resolves native libraries from `$ORIGIN/voice-runtime/lib`: install
-`chatanium` alongside the complete `voice-runtime/` directory, preserving
-its `lib/`, `licenses/` and `provenance/` contents and relative layout. The latter
-is ancillary data, not another runtime entry point. Do not install just the Go
-executable or rename its companion directory. A native build does not prove
-encrypted Discord interoperability.
+The separately compiled worker resolves native voice libraries from
+`$ORIGIN/voice-runtime/lib`. The static outer launcher embeds that worker and the
+complete native/helper closure, then verifies and publishes immutable digest
+generations during approved initialization. Install only the externally verified
+`bin/chatanium`; do not separately install a worker or companion voice directory.
+Neither worker nor helpers import `internal/releasepayload`, preventing recursive
+embedding. Native build success does not prove encrypted Discord interoperability.
 
 ## Create a v2 module
 
-The root CLI exposes `start`, `generate-config` and `new`; use Cobra's
-**double-hyphen** long flags. Run `./bin/chatanium --help` or a subcommand's
+The root CLI exposes lifecycle commands plus `generate-config` and `new`; use
+Cobra's **double-hyphen** long flags. Run `./bin/chatanium --help` or a subcommand's
 `--help` for its interface. `new` preserves the interactive name prompt when
 `--name` is omitted. It creates source, not a running installation.
 
@@ -366,10 +359,10 @@ checkout's `tools/build/manifest`, and build the supplied scratch Dockerfile
 with the exact manifest bytes and SHA-256 labels. `make image-module` below
 packages the repository's general-bot/sandbox fixtures, **not** arbitrary output
 from `new`. Publish the generated image through your approved registry workflow,
-obtain its real immutable `registry/repository@sha256:...` RepoDigest, make that
-digest available to the supervisor, and follow the approval/configuration flow
-below. Copying a binary into `modules/` does not install it; there is no installer
-or implicit production hot reload. Development reload is a separate opt-in path.
+obtain its real immutable `registry/repository@sha256:...` RepoDigest, then prepare
+that digest through explicit `chatanium prepare-image` and the approval flow below.
+Copying a binary into `modules/` does not install it. There is no implicit
+production hot reload; development reload remains a separate opt-in path.
 
 ### Module images
 
@@ -444,8 +437,15 @@ pulling `latest` or installing a system container engine is not part of setup.
 
 Run `doctor` from the same user account that will own the
 installation. `doctor` is read-only; it distinguishes authenticated bundle
-metadata from checks that require opening files or starting the engine. Target
-backends are Linux amd64/arm64 `systrap`, macOS arm64 `hvf`, and Windows
+metadata from the installed files. It verifies the embedded bundle manifest
+first. If the installation is `INITIALIZING` or `READY` and the digests match, it checks
+the exact installed files without taking a lock, opening the ledger, or starting
+the engine. `installed_bundle_verification` reports `VERIFIED` on success or
+`FAILED` with a nonzero exit. `DIFFERENT_LAUNCHER` means the bundle digests
+differ and `doctor` did not check the installed files. Other installation
+states report `NOT_APPLICABLE`. The field is absent if no installation exists.
+
+Target backends are Linux amd64/arm64 `systrap`, macOS arm64 `hvf`, and Windows
 amd64/arm64 `whpx`. WHPX must already be enabled. The installer does not enable
 a hypervisor, create accounts, run a service, mount host volumes or alter host
 cgroups, routing or firewall rules.
@@ -526,90 +526,132 @@ commands for a portable installation; portable-v2 never migrates or removes v1.
 
 ## Prepare a host
 
-Builds do not provision a host. `tools/host/prepare.py` is an explicit EL9 lab
-provisioner for rootful Docker **29.5.3**, cgroup v2/systemd, runsc release
-`release-20261026.0`, and XFS project quotas. It requires administrator-installed
-system tools including `conntrack-tools`, `xfsprogs`, `zstd`, `iptables-nft`,
-`iproute`, `util-linux`, `curl`, `shadow-utils` and `systemd`.
-Missing dual-stack forwarding or firewall hooks are reported, not silently fixed.
+The distribution is one static Linux/amd64 launcher. It contains original rungv
+`v0.16.10002026110900` at source commit
+`a9bfd06c2c07a16e76972ff43379e0ebe0d4223a`, static product helpers, a separate
+native-default worker and pinned EL9 XFS/network/shadow-utils closures. Runtime
+operation requires no Docker, containerd, runsc installation or engine daemon.
+Build-time Docker remains isolated from runtime authority.
 
-Review the script and install it as root-owned mode 0755 at
-`/opt/flexmodule-lab/prepare.py`, below root-owned, non-group/world-writable
-directories with no symlink components. Do not execute a user-writable checkout
-as root. Supply `/etc/flexmodule-lab/network.json` under the same trust rules.
-That operator inventory must contain exactly:
-
-- `ipv4_pool`, `ipv6_pool`: dedicated canonical, noncolliding module CIDRs.
-- `resolvers`: actual public numeric resolver addresses.
-- `host_public_addresses`: actual host/public/NAT addresses to exclude.
-- `internal_prefixes`, `metadata_prefixes`: actual protected destination ranges.
-- `inventory_revision`: an explicit finite revision string.
-
-All inventory lists are mandatory and nonempty. Documentation addresses, guessed
-public IPs and copied workstation ranges are not deployment inventory.
-Set every bound below to an approved positive integer. This command performs
-read-only preflight; repeat it with the exact `--apply` flag only to authorize
-the documented host mutations:
+Authenticate a download **before executing it**, using an independently trusted
+GitHub CLI and approved release tag and source commit:
 
 ```sh
-sudo /usr/bin/python3 -I /opt/flexmodule-lab/prepare.py \
-  --inventory /etc/flexmodule-lab/network.json \
-  --max-message-bytes "${SUPERVISOR_MAX_BYTES:?set packet bound}" \
-  --max-connections "${SUPERVISOR_MAX_CONNECTIONS:?set connection bound}" \
-  --operation-timeout-seconds "${HOST_OPERATION_SECONDS:?set operation bound}" \
-  --reconcile-interval-seconds "${HOST_RECONCILE_SECONDS:?set reconciliation interval}" \
-  --api-deadline-seconds "${HOST_API_SECONDS:?set Docker API deadline}" \
-  --termination-deadline-seconds "${HOST_TERMINATION_SECONDS:?set termination deadline}" \
-  --deadline-seconds "${HOST_PREPARE_SECONDS:?set whole-command deadline}"
+gh attestation verify ./chatanium-linux-amd64 \
+  --repo chatanium/runtime \
+  --signer-workflow chatanium/runtime/.github/workflows/release.yml \
+  --source-ref "refs/tags/${RELEASE_TAG:?set approved release tag}" \
+  --source-digest "${RELEASE_COMMIT:?set approved exact source commit}" \
+  --deny-self-hosted-runners
 ```
 
-The source enforces each flag's finite range. Apply creates/verifies the dedicated
-`flexmodule-runtime` account, a 32 GiB backing XFS image beneath
-`/home/flexmodule-lab-storage`, and its `prjquota,nodev,nosuid` mount at
-`/var/lib/flexmodule-lab/data`. It writes root-only
-`/etc/flexmodule-lab/supervisor.json`, registers the named Docker runtime
-`flexmodule-lab-runsc-20261026`, validates the merged Docker config, and uses
-SIGHUP rather than restarting Docker. It does not start services, install
-packages, change fstab/sysctl/firewall rules, reformat existing data or adopt
-permission-mismatched directories. Reapplication requires module networks to be
-absent, because collision checks also inspect workload routes.
-
-The mount contains separate `management`, `modules`, `ipc` and `discord`
-directories. The Discord ownership directory is runtime-owned mode 0700 and
-outside module storage/IPC mounts; do not substitute the root-owned management
-directory. Inspect generated UID/GID values rather than assuming numbers.
-Install reviewed runtime/supervisor binaries into a root-protected executable
-directory, for example `/opt/flexmodule-lab/bin`, before service launch.
-Start the supervisor independently, as root, in its own terminal/service:
+The canonical GitHub repository ID is `695180706`, owner ID `253326933`; verify
+those identities as well, since repository names alone can be reused. A local
+unsigned build, embedded checksums or a checksum downloaded beside the binary
+does not establish this initial trust. The hosted release workflow creates the
+product artifact attestation; rungv's upstream attestation is a separate trust
+check, not authentication of the Chatanium launcher.
 
 ```sh
-sudo /opt/flexmodule-lab/bin/flexmodule-supervisor \
-  --config /etc/flexmodule-lab/supervisor.json
+./chatanium-linux-amd64 doctor
+sudo install -o root -g root -m 0755 ./chatanium-linux-amd64 /usr/local/bin/chatanium
+sudo /usr/local/bin/chatanium init
+sudo /usr/local/bin/chatanium start --foreground \
+  --installation-id "${INSTALLATION_ID:?use the approved product installation ID}"
 ```
 
-The runtime must not belong to the Docker group or receive the Docker socket.
-It connects only to the supervisor socket, whose lab path is
-`/var/lib/flexmodule-lab/data/management/control.sock`. The supervisor owns
-cleanup even if the runtime dies. Before each Docker container/network create,
-it durably records `SUBMITTED` with a deterministic name bound to the owner
-triple. Any create error conservatively retains that record. A later NotFound
-does not prove the request never committed: cleanup reports
-`CREATE_OUTCOME_UNRESOLVED` / `UNRESOLVED_CREATE` and retains storage, quota and
-the installation lease across restart. Reconciliation must first observe the
-exact object ID with all ownership labels and persist `OBSERVED`; only subsequent
-confirmed absence can release its cleanup obligations. It does not adopt/restart
-objects or expose a force-release shortcut. Actual delayed-Docker fault timing
-still requires separate exercised evidence.
+`doctor` is passive even as root: no extraction, helper execution, mounts or
+units. It distinguishes unsupported, unknown and privileged-check-needed facts.
+The initial supported profile requires CPU amd64-v2, systemd 252 features,
+cgroup-v2 controllers, Landlock, namespaces, seccomp, pidfd/openat2 and approved
+XFS/loop/mount/network privileges. Preparation additionally requires PID1's
+`PrivateUsers=true` service boundary, native USER-namespace owner/parent/map
+inspection and thread-synchronized seccomp. A systemd property or kernel version
+alone proves none of these; an unsupported or mismatched native boundary fails
+before target work. Root and PID1 remain trusted. Runtime operation needs no
+Docker daemon; build-time Docker is separate.
+
+Bare `init` derives and displays a bounded plan and requires its exact PlanDigest
+before preparing anything; each module also requires its own exact ReviewDigest.
+It reviews paths, three dedicated identities, protected secrets, finite storage
+budgets, image sources and each module's separate grants. `--draft PATH` supplies
+protected choices; `--installation-id ID` resumes an existing initialization.
+It records PROVISIONING and per-object intent before mutation, never formats
+existing data, and reaches READY only after temporary services and mounts settle.
+It does not install packages, alter Docker/fstab/global sysctl, register a permanent service,
+or silently adopt old Docker state. Dedicated app/sandbox/preparer identities
+must have no unexpected NSS groups: an empty systemd SupplementaryGroups array
+does not clear account database memberships.
+
+The manager owns the installation lease and lifecycle journal. systemd is the
+sole cgroup writer, including FD-passed transient services; its v252 CPU quota
+property is `CPUQuotaPerSecUSec`, not `CPUQuotaUSecPerSec`. Uncertain submission
+retains claims until authoritative settlement. Owned transient services use both
+`AddRef=true` and `CollectMode=inactive-or-failed`: default failed-unit retention
+can otherwise keep PID1 stdio open after Unref. Persist the complete terminal
+observation first, then Unref, then prove actual unit/job/stdio/process/mount
+settlement before quota reclamation. There is no ResetFailed workaround.
+Missing native terminal status never becomes exit zero: Wait remains UNKNOWN.
+Cleanup may separately use journaled absence evidence only for an exact previously
+OBSERVED invocation, after complete job/unit/PID/cgroup/task and FD/namespace/pipe/data
+reference absence is proved. SUBMITTED-only uncertainty still requires
+authoritative rejection or a boot fence; it cannot use this absence path.
+
+`stop` commits desired STOPPED before drain. Optional `service install --now`
+creates explicit RUNNING intent; service restart respects STOPPED. `uninstall`
+removes owned code/unit only and preserves data/config/secrets/accounts/source
+and recovery records. `purge --installation-id ID` derives its current owned
+scope and requires the displayed exact PlanDigest before destruction, after
+cleanup proof. Execute `update --installation-id ID` from the new independently
+verified, protected launcher and approve its exact current-state PlanDigest.
+Update preserves source, hostfs metadata, compatible state and referenced
+bundle/cache generations; binary rollback is not data rollback.
+
+Full purge explicitly retains the shared `/var/lib/chatanium/.management.lock`:
+a root-owned mode-0600 coordination marker that must never be replaced or
+unlinked, including for NONE installations. This is approved shared residue,
+not a promise of an empty host. Per-installation `.purge-terminal-<ID>.json`
+receipts and `.purge-terminal-<ID>-<TxnID>-<Step>.next` stages in that shared
+directory are temporary; remove them only after durable full completion.
+
+Terminal finalization must remain resumable after canonical SQLite is gone.
+Only the exact root-validated terminal receipt may continue its original
+approval/digest/scope and finite remaining observed control/ancestor removals.
+It cannot recreate helpers, data, mounts or the database, or admit ordinary
+lifecycle work. Identity mismatches or reappearance of completed targets fail
+closed; missing SQLite without that exact authority is not purge success.
+
+The metadata filesystem must support anonymous `O_TMPFILE` publication,
+`linkat` no-replace publication, `RENAME_EXCHANGE`, and file/directory `fsync`.
+Two actual approved preflight probes must establish publication/exchange
+support and durable probe absence **before any selected payload, account or
+canonical-helper deletion**, not merely before SQLite removal. Unsupported
+filesystems fail closed, without named partial-write fallback, OS/package
+changes or weakened cleanup proof.
+
+
+PUBLIC initialization explicitly approves and journals the shared host-wide
+`/var/lib/chatanium/network-ipam` anchor and lock. Per-installation purge removes
+only its own allocations and preserves that shared anchor/lock and needed parent:
+unlinking a shared lock could split lock ownership or race other installations.
+NONE creates no network-IPAM infrastructure; it still retains the shared
+management lock above. Neither anchor implies a surviving unit, rule or mount,
+and purge is not byte-for-byte host restoration.
+
+Namespace handles are owned bind mounts beneath the installed `RunRoot/netns`.
+The runtime does not use `ip netns add/delete` or change global `/run/netns`
+self-bind/propagation state. The preserved shared IPAM anchor is only a directory
+and lock file, not a retained namespace mount.
+Root network helper services explicitly use PrivateMounts and ProtectControlGroups
+without CAP_SYS_ADMIN or `ip netns exec`; the product owns native namespace creation.
 
 ## Configure and run
 
-`chatanium start` optionally loads `.env` defaults from its working directory
-without overriding environment values already provisioned by the operator. A
-missing `.env` is allowed; an unreadable or malformed one is an error. There is
-no `private.env` autoload or `${...}` interpolation in module JSON.
-`generate-config` does not load `.env`. Secret selection remains an explicit
-`env:NAME` binding, not implicit use of legacy `DISCORD_TOKEN`, `GUILD_ID` or
-`PLUGIN_PATH` settings.
+The launcher never autoloads `.env` or inherits ambient PATH, loader, proxy or
+GVX_DEBUG_LOG into privileged helpers. Secret selection is an explicit `env:NAME`
+binding or approved protected secret file, not legacy DISCORD_TOKEN/GUILD_ID/
+PLUGIN_PATH defaults. Only selected values go to the nonroot worker over private
+bounded control input; no dotenv interpolation is performed.
 For Discord, configure `backends.discord.major` as `2` and
 `secret_sources.bot_token` as `env:FLEXMODULE_DISCORD_BOT_TOKEN`; inject the real
 value into the **runtime process only** using your private service environment.
@@ -619,36 +661,40 @@ opaque refs; the bot token cannot be provisioned to a module.
 
 ### Operator inputs
 
-Prepare three separate files before `generate-config`:
+`generate-config --installation-id ID` passively reads the committed installed
+base and inspected image binding; it does not create a runtime epoch. Prepare
+two separate protected operator files:
 
-1. A valid runtime base JSON with `schema_version: 2`, `modules: []`, and the
-   host/backend policy below. It is not the supervisor JSON.
-2. Module-scoped JSON matching the chosen [ordinary](examples/general-bot/README.md),
+1. Module-scoped JSON matching the chosen [ordinary](examples/general-bot/README.md),
    [music](modules/music-bot/README.md), or
    [player](modules/audio-player/README.md) contract, containing approved real IDs.
-3. A strict protobuf-JSON `core-v2.Grants` approval with exact capabilities,
+2. A strict protobuf-JSON `core-v2.Grants` approval with exact capabilities,
    resource scopes, resource profile and finite limits. Do not copy an image's
    requested `allResources` ceiling into approval to make initialization pass.
 
-All input/output paths must be canonical absolute, non-symlink regular files,
-owned by root or the runtime UID, and not group/world writable. The runtime
-bounds operator files to 16 MiB. Install the final config so that the dedicated
-runtime user can read it; the lab's root-only supervisor-config directory does
-not automatically grant runtime access.
+Input/output paths must be canonical absolute, non-symlink regular files in
+protected directories. Operator files are bounded to 16 MiB. Generate a new
+root-owned mode-0600 candidate, then use `configure --config PATH` to inspect and
+review its stopped installation plan and each actual module grant. Only that
+explicit commit changes installed configuration; stdout generation never does.
+Installed config remains root:root 0600 and reaches the worker through private
+INIT, not filesystem access. Workers cannot read the lifecycle journal.
+Advanced `--base PATH` accepts a separately protected runtime base; it is not
+required for the normal installed-base workflow.
 
 The authoritative JSON field names and validation rules are in
 [`internal/runtime/config.go`](internal/runtime/config.go) and [`internal/app/discord.go`](internal/app/discord.go):
 
 | Runtime base object | Required policy |
 |---|---|
-| `host` | Observed `docker_endpoint`, `docker_engine_version`, `runsc_runtime_name`, `runsc_version`, `runsc_sha256`, `management_directory`, `storage_root`, `ipc_root`; `quota_backend` is `xfs-project`. Match the independently prepared supervisor. |
-| `host.network` | `firewall_backend` is `iptables`; `ipv4` and `ipv6` true; explicit `resolvers`, `host_public_addresses`, `internal_prefixes`, `infrastructure_prefixes`, `metadata_destinations`. Include actual infrastructure exclusions, not just the module pool. |
+| `host` | Installed `runtime_installation_id`, `bundle_digest`, owned management/storage/IPC paths and `quota_backend: xfs-project`; no Docker endpoint/version/runsc fields |
+| `host.network` | Explicit `profile`: NONE, PUBLIC-v4 or PUBLIC-dual. NONE has no route/pool/uplink/source/resolver/inventory fields. PUBLIC requires matching family flags, canonical `ipv4_pool` and optional `ipv6_pool`, `inventory_revision`, `uplink4/source4` and optional `uplink6/source6`, family-compatible resolvers and all host/infrastructure/metadata exclusions. No family downgrade. |
 | `backends` | `{}` is backendless; only `discord` major 2 is composed by the current executable. No automatic Discord or voice registration. |
 | `resource_profiles` | Optional explicit profiles with `cpu_millicores`, `memory_bytes`, `max_pids`, `persistent_bytes`, `scratch_bytes`; all finite and positive, storage in 512-byte multiples. Built-ins: general 0.5 CPU/256 MiB/64 tasks/1 GiB persistent/256 MiB scratch; media 2 CPU/1 GiB/128 tasks/5 GiB persistent/2 GiB scratch. Profiles do not grant internet or voice. |
 | `defaults` | Optional positive `startup_deadline`, `drain_deadline`, `event_queue_events`, `event_queue_bytes`; defaults are 30s, 10s, 256 and 32 MiB. |
 | `limits` | All fields listed below are required; no missing-to-unlimited fallback. |
 
-`limits` duration strings: `termination_deadline`, `docker_api_deadline`,
+`limits` duration strings: `termination_deadline`, `host_operation_deadline`,
 `hook_rpc_deadline`, `readiness_poll_interval`, `credential_ref_max_ttl`,
 `upload_deadline`. Positive integer bounds: `control_message_max_bytes`,
 `config_max_bytes`, `control_rpcs_per_instance`, `credential_refs_per_instance`,
@@ -674,8 +720,8 @@ Its `http` object requires duration strings `request_deadline`,
 `rate_limit_buckets`. `presence_owner` and `provisioned_secrets` are optional
 explicit policy, not inferred module rights.
 
-Omit `voice` for ordinary bots. The ordinary runtime rejects voice configuration.
-For the separate voice artifact, use the exact mandatory voice/transport JSON
+Omit `voice` for ordinary bots. A DISABLE_VOICE build rejects voice configuration.
+For the default native-voice worker, use the exact mandatory voice/transport JSON
 fields in [`internal/backend/discord/voicejobs/config.go`](internal/backend/discord/voicejobs/config.go)
 and the SDK transport config; those duration fields use numeric nanoseconds, not
 the runtime's duration-string encoding. Voice control and packet limits must
@@ -684,54 +730,141 @@ the ordinary module image.
 
 ### Generate an installation
 
-Run the generator as the dedicated runtime user, against the already running
-supervisor. Variables below are operator inputs, not sample IDs or digests:
+Generate configuration from an already prepared immutable image record, never
+by registering a runtime epoch or fetching during launch:
 
 ```sh
-sudo -u flexmodule-runtime -- /opt/flexmodule-lab/bin/chatanium generate-config \
-  --base "${RUNTIME_BASE:?set absolute base JSON path}" \
-  --module-config "${MODULE_CONFIG:?set absolute module JSON path}" \
-  --approval "${MODULE_APPROVAL:?set absolute Grants JSON path}" \
-  --image "${MODULE_REPODIGEST:?set actual immutable registry RepoDigest}" \
-  --module-id "${MODULE_ID:?set stable installation identity}" \
-  --entrypoint /opt/flexmodule/module \
-  --uid "${MODULE_UID:?set approved nonzero module UID}" \
-  --gid "${MODULE_GID:?set approved nonzero module GID}" \
-  --supervisor-socket /var/lib/flexmodule-lab/data/management/control.sock \
-  --supervisor-uid 0 \
-  --supervisor-max-bytes "${SUPERVISOR_MAX_BYTES:?use the prepared packet bound}"
+sudo /usr/local/bin/chatanium prepare-image \
+  --installation-id "${INSTALLATION_ID:?}" --operator --module-id "${MODULE_ID:?}" \
+  --image "${MODULE_REPODIGEST:?use exact approved repository@sha256 digest}" \
+  --limits-file "${PREPARE_LIMITS:?set protected complete preparation-limits JSON}"
+# Review and type the exact preparation PlanDigest when prompted.
+# CONFIG_CANDIDATE must be new, in an existing protected root-owned directory.
+sudo /bin/sh -c 'umask 077; set -C; output=$1; shift; exec /usr/local/bin/chatanium generate-config "$@" > "$output"' \
+  sh "${CONFIG_CANDIDATE:?set new protected absolute candidate path}" \
+  --installation-id "$INSTALLATION_ID" \
+  --module-config "${MODULE_CONFIG:?}" --approval "${MODULE_APPROVAL:?}" \
+  --image "$MODULE_REPODIGEST" --module-id "$MODULE_ID" \
+  --uid "${MODULE_UID:?}" --gid "${MODULE_GID:?}"
+sudo /usr/local/bin/chatanium configure --installation-id "$INSTALLATION_ID" \
+  --config "$CONFIG_CANDIDATE"
+# Review and type the exact configuration PlanDigest and each ReviewDigest.
+sudo --preserve-env=FLEXMODULE_DISCORD_BOT_TOKEN -- /usr/local/bin/chatanium start \
+  --foreground --installation-id "$INSTALLATION_ID"
 ```
 
-The exact digest must already exist in the supervisor's local image store.
-The generator verifies its strict v2 image manifest, preserves separately supplied
-approval, revalidates the resulting installation and writes JSON to stdout.
-Capture it into a private staging file, then install it atomically with explicit
-ownership/permissions; it never overwrites your config. It currently generates
-one module from an empty base. For multiple installations, compose the `modules`
-array using the same schema and independent approvals; do not rerun it against a
-nonempty base. Optional `--config-revision` and `--approval-revision` record operator
-revisions. Provisioned credential bindings require the explicit schema fields;
-the generator does not invent them.
+For offline preparation, supply `--source-kind oci-archive|docker-archive`,
+`--input PATH` and `--archive-digest sha256:...`; root derives the offline selector
+from inspected metadata. Original archive identity remains distinct from
+registry provenance. Registry credentials require an explicit protected mode-0600
+`--credential-file`; no ambient Docker credential discovery occurs.
 
-With a real token already exported in the invoking administrator's private
-environment, an ordinary Discord runtime can be started as:
+The example selects explicit limits through optional `--limits-file PATH`;
+omit that flag to use the root-proposed finite limits. A supplied file must be a
+complete strict [`provision.PrepareLimits`](internal/provision/contracts.go) JSON
+object with every positive bound: `nano_cpus`, `memory_bytes`, `tasks`,
+`input_bytes`, `expanded_bytes`, `output_bytes`, `inodes`, `json_bytes`,
+`descriptor_count`, `index_depth`, and `deadline`. Deadline is an integer number
+of nanoseconds, not a duration string. Missing fields are not filled with defaults.
+The protected file is read and validated before producing the root plan, which
+displays the exact selected limits for digest approval. `--limits-file` cannot
+be combined with advanced `--plan`. A known `--job-id` replay must use exactly
+its recorded limits; fresh/live preparation cannot exceed its root-approved
+finite ceiling or expand the original scope.
+Automatically derived preparation defaults leave four retained-image slots in
+the total source/cache pools: source accounting charges `2 * input_bytes`, so
+default input is capped at one eighth of total source bytes; default retained
+cache output and source/cache inode bounds are capped at one quarter of their
+total pools. Defaults also fit currently available source/cache and temporary
+work peaks, with byte bounds rounded down to 4096-byte blocks. Explicit approved
+limits are validated unchanged, never silently resized to these defaults.
 
-```sh
-sudo --preserve-env=FLEXMODULE_DISCORD_BOT_TOKEN -u flexmodule-runtime -- \
-  /opt/flexmodule-lab/bin/chatanium start \
-  --config "${RUNTIME_CONFIG:?set absolute installed runtime JSON path}" \
-  --supervisor-socket /var/lib/flexmodule-lab/data/management/control.sock \
-  --supervisor-uid 0 \
-  --supervisor-max-bytes "${SUPERVISOR_MAX_BYTES:?use the prepared packet bound}"
-```
 
-For backendless operation omit secret preservation. Voice support is compiled
-into the default `chatanium start` executable; deploy its adjacent
-`voice-runtime/` directory too unless built with `DISABLE_VOICE=1`. `SIGINT`/`SIGTERM`
-drain instances before backend/upload cleanup. `--duration` provides an optional
-finite run interval, not interactive acceptance proof. `make run` exposes the
-same runtime flags through `CONFIG`, `SUPERVISOR_SOCKET`, `SUPERVISOR_UID` and
-`SUPERVISOR_MAX_BYTES`, but does not start/provision the supervisor.
+The generator preserves separately supplied approvals and defaults to the
+inspected image argv; `--entrypoint` is an explicit absolute override.
+`prepare-image --operator` is stopped root management with a displayed bounded
+plan and exact digest approval. Runtime Create only uses committed prepared
+records, readonly whole-cache generations and pull=never. SIGINT/SIGTERM and
+optional `--duration` converge on owned drain. `make run` uses installed
+self-management with INSTALLATION_ID; CONFIG is only an optional exact installed
+path assertion, not a replacement or uncommitted input.
+
+### Preparation confinement and cache publication
+
+OCI/archive preparation, `rungv load` and development-worker inspection use a
+private USER namespace owned by root, directly below the controller's host USER
+namespace. Services run as Preparer with only the primary GID, no capabilities
+and NoNewPrivileges. The controller verifies exact UID/GID maps, denied
+setgroups, process/invocation identity and every task's authority; it independently
+verifies the mount namespace and the actual approved storage binds.
+
+The preparation gate uses domain 1, protocol 2 and filter 2. Immutable launch
+metadata binds filter 2 before dispatch. After READY, native birth evidence is
+recorded before ARM; FILTER_READY requires the exact installed filter digest
+and all-thread TSYNC readback. Full evidence and START intent are persisted in
+one transaction before START permits target data operations.
+
+The fixed preparation-only filter rejects `sendmsg`, `sendmmsg`, `recvmsg`,
+`recvmmsg` and all three io_uring syscalls, and rejects foreign syscall ABIs/x32.
+Blocking ancillary ingress also prevents acquiring an outside seccomp listener
+for descriptor injection. Ordinary stream/file I/O, HTTP/TLS, pure-Go DNS and
+poller operations remain available. This is not the policy for `rungv run`,
+module/worker IPC or CGO variants, and it is not a general ioctl allowlist.
+
+Source/work pools remain root:root 0700. The prepared pool remains
+root:RuntimeGID 0710, but each `prepared/<job>` cache envelope is root:root 0700
+from birth. Only its Preparer-owned `generation` child is writable and bound as
+`/chatanium/cache`; the envelope and pools are never writable target binds.
+There is no pending-directory rename or durable-path change. Both cache
+directories remain charged to the existing project and inode limit.
+
+After authoritative writer/private-namespace settlement, seal `generation`
+read-only in place, reclaim Work and prove its actual project usage zero. Only
+then journal, synchronize and expose the envelope as root:RuntimeGID 0710 and
+commit publication. Current readiness/reuse also requires immutable original
+acquisition proof; hashes, chmod, a later load or a proc/FD scan cannot replace
+it. Opaque envelope handles may still block full reclamation. No completed
+history is backfilled; unsupported filter-1 history remains cleanup-only where
+its exact complete historical proof is valid, never current admission evidence.
+
+### Legacy quarantine and staged release preparation
+
+Only committed legacy lineages with COMPLETE outer/internal helper histories
+are eligible; pending or uncertain native work is not reclassified as complete.
+Unproven legacy acquisitions and their derived caches are quarantined, not
+silently adopted or made usable by recovery. Quarantine preserves immutable
+history, storage claims and retention-only references, while denying launch,
+candidate/readiness use, rebuild-source reuse and development reuse. Full
+disposal still requires native ownership/reference and actual quota-zero proof.
+
+When installed release A cannot perform current preparation:
+
+1. Independently authenticate and protect the candidate release B launcher.
+   Run its existing `prepare-image --installation-id ID --operator` workflow,
+   or `--operator --plan PATH` for an exact reviewed plan.
+2. Review the preparation bundle digest, quarantine-set digest, expected active
+   revision and exact old image record being replaced before approval. Use fresh
+   jobs and approved source/credential/limits; retain the resulting exact receipt.
+   Publishing B's helpers/cache does not change the installed bundle, active or
+   pending revision, launch authority, or RECOVERY_REQUIRED state.
+3. Explicitly request ordinary recovery with `stop --installation-id ID` through
+   a compatible verified launcher. Only genuine cleanup/detachment can complete
+   recovery; active bindings to quarantined images still prevent start.
+4. Separately review B's `update --installation-id ID`. Its full candidate must
+   preserve intended modules and bind exact pre-approved replacement preparation
+   plans, fresh images and receipt caches for B. Missing or ambiguous matches
+   fail; existing `update --plan PATH` selects exact references without guessing
+   by selector, timestamp or newest result.
+
+Only that approved Update performs backup, pending/configuration/launcher
+replacement and activation. There is no installed-A Configure workaround,
+temporary module-removal bypass, cache relabeling or legacy/missing-cache rebuild
+fallback. Unrelated pending work, native uncertainty, resource/secret/grant
+checks and cleanup barriers are not waived by quarantine.
+
+Isolated-child checks do not establish privileged host/runtime or final native
+release acceptance; those remain pending.
+
 
 ### Development-only hot reload
 
@@ -740,38 +873,50 @@ Enable the watched workflow explicitly:
 
 ```sh
 DEV_MODE=1 \
-DEV_RUNTIME_USER="${DEV_RUNTIME_USER:?set an existing non-root, non-Docker runtime account}" \
-CONFIG="${CONFIG:?set canonical approved runtime JSON path}" \
-SUPERVISOR_SOCKET="${SUPERVISOR_SOCKET:?set prepared supervisor socket}" \
-SUPERVISOR_UID="${SUPERVISOR_UID:?set trusted supervisor UID}" \
-SUPERVISOR_MAX_BYTES="${SUPERVISOR_MAX_BYTES:?set prepared packet bound}" \
+DEV_RUNTIME_USER="${DEV_RUNTIME_USER:?set the approved installed non-root, non-Docker App account}" \
+INSTALLATION_ID="${INSTALLATION_ID:?set approved product installation ID}" \
 make run
 ```
 
-`DISABLE_VOICE=1` is still the only runtime voice opt-out. The supervisor, host
-storage and writable image registry must already be prepared; this command does
-not provision accounts, sudoers, mounts or services. Image publishing uses the
-builder's pre-provisioned registry access. The runtime must use a separate
-unprivileged account when the builder has Docker authority; existing authorized
-noninteractive run-as is required. Runtime generations contain only executable
-and ancillary native artifacts, never host secrets or copied `.env` files.
-Export the configured `env:NAME` host secrets in the invoking private environment.
-The canonical operator JSON must be root-owned or owned by that runtime UID,
-not group/world writable, and already readable by both runtime and builder.
-The watcher does not copy, chmod or chown the protected configuration.
+`DISABLE_VOICE=1` remains the voice opt-out. The self-managed installation and
+writable image registry must already be approved. Builds/pushes run unprivileged;
+only the trusted installed launcher may handle approved update/preparation/start.
+The watcher never executes a user-writable checkout binary as root or gives the
+nonroot dev controller Docker authority. Existing narrow noninteractive sudo
+authorization is required for the installed lifecycle commands and
+`inspect-config --installation-id ID` and `inspect-dev-lock --installation-id ID`;
+no accounts, sudoers, mounts or services
+are provisioned by the watcher. Export the configured `env:NAME` host secrets in
+the invoking private environment. Installed configuration remains root:root mode
+0600. The watcher reads only the exact committed configuration through that
+bounded root-mediated command, retaining its bytes in private memory; neither
+the builder nor runtime account needs file read access. It periodically detects
+committed configuration changes and rechecks before replacing a healthy runtime.
+It never accepts a separate development config path or copies, chmods or chowns
+the protected configuration. The worker receives configuration through private INIT.
 
 The watcher binds installed module IDs to unique local source manifest names,
 using the same module discovery as `make build`. It never auto-installs an
 unconfigured module or invents approvals. Module-only changes build an overlay
 from the existing immutable image, preserving its tooling/environment, push a
-new tag to the same repository, resolve its real RepoDigest, and reload only
-that installation. Runtime/shared-source changes rebuild before requesting an
-orderly runtime stop; a replacement process starts only after positive cleanup.
+new tag to the same repository, resolve its real RepoDigest, explicitly prepare
+that candidate through root management, and only then request nonroot dev reload.
+Development rebuilds replace only the nonroot worker and native closure after
+positive cleanup. They never promote a developer-built privileged launcher,
+stage, preparer, engine or root helper; those require the normal verified release update.
+The unprivileged packager creates a worker-only USTAR with exact member hashes,
+then streams it on stdin to `prepare-dev-worker --input - --sha256 ... --size ...`.
+Only the installed bounded nonroot preparer parses candidate archives/ELF.
+The returned dev-only revision is selected with `start --foreground --dev-mode
+--dev-revision REV`; it never changes the active release or privileged bundle.
+After new readiness the watcher discards superseded owned revisions; clean final
+stop discards remaining prepared revisions. Failed/uncertain operations retain
+records and never blindly resubmit, fall back or roll back.
 Committed images, including successful manual reloads, survive development
 restarts unless the operator changes that installation's configured image.
-The protected operator JSON is not rewritten. A final development-only cleanup
-receipt can authorize restart after a logical module failure; an ordinary crash
-or uncertain cleanup cannot.
+The protected operator JSON is not rewritten. A development cleanup receipt plus
+an authoritative installed `stop` report can permit replacement after a logical
+module failure; a worker receipt alone, an ordinary crash or uncertain root cleanup cannot.
 
 Compatible rebuilds reuse a verified published base within the watcher session,
 rather than growing an image layer chain on every edit. An unknown/manual image
@@ -782,23 +927,47 @@ container to be removed. Uncertain cleanup retains
 `.tools/native-container.receipt` and blocks new native builds.
 
 For direct host-side control, add `--dev-mode --dev-socket "$DEV_SOCKET"` to
-`chatanium start`. The canonical socket parent must already be owned by the
-runtime UID with mode 0700, outside module storage/IPC mounts. The socket is
-mode 0600 and authenticates the caller's Unix peer UID; invoke clients as the
-runtime account. No TCP endpoint or root/developer-UID exception is exposed.
-Socket/image-override options without `--dev-mode` are rejected. The watcher
-creates a private runtime-owned socket directory by default; `DEV_SOCKET` can
-select an explicitly prepared private path.
+`chatanium start`. The socket must be a direct child of the exact canonical
+`StorageRoot/app/native` directory, also visible at the same physical path to
+host-side clients. That directory is quota-backed and owned by the installed App
+UID/GID mode 0700; `ManagementDirectory` is exactly `StorageRoot/app`, never an
+installation-directory alias. No extra host bind or permissive copy is created.
+The socket is mode 0600 and authenticates the caller's Unix peer UID; invoke
+clients as the installed App account. No TCP endpoint or root/developer-UID
+exception is exposed. Socket/image-override options without `--dev-mode` are
+rejected. The watcher defaults to `StorageRoot/app/native/control.sock`;
+`DEV_SOCKET` may select another direct child of that same native directory.
+The builder never traverses or changes permissions on this App-private storage.
+The watcher holds only the explicitly journaled root:AppGID 0440
+`Installation/dev-watch.lock` across restarts, outside the detachable backing.
+It gets that exact path/dev/inode/owner/mode through bounded root-mediated
+`inspect-dev-lock`, never by guessing from StorageRoot. Its App-account helper
+opens the existing single-link empty file read-only, takes nonblocking flock and
+revalidates the canonical path/inode after acquisition. It never creates or
+chmods this lock. Helper/launcher cwd stays `/`, and native client connections
+close before awaiting root stop/backing detachment. Full purge refuses active
+coordination handles; it cannot unlink a held lock and split lock ownership.
+
+Initialization separately displays and approves finite AppBytes/AppInodes
+(baseline 10 GiB / 65536 inodes inside the default 32 GiB DATA pool), not
+additional backing capacity. App/upload/log and module budgets must fit together.
+Existing upload defaults remain 32 per-instance / 256 per-host records and the
+8 GiB ceiling. Nothing is allocated before plan approval. Persistent app state and
+its quota claim survive normal stop/uninstall; primary-data purge needs complete
+writer/reference/namespace/quota cleanup proof. Update/backup includes this app data.
 
 ```sh
-curl --fail-with-body --unix-socket "${DEV_SOCKET:?set runtime-owned private socket}" \
+sudo -n -u "${DEV_RUNTIME_USER:?installed App account}" -- curl --fail-with-body --unix-socket "${DEV_SOCKET:?canonical native socket}" \
   http://localhost/v1/modules
+
+sudo /usr/local/bin/chatanium prepare-image --installation-id "${INSTALLATION_ID:?}" \
+  --module-id "${MODULE_ID:?}" --image "${MODULE_REPODIGEST:?}"
 
 jq -n --arg module_id "${MODULE_ID:?select an installed module}" \
   --arg expected_instance_id "${INSTANCE_ID:?use the current instance from GET}" \
   --arg image "${MODULE_REPODIGEST:?use a real locally prepared same-repository digest}" \
   '{module_id:$module_id,expected_instance_id:$expected_instance_id,image:$image}' |
-  curl --fail-with-body --unix-socket "$DEV_SOCKET" \
+  sudo -n -u "$DEV_RUNTIME_USER" -- curl --fail-with-body --unix-socket "$DEV_SOCKET" \
     -H 'Content-Type: application/json' --data-binary @- \
     http://localhost/v1/modules/reload
 ```
@@ -861,15 +1030,12 @@ The bounded validation entry points are:
 
 ```sh
 make check-offline CHECK_DEADLINE=1800s TEST_TIMEOUT=120s
-make check-sandbox CONFIG="${RUNTIME_CONFIG:?}" \
-  SUPERVISOR_SOCKET="${SUPERVISOR_SOCKET:?}" SUPERVISOR_UID="${SUPERVISOR_UID:?}" \
-  SUPERVISOR_MAX_BYTES="${SUPERVISOR_MAX_BYTES:?}" CHECK_DEADLINE=120s OBSERVE=15s
-make smoke-discord CONFIG="${RUNTIME_CONFIG:?}" \
-  SUPERVISOR_SOCKET="${SUPERVISOR_SOCKET:?}" SUPERVISOR_UID="${SUPERVISOR_UID:?}" \
-  SUPERVISOR_MAX_BYTES="${SUPERVISOR_MAX_BYTES:?}" CHECK_DEADLINE=180s OBSERVE=60s
-make smoke-voice CONFIG="${RUNTIME_CONFIG:?}" \
-  SUPERVISOR_SOCKET="${SUPERVISOR_SOCKET:?}" SUPERVISOR_UID="${SUPERVISOR_UID:?}" \
-  SUPERVISOR_MAX_BYTES="${SUPERVISOR_MAX_BYTES:?}" CHECK_DEADLINE=180s OBSERVE=60s
+make check-sandbox CONFIG="${RUNTIME_CONFIG:?}" INSTALLATION_ID="${INSTALLATION_ID:?}" \
+  RUNTIME=/usr/local/bin/chatanium CHECK_DEADLINE=120s OBSERVE=15s
+make smoke-discord CONFIG="${RUNTIME_CONFIG:?}" INSTALLATION_ID="${INSTALLATION_ID:?}" \
+  RUNTIME=/usr/local/bin/chatanium CHECK_DEADLINE=180s OBSERVE=60s
+make smoke-voice CONFIG="${RUNTIME_CONFIG:?}" INSTALLATION_ID="${INSTALLATION_ID:?}" \
+  RUNTIME=/usr/local/bin/chatanium CHECK_DEADLINE=180s OBSERVE=60s
 ```
 
 Scenario configs must match the selected ordinary/sandbox/media image and actual
@@ -895,7 +1061,7 @@ whose original root license is MPL-2.0, preserved verbatim in
 replaced. This is preservation of notices and existing terms, **not relicensing**.
 
 FlexModule-derived files in `proto/`, `shared/`,
-`internal/{runtime,host,backend,app}/`, `cmd/flexmodule-supervisor/`, `tools/`,
+`internal/{runtime,host,backend,app}/`, `tools/`,
 `tests/integration/`, `examples/`, `modules/audio-player/`, and the copied
 `Makefile` and maintained patch work retain the original MPL terms unless more
 specific existing notices apply. In particular,
@@ -911,9 +1077,9 @@ relicensed by the transplant. The
 [libdave ABI patch](third_party/libdave/README.md#licensing-and-attribution)
 preserves libdave's MIT/Discord notice and separate dependency terms. The native
 build collects installed vcpkg and system-library notices as well as native
-provenance; distribute `bin/voice-runtime/licenses/` and
-`bin/voice-runtime/provenance/` with the executable and libraries. Keep exact
-source/patch/build records and meet the applicable dependencies' redistribution
+provenance. These notices, build records and all dependencies ship inside the
+static launcher and its verified immutable bundle, not as a user-installed sidecar.
+Keep exact source/patch/build records and meet applicable dependencies' redistribution
 and source requirements, not just the root application license.
 
 Media images likewise retain their FFmpeg, Opus, yt-dlp, Deno, Python/system

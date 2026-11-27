@@ -1,0 +1,36 @@
+@startuml
+title 자원 예산과 공간 회수
+top to bottom direction
+rectangle "사용자 승인 예산" as Budget
+rectangle "전체 런타임\n유한한 MemoryMax" as Runtime
+note right of Runtime
+  MemoryMax 비용
+  * rungv
+  * bridge
+  * 게스트
+  * tmpfs
+  TasksMax: 호스트 task와 thread 상한
+end note
+rectangle "하나의 유한한 DATA\nXFS byte / inode hard limit" as Data {
+  rectangle "StorageRoot/app\nAppBytes / AppInodes 하위 예약\nstop / uninstall 후 유지" as App
+  rectangle "나머지 DATA 예약" as Other
+  note right of Other
+    승인 전 수용량 확인
+    * persistent와 scratch
+    * 원본 OCI와 cache
+    * 압축 입력과 해제 출력의 준비 peak
+    * 로그와 metadata 여유
+  end note
+}
+rectangle "control journal\nworkload 고갈 밖의 관리 기록" as Journal
+rectangle "관리 프로그램의 실제 참조 정리\nwriter 종료 후 열린 삭제 파일과 mount 참조 해소" as Close
+rectangle "syncfs와 project accounting\n실제 quota 회수 확인" as Reclaim
+rectangle "정리 대상 claim 반환\n미확인 시 claim 유지" as Release
+Budget --> Runtime : systemd 상한 적용
+Budget --> Data : 전체 예약 합계 확인
+Runtime --> Close : 종료 후 정리
+Data --> Close : 정리 대상 선택
+Close --> Reclaim : 참조 해소 후 확인
+Reclaim --> Release : 실제 회수 후 반환
+Journal ..> Release : 미해결 claim 기록 유지
+@enduml

@@ -1,0 +1,27 @@
+@startuml
+title 승인 내용과 실행 이미지 연결
+hide stereotype
+top to bottom direction
+
+rectangle "사용자의 준비 계획 승인" as PreparationApproval <<primary>>
+package "고정 이미지 준비" {
+  rectangle "온라인 tag 또는 오프라인 archive" as Input
+  rectangle "정확한 manifest/config 고정\n원본 config의 선언 label 검사" as Identity <<data>>
+  rectangle "제한된 별도 preparer\ncanonical OCI에서 원본 rungv load" as Preparation
+  rectangle "원래 writer 증거 확인\nwriter 종료와 Work 공간 회수" as Cleanup
+  rectangle "원본 OCI와 파생 cache\n읽기 전용 봉인 후 공개" as Published <<data>>
+  rectangle "ImageRecord\n내용 식별과 revision 저장" as Record <<data>>
+}
+rectangle "사용자의 모듈 승인\n고정 내용과 실행 정책에 연결" as ModuleApproval <<primary>>
+rectangle "저장한 실행 참조로 원본 rungv 실행\n고정 digest와 읽기 전용 cache 사용" as Run <<success>>
+
+PreparationApproval --> Input : 승인한 준비 범위
+Input --> Identity : 동일한 내용 검사 경로
+Identity --> Preparation : 모듈 실행 전 검사
+Preparation --> Cleanup : 준비 작업 종료 후 확인
+Cleanup --> Published : 증거와 실제 정리 확인 후 공개
+Published --> Record : 원본과 파생 데이터의 연결 기록
+Record --> ModuleApproval : 검사한 선언과 요청 상한 제시
+ModuleApproval --> Run : 현재 승인과 레코드 재검증
+Record --> Run : 저장한 내용 식별 유지
+@enduml

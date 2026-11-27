@@ -1,0 +1,18 @@
+@startuml
+title 중지와 복구
+
+start
+:중지 의도 STOPPED를 먼저 저장;
+:새 실행 접수를 닫고 진행 중 작업 정리;
+if (종료 근거 확인?) then (확인)
+  :종료 관측 결과를 영속 기록;
+  :systemd 참조 해제;
+  if (자원 정리와 남은 참조 해소 확인?) then (확인)
+    :예약 반환 후 중지 확정;
+    :정리를 확인한 자원만 재사용;
+    stop
+  endif
+endif
+:정리 대기 상태 CLEANUP_PENDING\n예약과 남은 참조 유지;
+stop
+@enduml

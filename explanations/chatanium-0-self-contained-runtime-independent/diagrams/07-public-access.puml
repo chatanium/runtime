@@ -1,0 +1,24 @@
+@startuml
+title 공개 인터넷 접근
+
+state "인스턴스의 고정 프로필" as Profile
+state "외부 통신 차단" as Closed
+state "외부 통신 허용" as Open
+
+note right of Profile
+  선택 범위
+  * NONE
+  * PUBLIC-v4
+  * PUBLIC-dual
+end note
+
+note left of Profile
+  모든 프로필에서
+  모듈과 앱의 로컬 통신
+end note
+
+Profile --> Closed : 닫힌 게이트로 준비
+Closed --> Open : PUBLIC 승인과 현재 네트워크 확인 후\n게이트 열기
+Open --> Closed : 승인 철회 또는 네트워크 변경 시\n게이트 닫기
+Open : 허용 트래픽과 해당 응답 통과
+@enduml

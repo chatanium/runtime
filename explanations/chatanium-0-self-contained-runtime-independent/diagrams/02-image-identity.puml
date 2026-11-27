@@ -1,0 +1,16 @@
+@startuml
+title 승인한 이미지로 실행
+rectangle "레지스트리 태그 또는 오프라인 아카이브" as Source
+rectangle "이미지 준비와 승인" {
+  rectangle "linux/amd64 이미지 선택과 내용 확인" as Exact
+  rectangle "원본 설정에서 모듈 선언 추출" as Declaration
+  rectangle "고정 실행 참조와 읽기 전용 캐시" as Cache
+  rectangle "운영자: 이미지 내용과 실행 설정 승인" as Approval
+  Exact -down-> Declaration
+  Declaration -down-> Cache : 검증한 이미지에서 생성
+  Cache -down-> Approval : 검사 결과 제시
+}
+rectangle "실행 후 인증한 선언 대조" as Match
+Source -down-> Exact : 준비 시점에 내용 확정
+Approval -down-> Match : 고정 참조로 실행 후 대조
+@enduml

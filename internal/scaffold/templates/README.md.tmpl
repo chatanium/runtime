@@ -67,9 +67,9 @@ PY
 
 Use your approved registry publishing workflow, then obtain the real immutable
 registry `RepoDigest`. A local image ID or mutable tag is not an installation
-identity. Do not install by copying a binary into the host runtime; configure
-and approve the immutable image through Chatanium's sandbox supervisor. No
-live installer or hot reload is provided by `chatanium new`.
+identity. Prepare the exact image explicitly with `chatanium prepare-image`;
+configuration inspection uses only its committed immutable record and never
+executes the module. `chatanium new` does not install or run generated code.
 
 ## Operator configuration and approval
 
@@ -99,8 +99,9 @@ needs Discord guild-message/message-content intents and view/send permissions
 for that channel. This module does not need uploads, routes, files, network or
 voice authority. Choose the ordinary sandbox resource profile and no egress
 under the host operator configuration; derive that configuration with
-`chatanium generate-config` and follow the host README's supervisor/approval
-procedure rather than inventing an alternate config schema here.
+`chatanium generate-config` after explicit stopped `prepare-image --operator`.
+Bootstrap the host first with `chatanium init`, then review and commit the
+generated module configuration with `chatanium configure --config PATH`.
 
 ## Lifecycle
 
