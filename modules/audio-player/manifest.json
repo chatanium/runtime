@@ -3,8 +3,8 @@
   "name": "VoicePlayerModule",
   "version": "2.0.0",
   "description": "승인된 텍스트 채널의 오디오 첨부 파일을 설정된 Discord 음성 채널에서 재생합니다.",
-  "author": "Chatanium contributors",
-  "repository": "https://github.com/thirdscam/chatanium",
+  "author": "Chatanium",
+  "repository": "https://github.com/chatanium/runtime",
   "requiredCapabilities": [
     {"name": "core.config.read", "resourceScopes": [{"selector": {}}]},
     {"name": "core.network.public_egress", "resourceScopes": [{"selector": {}}]}

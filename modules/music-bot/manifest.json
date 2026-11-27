@@ -3,8 +3,8 @@
   "name": "MusicBot",
   "version": "2.0.0",
   "description": "YouTube 검색어와 URL로 음원을 찾아 다운로드하고 Opus로 준비해 호스트를 통해 Discord 음성 채널에서 재생합니다.",
-  "author": "ANTEGRAL",
-  "repository": "https://github.com/thirdscam/chatanium",
+  "author": "Chatanium",
+  "repository": "https://github.com/chatanium/runtime",
   "requiredCapabilities": [
     {"name": "core.config.read", "resourceScopes": [{"selector": {"resourceIds": {}}}]},
     {"name": "core.network.public_egress", "resourceScopes": [{"selector": {"resourceIds": {}}}]}

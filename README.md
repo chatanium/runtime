@@ -7,7 +7,7 @@ protocol keeps module lifecycle, capabilities and isolation backend-neutral.
 Ordinary management and message bots do not require music, voice or native DAVE.
 
 Chatanium v2 integrates the module system from
-[thirdscam/chatanium-flexmodule](https://github.com/thirdscam/chatanium-flexmodule).
+[Chatanium FlexModule](https://github.com/chatanium/flexmodule).
 Modules run as independent executables in immutable OCI images under the bundled
 original `rungv` (gVisor), with authenticated bidirectional gRPC, explicitly
 approved capabilities, resource scopes and finite limits. Docker is build-only.
@@ -1053,22 +1053,22 @@ receive observations with participants.
 
 ## Licensing, origin and redistribution
 
-Existing Chatanium files retain the [MIT license](LICENSE). The module-system
-transplant comes from
-[thirdscam/chatanium-flexmodule](https://github.com/thirdscam/chatanium-flexmodule),
-whose original root license is MPL-2.0, preserved verbatim in
-[`LICENSE.flexmodule`](LICENSE.flexmodule). The existing root `LICENSE` is not
-replaced. This is preservation of notices and existing terms, **not relicensing**.
+The [Chatanium organization](https://github.com/chatanium) maintains this
+repository. Source covered by the root [MIT license](LICENSE) stays MIT; its
+original ThirdScam copyright notice is retained. The module-system transplant
+comes from [Chatanium FlexModule](https://github.com/chatanium/flexmodule).
+Its MPL-2.0 license is preserved verbatim in
+[`LICENSE.flexmodule`](LICENSE.flexmodule).
 
 FlexModule-derived files in `proto/`, `shared/`,
 `internal/{runtime,host,backend,app}/`, `tools/`,
 `tests/integration/`, `examples/`, `modules/audio-player/`, and the copied
 `Makefile` and maintained patch work retain the original MPL terms unless more
-specific existing notices apply. In particular,
-[`modules/music-bot/LICENSE`](modules/music-bot/LICENSE) is independently MIT;
-it is not made MPL by residing beside those files. Preserve original copyright,
-source provenance and file/dependency notices when modifying or redistributing
-these components, including applicable MPL source-availability obligations.
+specific existing notices apply. The HashiCorp notices in
+[`proto/buf.yaml`](proto/buf.yaml) and [`proto/buf.gen.yaml`](proto/buf.gen.yaml)
+remain MPL-2.0. [`modules/music-bot/LICENSE`](modules/music-bot/LICENSE) is
+independently MIT. Preserve original copyright, source provenance and
+dependency notices, including applicable MPL source-availability obligations.
 
 Upstream dependencies retain their own licenses. The maintained
 [DiscordGo patch stack](third_party/discordgo/README.md#licensing-and-attribution)
