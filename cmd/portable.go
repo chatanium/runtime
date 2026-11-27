@@ -100,8 +100,15 @@ func approvalFlag(cmd *cobra.Command) {
 }
 
 func approval(cmd *cobra.Command) install.Confirm {
+	return digestApproval(cmd, approvalInput(cmd))
+}
+
+func approvalInput(cmd *cobra.Command) *bufio.Reader {
+	return bufio.NewReader(io.LimitReader(cmd.InOrStdin(), 128<<10))
+}
+
+func digestApproval(cmd *cobra.Command, stdin *bufio.Reader) install.Confirm {
 	approved, _ := cmd.Flags().GetStringArray("approve")
-	stdin := bufio.NewReader(io.LimitReader(cmd.InOrStdin(), 128<<10))
 	return func(description string, value any, digest string) error {
 		if err := json.NewEncoder(cmd.ErrOrStderr()).Encode(value); err != nil {
 			return err

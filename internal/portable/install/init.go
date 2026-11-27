@@ -167,38 +167,12 @@ func Init(ctx context.Context, budget int64, first *FirstModule, confirm Confirm
 	if err != nil {
 		return Manifest{}, err
 	}
-	owner, err := process.OwnerIdentity()
+	p, err := planInit(path, b, budget, first)
 	if err != nil {
 		return Manifest{}, err
-	}
-	fallback, err := ipcpath.FallbackBase()
-	if err != nil {
-		return Manifest{}, err
-	}
-	codeBytes, err := bundleBytes(b)
-	const metadataBase = 4 * (reservedUploadBytes + reservedDiscordBytes + 64<<20)
-	if err != nil || codeBytes > (math.MaxInt64-metadataBase-runtimeDiskBytes)/8 {
-		return Manifest{}, errors.New("bundle cannot fit in the portable metadata bound")
-	}
-	// The store reserves at least one quarter for non-SQLite files. Budget
-	// two code generations at peak, bounded manifests and the upload spool.
-	metadata := 8*codeBytes + metadataBase
-	if budget <= metadata+runtimeDiskBytes {
-		return Manifest{}, fmt.Errorf("%w: budget must exceed %d bytes for this bundle, metadata and one runtime reservation", store.ErrBudgetExceeded, metadata+runtimeDiskBytes)
 	}
 	if confirm == nil {
 		return Manifest{}, errors.New("initialization requires exact PlanDigest approval")
-	}
-	p := initPlan{Format: Format, Owner: owner, Path: path, Staging: initStaging(path), SharedParent: filepath.Dir(path), IPCFallback: fallback, BudgetBytes: budget, MetadataBytes: metadata, LogBytes: runtimeDiskBytes, UploadBytes: reservedUploadBytes, DiscordBytes: reservedDiscordBytes, Bundle: b}
-	if first != nil {
-		p.FirstModule, err = planFirstModule(p, *first)
-		if err != nil {
-			return Manifest{}, err
-		}
-	}
-	p.PlanDigest, err = planDigest(p)
-	if err != nil {
-		return Manifest{}, err
 	}
 	if err := confirm("Approve the exact portable installation paths, bundle and byte budget (PlanDigest)", p, p.PlanDigest); err != nil {
 		return Manifest{}, err
@@ -207,30 +181,52 @@ func Init(ctx context.Context, budget int64, first *FirstModule, confirm Confirm
 		return Manifest{}, err
 	}
 	m, err := initialize(ctx, p)
-	if err != nil || first == nil || m.State == store.Ready {
+	if err != nil {
 		return m, err
 	}
-	generation, err := prepareImage(ctx, p.Path, first.Image, nil, p.PlanDigest, p.FirstModule.Image.PlanDigest)
-	if err != nil {
-		return Manifest{}, err
-	}
-	options := first.Module
-	options.ImageID = generation.ID
-	candidate, err := GenerateConfig(p.Path, options)
-	if err != nil {
-		return Manifest{}, err
-	}
-	return Configure(ctx, p.Path, candidate, confirm)
+	return completeInit(ctx, p, m, first, confirm)
 }
 
-func initialize(ctx context.Context, p initPlan) (_ Manifest, resultErr error) {
-	path := p.Path
-	if p.Staging != initStaging(path) {
-		return Manifest{}, store.ErrApprovalMismatch
+func planInit(path string, b bundle.PortableManifest, budget int64, first *FirstModule) (initPlan, error) {
+	owner, err := process.OwnerIdentity()
+	if err != nil {
+		return initPlan{}, err
 	}
-	runtimeName := filepath.Base(path)
-	stageName := filepath.Base(p.Staging)
-	parent, err := anchor(path, true)
+	fallback, err := ipcpath.FallbackBase()
+	if err != nil {
+		return initPlan{}, err
+	}
+	codeBytes, err := bundleBytes(b)
+	const metadataBase = 4 * (reservedUploadBytes + reservedDiscordBytes + 64<<20)
+	if err != nil || codeBytes > (math.MaxInt64-metadataBase-runtimeDiskBytes)/8 {
+		return initPlan{}, errors.New("bundle cannot fit in the portable metadata bound")
+	}
+	// The store reserves at least one quarter for non-SQLite files. Budget
+	// two code generations at peak, bounded manifests and the upload spool.
+	metadata := 8*codeBytes + metadataBase
+	if budget <= metadata+runtimeDiskBytes {
+		return initPlan{}, fmt.Errorf("%w: budget must exceed %d bytes for this bundle, metadata and one runtime reservation", store.ErrBudgetExceeded, metadata+runtimeDiskBytes)
+	}
+	p := initPlan{Format: Format, Owner: owner, Path: path, Staging: initStaging(path), SharedParent: filepath.Dir(path), IPCFallback: fallback, BudgetBytes: budget, MetadataBytes: metadata, LogBytes: runtimeDiskBytes, UploadBytes: reservedUploadBytes, DiscordBytes: reservedDiscordBytes, Bundle: b}
+	if first != nil {
+		p.FirstModule, err = planFirstModule(p, *first)
+		if err != nil {
+			return initPlan{}, err
+		}
+	}
+	p.PlanDigest, err = planDigest(p)
+	return p, err
+}
+
+func completeInit(ctx context.Context, p initPlan, m Manifest, first *FirstModule, confirm Confirm) (Manifest, error) {
+	if first == nil || m.State == store.Ready {
+		return m, nil
+	}
+	return activateInitial(ctx, p.Path, m, first, p.FirstModule.Image.PlanDigest, confirm)
+}
+
+func initialize(ctx context.Context, p initPlan) (Manifest, error) {
+	parent, err := anchor(p.Path, true)
 	if err != nil {
 		return Manifest{}, err
 	}
@@ -240,14 +236,21 @@ func initialize(ctx context.Context, p initPlan) (_ Manifest, resultErr error) {
 		return Manifest{}, err
 	}
 	defer gate.Close()
-	purgeName := purgeTerminalName(path)
-	for _, name := range []string{purgeName, ".writing-" + purgeName} {
-		if _, err := parent.Lstat(name); err == nil {
-			return Manifest{}, errors.New("installation has a pending terminal purge; finish purge before initializing")
-		} else if !errors.Is(err, fs.ErrNotExist) {
-			return Manifest{}, err
-		}
+	return initializeLocked(ctx, parent, p)
+}
+
+// initializeLocked publishes a stopped installation with the management lock
+// already held. Reset keeps this lock from approving deletion to publication.
+func initializeLocked(ctx context.Context, parent *os.Root, p initPlan) (_ Manifest, resultErr error) {
+	path := p.Path
+	if p.Staging != initStaging(path) {
+		return Manifest{}, store.ErrApprovalMismatch
 	}
+	if err := requireNoPurgeReceipt(parent, path); err != nil {
+		return Manifest{}, err
+	}
+	runtimeName := filepath.Base(path)
+	stageName := filepath.Base(p.Staging)
 	if _, err := parent.Lstat(runtimeName); err == nil {
 		i, err := lockInstallation(parent, path)
 		if err != nil {

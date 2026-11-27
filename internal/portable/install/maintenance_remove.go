@@ -146,19 +146,46 @@ func Purge(ctx context.Context, path string, confirm Confirm) (resultErr error) 
 	if resumed, err := checkPurgeReceipt(ctx, parent, path, confirm); err != nil || resumed {
 		return err
 	}
+	return purgeLocked(ctx, parent, path, "", func(scope purgeScope) error {
+		return approvePurge(ctx, scope, confirm)
+	})
+}
+
+// purgeLocked uses the singleton's held management lock. A reset is a fresh
+// purge of an exact, already stopped installation, not a recovery request.
+func purgeLocked(ctx context.Context, parent *os.Root, path, expectedID string, approve func(purgeScope) error) (resultErr error) {
+	replacing := expectedID != ""
 	root, err := maintenanceDir(parent, filepath.Base(path))
 	if errors.Is(err, fs.ErrNotExist) {
+		if replacing {
+			return fmt.Errorf("%w: installation to replace is missing", store.ErrApprovalMismatch)
+		}
 		return nil
 	}
 	if err != nil {
 		return err
 	}
 	defer root.Close()
-	i, err := lockInstallation(parent, path)
+	var i *Installation
+	if replacing {
+		i, err = lockResetInstallation(parent, path, expectedID)
+	} else {
+		i, err = lockInstallation(parent, path)
+	}
 	if err != nil {
 		return err
 	}
 	defer func() { resultErr = errors.Join(resultErr, i.Close()) }()
+	var resetFiles [3]fs.FileInfo
+	if replacing {
+		resetFiles, err = resetFinalizeFiles(i.Root)
+		if err != nil {
+			return err
+		}
+		if err := checkMaintenanceFile(i.Root, store.DatabaseName); err != nil {
+			return err
+		}
+	}
 	db, err := i.Store(ctx)
 	if err != nil {
 		return err
@@ -172,22 +199,39 @@ func Purge(ctx context.Context, path string, confirm Confirm) (resultErr error) 
 	if err != nil {
 		return err
 	}
+	if replacing {
+		switch record.State {
+		case store.Initializing, store.Ready, store.Uninstalled:
+			if record.State != i.Manifest.State {
+				return store.ErrApprovalMismatch
+			}
+			if record.State != store.Uninstalled {
+				if err := i.verifyInstalledCode(ctx, i.Manifest); err != nil {
+					return err
+				}
+			}
+		case store.Purging, store.Purged:
+			return pendingResetPurge()
+		default:
+			return store.ErrState
+		}
+	}
 	if record.State != store.Purged {
 		if err := matchMaintenanceManifest(record, i.Manifest); err != nil {
 			return err
 		}
 	}
 	var epoch string
-	if record.State != store.Purged {
+	defer func() {
+		if db != nil && epoch != "" {
+			finishEpoch(ctx, db, epoch, &resultErr)
+		}
+	}()
+	if !replacing && record.State != store.Purged {
 		epoch, err = i.beginEpoch(ctx, db)
 		if err != nil {
 			return err
 		}
-		defer func() {
-			if db != nil {
-				finishEpoch(ctx, db, epoch, &resultErr)
-			}
-		}()
 		if record.State != store.Purging {
 			if err := i.recoverAbandoned(ctx, db, epoch); err != nil {
 				return err
@@ -206,14 +250,51 @@ func Purge(ctx context.Context, path string, confirm Confirm) (resultErr error) 
 	if err != nil {
 		return err
 	}
+	if err := scope.checkRoot(parent, root, path); err != nil {
+		return err
+	}
 	if err := scope.checkManifest(i.Root, i.Manifest); err != nil {
 		return err
 	}
 	if err := i.validatePurge(ctx, scope, record.State == store.Purging || record.State == store.Purged); err != nil {
 		return err
 	}
-	if err := approvePurge(ctx, scope, confirm); err != nil {
+	if err := approve(scope); err != nil {
 		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := scope.checkRoot(parent, root, path); err != nil {
+		return err
+	}
+	if replacing {
+		if err := checkResetContents(i.Root); err != nil {
+			return err
+		}
+		currentFiles, err := resetFinalizeFiles(i.Root)
+		if err != nil {
+			return err
+		}
+		for n, file := range currentFiles {
+			if !os.SameFile(resetFiles[n], file) {
+				return store.ErrApprovalMismatch
+			}
+		}
+		currentRecord, err := db.Installation(ctx)
+		if err != nil {
+			return err
+		}
+		if currentRecord != record {
+			return store.ErrApprovalMismatch
+		}
+		current, err := i.collectPurge(ctx, db)
+		if err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(scope, current) {
+			return store.ErrApprovalMismatch
+		}
 	}
 	if err := scope.checkManifest(i.Root, i.Manifest); err != nil {
 		return err
@@ -228,6 +309,12 @@ func Purge(ctx context.Context, path string, confirm Confirm) (resultErr error) 
 		}
 		if err := checkMetadataBudget(i, 2*int64(len(raw))); err != nil {
 			return err
+		}
+		if replacing {
+			epoch, err = i.beginEpoch(ctx, db)
+			if err != nil {
+				return err
+			}
 		}
 		if err := removeMaintenanceFile(i.Root, purgeIntent); err != nil {
 			return err
@@ -256,6 +343,7 @@ func Purge(ctx context.Context, path string, confirm Confirm) (resultErr error) 
 			return err
 		}
 		finishEpoch(ctx, db, epoch, &resultErr)
+		epoch = ""
 		if resultErr != nil {
 			return resultErr
 		}
@@ -633,10 +721,21 @@ func checkPurgeReceipt(ctx context.Context, parent *os.Root, path string, confir
 	return true, finishNativePurge(parent, root, path, p)
 }
 
-func finishNativePurge(parent, root *os.Root, path string, p purgeScope) error {
-	id, err := maintenanceDirectoryIdentity(root, ".")
-	if err != nil || id != p.RootNativeID {
+func (p purgeScope) checkRoot(parent, root *os.Root, path string) error {
+	rootID, err := maintenanceDirectoryIdentity(root, ".")
+	if err != nil || rootID != p.RootNativeID {
 		return errors.Join(store.ErrApprovalMismatch, err)
+	}
+	currentID, err := maintenanceDirectoryIdentity(parent, filepath.Base(path))
+	if err != nil || currentID != rootID {
+		return errors.Join(store.ErrApprovalMismatch, err)
+	}
+	return nil
+}
+
+func finishNativePurge(parent, root *os.Root, path string, p purgeScope) error {
+	if err := p.checkRoot(parent, root, path); err != nil {
+		return err
 	}
 	names, err := maintenanceNames(root)
 	if err != nil {

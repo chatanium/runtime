@@ -486,6 +486,13 @@ To stage an installation or add another module separately:
    module data. `purge` lists what it will delete and needs a fresh approval.
    The downloaded executable and shared parent directory are not purge targets.
 
+Running `init` again on a stopped installation shows the deletion inventory and
+replacement plan. Answer `y` to erase its configuration, cached images, persistent
+module data and backups, then create a fresh installation. The default is **no**:
+an empty answer, `n` or closed stdin keeps the existing installation. `serve`
+never performs a reset. The downloaded launcher and older named installations
+are outside the deletion scope.
+
 **Restoring a stopped update backup after copying it to another filesystem:**
 restore only the listed members (including `config.json`) to a fresh private
 installation at the original approved path, using the matching verified code.

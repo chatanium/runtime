@@ -9,9 +9,14 @@ import (
 
 // SetupForServe activates the observed INITIALIZING installation. It holds the
 // owner lock across acquisition, candidate generation, and configuration review.
-func SetupForServe(ctx context.Context, path string, m Manifest, first *FirstModule, confirm Confirm) (resultErr error) {
+func SetupForServe(ctx context.Context, path string, m Manifest, first *FirstModule, confirm Confirm) error {
+	_, err := activateInitial(ctx, path, m, first, "", confirm)
+	return err
+}
+
+func activateInitial(ctx context.Context, path string, m Manifest, first *FirstModule, approvedImagePlan string, confirm Confirm) (_ Manifest, resultErr error) {
 	if m.State != store.Initializing {
-		return store.ErrState
+		return Manifest{}, store.ErrState
 	}
 	check := func(current *Manifest) error {
 		if current.ID != m.ID {
@@ -27,33 +32,31 @@ func SetupForServe(ctx context.Context, path string, m Manifest, first *FirstMod
 	}
 	i, err := lockPath(path, check)
 	if err != nil {
-		return err
+		return Manifest{}, err
 	}
 	defer func() { resultErr = errors.Join(resultErr, i.Close()) }()
 	// The ordinary recovery pass can complete an earlier approved activation.
 	if err := check(&i.Manifest); err != nil {
-		return err
+		return Manifest{}, err
 	}
 	if first == nil {
-		_, err := i.configure(ctx, Candidate{Format: Format, Config: i.Manifest.Config}, confirm)
-		return err
+		return i.configure(ctx, Candidate{Format: Format, Config: i.Manifest.Config}, confirm)
 	}
 	options := first.Module
 	if options.ImageID != "" || !modulePattern.MatchString(options.ModuleID) || options.UID == 0 || options.GID == 0 {
-		return errors.New("initial module requires its stable ID and nonroot guest UID/GID")
+		return Manifest{}, errors.New("initial module requires its stable ID and nonroot guest UID/GID")
 	}
 	if err := i.verifyInitializationLedger(ctx); err != nil {
-		return err
+		return Manifest{}, err
 	}
-	generation, err := i.prepareImage(ctx, first.Image, confirm, "", "")
+	generation, err := i.prepareImage(ctx, first.Image, confirm, m.PlanDigest, approvedImagePlan)
 	if err != nil {
-		return err
+		return Manifest{}, err
 	}
 	options.ImageID = generation.ID
 	candidate, err := i.generateConfig(options)
 	if err != nil {
-		return err
+		return Manifest{}, err
 	}
-	_, err = i.configure(ctx, candidate, confirm)
-	return err
+	return i.configure(ctx, candidate, confirm)
 }

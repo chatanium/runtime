@@ -92,17 +92,13 @@ func finishEpoch(ctx context.Context, db *store.Store, epoch string, result *err
 
 // PrepareImage completes a read-only generation but keeps it staged: it is not
 // publishable to the runtime until Configure reviews a specific module/grant.
-func PrepareImage(ctx context.Context, path string, request ImageInput, confirm Confirm) (images.Generation, error) {
-	return prepareImage(ctx, path, request, confirm, "", "")
-}
-
-func prepareImage(ctx context.Context, path string, request ImageInput, confirm Confirm, initDigest, approvedImagePlan string) (_ images.Generation, resultErr error) {
+func PrepareImage(ctx context.Context, path string, request ImageInput, confirm Confirm) (_ images.Generation, resultErr error) {
 	i, err := Lock(path)
 	if err != nil {
 		return images.Generation{}, err
 	}
 	defer func() { resultErr = errors.Join(resultErr, i.Close()) }()
-	return i.prepareImage(ctx, request, confirm, initDigest, approvedImagePlan)
+	return i.prepareImage(ctx, request, confirm, "", "")
 }
 
 func (i *Installation) prepareImage(ctx context.Context, request ImageInput, confirm Confirm, initDigest, approvedImagePlan string) (_ images.Generation, resultErr error) {

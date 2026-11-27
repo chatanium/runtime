@@ -11,7 +11,7 @@ import (
 )
 
 func initCommand() *cobra.Command {
-	cmd := &cobra.Command{Use: "init", Short: "Review and create a private, stopped portable installation", Args: cobra.NoArgs}
+	cmd := &cobra.Command{Use: "init", Short: "Set up a stopped runtime or confirm resetting an existing installation", Args: cobra.NoArgs}
 	cmd.SetFlagErrorFunc(legacyFlagError)
 	budget, firstModule := setupFlags(cmd)
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
@@ -19,7 +19,7 @@ func initCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		m, err := install.Init(cmd.Context(), *budget, first, approval(cmd))
+		m, err := initializeOrReset(cmd, *budget, first)
 		return manifestResult(cmd, m, err)
 	}
 	return cmd
