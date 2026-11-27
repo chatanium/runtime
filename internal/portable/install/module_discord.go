@@ -36,7 +36,7 @@ type DiscordSetup struct {
 }
 
 func isDiscordStarter(m *wire.ModuleManifest) bool {
-	if len(m.RequiredCapabilities) != 1 || !configReadRequest(m.RequiredCapabilities[0]) || len(m.OptionalCapabilities) != 0 || len(m.BackendRequirements) != 1 {
+	if len(m.RequiredCapabilities)+len(m.OptionalCapabilities) != 0 || len(m.BackendRequirements) != 1 {
 		return false
 	}
 	b := m.BackendRequirements[0]
@@ -67,19 +67,11 @@ func discordSnowflake(s string) bool {
 	return err == nil
 }
 
-func discordStarterSettings(s ModuleInstallSettings) ([]byte, []*wire.BackendGrant, error) {
-	if !discordSnowflake(s.GuildID) || !discordSnowflake(s.ChannelID) {
-		return nil, nil, errors.New("Discord guild and channel IDs must be positive decimal snowflakes")
-	}
-	config, err := json.Marshal(map[string]string{"guild_id": s.GuildID, "channel_id": s.ChannelID})
-	if err != nil {
-		return nil, nil, err
-	}
-	selector := &wire.ResourceScope{SelectorKind: &wire.ResourceScope_Selector{Selector: &wire.ResourceSelector{ResourceIds: map[string]string{"guild_id": s.GuildID, "channel_id": s.ChannelID}}}}
-	return config, []*wire.BackendGrant{{BackendId: "discord", ProtocolMajor: 2, Capabilities: []*wire.CapabilityGrant{
-		{Name: discordEvent, ResourceScopes: []*wire.ResourceScope{selector}},
-		{Name: discordREST, ResourceScopes: []*wire.ResourceScope{selector}},
-	}}}, nil
+func discordStarterGrants() []*wire.BackendGrant {
+	return []*wire.BackendGrant{{BackendId: "discord", ProtocolMajor: 2, Capabilities: []*wire.CapabilityGrant{
+		{Name: discordEvent, ResourceScopes: []*wire.ResourceScope{{SelectorKind: &wire.ResourceScope_AllResources{AllResources: true}}}},
+		{Name: discordREST, ResourceScopes: []*wire.ResourceScope{{SelectorKind: &wire.ResourceScope_AllResources{AllResources: true}}}},
+	}}}
 }
 
 func compatibleDiscordProfile(b runtime.BackendConfig) (DiscordProfile, error) {

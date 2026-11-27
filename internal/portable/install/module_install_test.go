@@ -40,10 +40,9 @@ func TestModuleInstallArchiveDigest(t *testing.T) {
 	}
 }
 
-func TestModuleInstallDiscordScope(t *testing.T) {
+func TestModuleInstallDiscordStartsWithoutAccess(t *testing.T) {
 	m, err := decodeInstallDeclaration([]byte(`{
 		"protocolMajor":2,"name":"ping-bot","version":"0.1.0",
-		"requiredCapabilities":[{"name":"core.config.read","resourceScopes":[{"selector":{"resourceIds":{}}}]}],
 		"backendRequirements":[{"backendId":"discord","protocolMajor":2,"required":true,"optionalCapabilities":[
 			{"name":"discord.event.MESSAGE_CREATE","resourceScopes":[{"allResources":true}]},
 			{"name":"discord.rest.ChannelMessageSendComplex","resourceScopes":[{"allResources":true}]}
@@ -54,7 +53,7 @@ func TestModuleInstallDiscordScope(t *testing.T) {
 	}
 	profile := runtime.ResourceProfile{CPUMillicores: 321, MemoryBytes: 128 << 20, MaxPids: 32, PersistentBytes: 128 << 20, ScratchBytes: 64 << 20}
 	cfg := runtime.Config{ResourceProfiles: map[string]runtime.ResourceProfile{"general": profile}}
-	options, err := installModuleOptions(cfg, true, m, GenerateOptions{}, ModuleInstallSettings{GuildID: "123", ChannelID: "456"})
+	options, err := installModuleOptions(cfg, true, m, GenerateOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,19 +61,15 @@ func TestModuleInstallDiscordScope(t *testing.T) {
 	if err := protojson.Unmarshal(options.Grant, &grant); err != nil {
 		t.Fatal(err)
 	}
-	if grant.EgressPolicy != wire.EgressPolicy_EGRESS_POLICY_NONE || grant.ResourceLimits.CpuMillicores != profile.CPUMillicores || len(grant.Backends) != 1 || len(grant.Backends[0].Capabilities) != 2 || len(grant.CoreCapabilities) != 1 {
+	if !options.discordACLRequired || grant.EgressPolicy != wire.EgressPolicy_EGRESS_POLICY_NONE || grant.ResourceLimits.CpuMillicores != profile.CPUMillicores || len(grant.Backends) != 1 || len(grant.Backends[0].Capabilities) != 2 || len(grant.CoreCapabilities) != 0 {
 		t.Fatalf("unexpected grants: %v", &grant)
 	}
 	for _, cap := range grant.Backends[0].Capabilities {
-		if len(cap.ResourceScopes) != 1 {
-			t.Fatalf("unexpected scopes for %s: %v", cap.Name, cap.ResourceScopes)
-		}
-		selector := cap.ResourceScopes[0].GetSelector().GetResourceIds()
-		if len(selector) != 2 || selector["guild_id"] != "123" || selector["channel_id"] != "456" {
-			t.Fatalf("unexpected selector for %s: %v", cap.Name, selector)
+		if len(cap.ResourceScopes) != 1 || !cap.ResourceScopes[0].GetAllResources() {
+			t.Fatalf("expected capability ceiling for %s, got %v", cap.Name, cap.ResourceScopes)
 		}
 	}
-	if string(options.ModuleConfig) != `{"channel_id":"456","guild_id":"123"}` {
+	if string(options.ModuleConfig) != `{}` {
 		t.Fatalf("unexpected module settings: %s", options.ModuleConfig)
 	}
 }
@@ -83,7 +78,7 @@ func TestModuleInstallOfflineDefaults(t *testing.T) {
 	profile := runtime.ResourceProfile{CPUMillicores: 123, MemoryBytes: 128 << 20, MaxPids: 32, PersistentBytes: 128 << 20, ScratchBytes: 64 << 20}
 	cfg := runtime.Config{ResourceProfiles: map[string]runtime.ResourceProfile{"general": profile}}
 	m := &wire.ModuleManifest{ProtocolMajor: 2, Name: "offline", Version: "0.1.0"}
-	o, err := installModuleOptions(cfg, false, m, GenerateOptions{}, ModuleInstallSettings{})
+	o, err := installModuleOptions(cfg, false, m, GenerateOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +90,7 @@ func TestModuleInstallOfflineDefaults(t *testing.T) {
 		t.Fatalf("unexpected offline defaults: config=%s grant=%v", o.ModuleConfig, &grant)
 	}
 	m.BackendRequirements = []*wire.BackendRequirement{{BackendId: "other", ProtocolMajor: 2, Required: true}}
-	if _, err := installModuleOptions(cfg, false, m, GenerateOptions{}, ModuleInstallSettings{}); err == nil {
+	if _, err := installModuleOptions(cfg, false, m, GenerateOptions{}); err == nil {
 		t.Fatal("module with other backend requirements silently received offline defaults")
 	}
 }

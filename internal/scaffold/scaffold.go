@@ -137,9 +137,6 @@ func Create(opts Options) (string, error) {
 		"README.md":     "README.md.tmpl",
 		".gitignore":    ".gitignore.tmpl",
 	}
-	if data.Discord {
-		sources["config.example.json"] = "config.example.json.tmpl"
-	}
 	// Render everything before creating the output directory.
 	files := make(map[string][]byte, len(sources))
 	for name, sourceName := range sources {

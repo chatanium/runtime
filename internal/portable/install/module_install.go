@@ -11,7 +11,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/thirdscam/chatanium/internal/discordsetup"
 	"github.com/thirdscam/chatanium/internal/portable/images"
 	"github.com/thirdscam/chatanium/internal/portable/process"
 	"github.com/thirdscam/chatanium/internal/portable/store"
@@ -29,8 +31,7 @@ type ModuleInstallInfo struct {
 }
 
 type ModuleInstallSettings struct {
-	GuildID, ChannelID string
-	Discord            *DiscordSetup
+	DiscordToken []byte
 }
 
 type ModuleInstallOptions struct {
@@ -45,6 +46,7 @@ type moduleInstallApproval struct {
 	Configuration configurationApproval `json:"configuration"`
 	Module        moduleApproval        `json:"module"`
 	AddedDiscord  bool                  `json:"added_discord_backend"`
+	DiscordName   string                `json:"discord_name,omitempty"`
 }
 
 // InstallModule reviews and adds exactly one module without starting the runtime.
@@ -176,31 +178,37 @@ func InstallModule(ctx context.Context, o ModuleInstallOptions, confirm Confirm)
 	if err != nil {
 		return Manifest{}, err
 	}
-	if settings.Discord != nil {
-		defer clear(settings.Discord.Token)
-	}
-	options, err := installModuleOptions(cfg, info.DiscordStarter, declaration, o.Module, settings)
+	defer clear(settings.DiscordToken)
+	options, err := installModuleOptions(cfg, info.DiscordStarter, declaration, o.Module)
 	if err != nil {
 		return Manifest{}, err
 	}
 	var publishCredential func() error
-	if settings.Discord != nil {
-		if !info.DiscordStarter || info.Discord != nil {
-			return Manifest{}, errors.New("install cannot replace or configure an unrelated Discord backend")
+	var discordName string
+	if info.DiscordStarter && info.Discord == nil {
+		if !validDiscordToken(settings.DiscordToken) {
+			return Manifest{}, errors.New("Discord setup requires a valid bot token")
 		}
-		backend, publish, err := i.proposeDiscordBackend(*settings.Discord, cfg.Backends)
+		identity, err := discordsetup.LookupIdentity(ctx, strings.TrimPrefix(string(settings.DiscordToken), "Bot "))
+		if err != nil {
+			return Manifest{}, err
+		}
+		discordName = identity.Name
+		backend, publish, err := i.proposeDiscordBackend(DiscordSetup{ApplicationID: identity.ApplicationID, BotUserID: identity.BotUserID, Token: settings.DiscordToken}, cfg.Backends)
 		if err != nil {
 			return Manifest{}, err
 		}
 		cfg.Backends["discord"] = backend
 		publishCredential = publish
+	} else if len(settings.DiscordToken) != 0 {
+		return Manifest{}, errors.New("install cannot replace or configure an unrelated Discord backend")
 	}
 	candidate, err := i.candidateForModule(cfg, g, options, true)
 	if err != nil {
 		return Manifest{}, err
 	}
 	return i.configureCandidate(ctx, candidate, func(config configurationApproval, modules []Module) error {
-		value := moduleInstallApproval{Configuration: config, Module: approvalForModule(modules[len(modules)-1]), AddedDiscord: publishCredential != nil}
+		value := moduleInstallApproval{Configuration: config, Module: approvalForModule(modules[len(modules)-1]), AddedDiscord: publishCredential != nil, DiscordName: discordName}
 		return confirm("Approve installing this module and publishing the stopped configuration (PlanDigest)", value, config.Plan.PlanDigest)
 	}, publishCredential)
 }
@@ -282,11 +290,11 @@ func decodeInstallDeclaration(raw []byte, maximum int) (*wire.ModuleManifest, er
 	return m, nil
 }
 
-func installModuleOptions(cfg runtime.Config, starter bool, m *wire.ModuleManifest, options GenerateOptions, s ModuleInstallSettings) (GenerateOptions, error) {
+func installModuleOptions(cfg runtime.Config, starter bool, m *wire.ModuleManifest, options GenerateOptions) (GenerateOptions, error) {
 	grant := new(wire.Grants)
 	if len(options.Grant) != 0 {
 		if starter {
-			return GenerateOptions{}, errors.New("use --discord-guild-id and --discord-channel-id to grant the Discord starter one channel")
+			return GenerateOptions{}, errors.New("the Discord starter has built-in permissions; use chatanium acl after installation to select its scope")
 		}
 		if err := protojson.Unmarshal(options.Grant, grant); err != nil {
 			return GenerateOptions{}, errors.New("invalid grants JSON")
@@ -311,13 +319,11 @@ func installModuleOptions(cfg runtime.Config, starter bool, m *wire.ModuleManife
 	}
 	if starter {
 		if len(options.ModuleConfig) != 0 {
-			return GenerateOptions{}, errors.New("use --discord-guild-id and --discord-channel-id to set the Discord starter configuration")
+			return GenerateOptions{}, errors.New("the Discord starter takes no module settings; use chatanium acl after installation to select its scope")
 		}
-		var err error
-		options.ModuleConfig, grant.Backends, err = discordStarterSettings(s)
-		if err != nil {
-			return GenerateOptions{}, err
-		}
+		options.ModuleConfig = json.RawMessage(`{}`)
+		options.discordACLRequired = true
+		grant.Backends = discordStarterGrants()
 	} else if len(options.ModuleConfig) == 0 {
 		if len(m.RequiredCapabilities)+len(m.OptionalCapabilities)+len(m.BackendRequirements) != 0 || len(options.Grant) != 0 {
 			return GenerateOptions{}, errors.New("module settings are not declared by the image; provide --module-config (use {} if no settings are needed)")

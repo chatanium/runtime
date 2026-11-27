@@ -339,11 +339,18 @@ The archive digest identifies the bytes you selected. It does not authenticate
 the publisher. For other modules with deployment-specific settings, pass a
 settings file with `--module-config` and proposed grants with `--approval`.
 
-For the Discord starter, supply a real guild and text channel. Configure the
-host bot if it is not already set up. The bot needs the Message Content
-privileged intent enabled in Discord and **View Channel** and **Send Messages**
-in the chosen channel. Chatanium grants the module access to that guild and
-channel, not the host bot token or general network access.
+For the Discord starter, provide the host bot's token on first use. Chatanium
+looks up the app and bot IDs. The bot needs Message Content Intent enabled in
+Discord and **View Channel** and **Send Messages** in the channels you allow.
+
+The module starts with no Discord access. While `serve` runs, open a second
+terminal and run `chatanium acl set hello` to select servers or channels by
+name. Run `chatanium acl show hello` to see its scope. Changes survive a
+restart and do not restart the module. The host never shares the token with
+the module. The ACL can narrow access, not add capabilities to the
+installation approval. A Discord starter built before this flow still
+filters events using its old module settings; rebuild it to use the new
+template.
 
 For scripts, use `new --name hello` with `--template local` or `--template discord`.
 `--output` defaults to `modules/<name>`. `--module-path` defaults to

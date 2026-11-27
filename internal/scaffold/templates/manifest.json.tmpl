@@ -3,15 +3,12 @@
   "name": "{{.Name}}",
   "version": "0.1.0",
 {{- if .Discord}}
-  "description": "Replies with pong to a non-bot user's !ping in the configured guild text channel.",
+  "description": "Replies with pong to a non-bot user's !ping in Discord channels allowed by the runtime.",
 {{- else}}
   "description": "Verifies that a core-v2 module can start and stop without a backend.",
 {{- end}}
   "author": "Module contributors",
   "repository": "https://{{.ModulePath}}"{{if .Discord}},
-  "requiredCapabilities": [
-    {"name": "core.config.read", "resourceScopes": [{"selector": {"resourceIds": {}}}]}
-  ],
   "backendRequirements": [
     {
       "backendId": "discord",

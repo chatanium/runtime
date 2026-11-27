@@ -49,7 +49,7 @@ func DescribeSetupApproval(value any) (SetupApprovalSummary, error) {
 	case configurationApproval:
 		return describeSetupConfiguration(plan)
 	case moduleApproval:
-		return describeSetupModule(plan)
+		return describeSetupModule(plan, false)
 	case moduleInstallApproval:
 		return describeModuleInstall(plan)
 	case updatePlan:
@@ -265,7 +265,7 @@ func describeSetupConfiguration(approval configurationApproval) (SetupApprovalSu
 	return summary, nil
 }
 
-func describeSetupModule(approval moduleApproval) (SetupApprovalSummary, error) {
+func describeSetupModule(approval moduleApproval, starter bool) (SetupApprovalSummary, error) {
 	var image imagePlan
 	var review struct {
 		Launch struct {
@@ -300,7 +300,11 @@ func describeSetupModule(approval moduleApproval) (SetupApprovalSummary, error) 
 		fmt.Sprintf("Resource maxima: %d millicores, %s memory, %d tasks; %s persistent, %s scratch.", limits.NanoCPUs/1_000_000, setupBytes(limits.MemoryBytes), limits.Pids, setupBytes(limits.PersistentBytes), setupBytes(limits.ScratchBytes)),
 		network,
 	)
-	lines = append(lines, setupGrantLines(&grant)...)
+	if starter {
+		lines = append(lines, "Requested Discord capabilities: read messages and send replies.")
+	} else {
+		lines = append(lines, setupGrantLines(&grant)...)
+	}
 	return SetupApprovalSummary{Heading: "Review module " + strconv.QuoteToASCII(approval.Module), Lines: lines}, nil
 }
 
@@ -309,7 +313,8 @@ func describeModuleInstall(approval moduleInstallApproval) (SetupApprovalSummary
 	if err != nil {
 		return SetupApprovalSummary{}, err
 	}
-	summary, err := describeSetupModule(approval.Module)
+	starter := isDiscordStarter(m)
+	summary, err := describeSetupModule(approval.Module, starter)
 	if err != nil {
 		return SetupApprovalSummary{}, err
 	}
@@ -317,26 +322,26 @@ func describeModuleInstall(approval moduleInstallApproval) (SetupApprovalSummary
 	if json.Unmarshal(approval.Module.Review, &review) != nil {
 		return SetupApprovalSummary{}, errors.New("cannot describe exact module install settings and grants")
 	}
+	var grant wire.Grants
+	if err := protojson.Unmarshal(review.Grant, &grant); err != nil {
+		return SetupApprovalSummary{}, err
+	}
 	summary.Heading = "Install " + strconv.QuoteToASCII(m.Name) + " version " + strconv.QuoteToASCII(m.Version)
 	summary.Lines = append(summary.Lines,
 		"Module ID: "+strconv.QuoteToASCII(approval.Module.Module),
 		"Archive SHA-256: "+approval.Module.Source,
 		fmt.Sprintf("Installation disk maximum: %s. Existing modules kept: %d.", setupBytes(approval.Configuration.Plan.BudgetBytes), len(approval.Configuration.Plan.Reviews)-1),
 	)
-	if isDiscordStarter(m) {
+	if starter {
 		config := approval.Configuration.display.Backends["discord"].Config
 		var p DiscordProfile
 		if err := json.Unmarshal(config, &p); err != nil {
 			return SetupApprovalSummary{}, err
 		}
-		var settings struct {
-			GuildID   string `json:"guild_id"`
-			ChannelID string `json:"channel_id"`
+		if approval.DiscordName != "" {
+			summary.Lines = append(summary.Lines, "Discord bot: "+strconv.QuoteToASCII(approval.DiscordName))
 		}
-		if err := json.Unmarshal(review.ModuleConfig, &settings); err != nil {
-			return SetupApprovalSummary{}, err
-		}
-		summary.Lines = append(summary.Lines, fmt.Sprintf("Discord scope: guild %s, channel %s.", settings.GuildID, settings.ChannelID))
+		summary.Lines = append(summary.Lines, "Initial Discord access: none. Use chatanium acl after starting the runtime.")
 		action := "Reuse existing host Discord backend"
 		if approval.AddedDiscord {
 			action = "Configure host Discord backend (bot token kept in a private host file)"
@@ -346,10 +351,6 @@ func describeModuleInstall(approval moduleInstallApproval) (SetupApprovalSummary
 	} else {
 		if string(review.ModuleConfig) != "{}" {
 			summary.Lines = append(summary.Lines, "Module settings: "+string(review.ModuleConfig))
-		}
-		var grant wire.Grants
-		if err := protojson.Unmarshal(review.Grant, &grant); err != nil {
-			return SetupApprovalSummary{}, err
 		}
 		if len(grant.CoreCapabilities)+len(grant.Backends) > 0 {
 			summary.Lines = append(summary.Lines, "Proposed grant ceilings: "+string(review.Grant))

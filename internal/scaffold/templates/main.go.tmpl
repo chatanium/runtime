@@ -1,13 +1,10 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -20,6 +17,8 @@ import (
 	core "github.com/thirdscam/chatanium/shared/core-v2"
 	discord "github.com/thirdscam/chatanium/shared/discord-v2"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -27,16 +26,9 @@ import (
 //go:embed manifest.json
 var manifestJSON []byte
 
-type Config struct {
-	GuildID   string `json:"guild_id"`
-	ChannelID string `json:"channel_id"`
-}
-
 type Bot struct {
 	mu      sync.Mutex
-	core    core.CoreClient
 	api     *discord.Client
-	config  Config
 	ready   bool
 	running bool
 	stopped bool
@@ -48,10 +40,6 @@ type Bot struct {
 
 func (b *Bot) bind(_ context.Context, conn grpc.ClientConnInterface) error {
 	var err error
-	b.core, err = core.NewCoreClient(conn, core.JSONLimits{MaxBytes: 4096, MaxDepth: 4})
-	if err != nil {
-		return err
-	}
 	b.api, err = discord.NewClient(conn)
 	return err
 }
@@ -89,7 +77,7 @@ func (b *Bot) OnStage(ctx context.Context, req *corewire.StageRequest) error {
 	}
 	switch req.Stage {
 	case corewire.Stage_STAGE_INIT:
-		return b.initialize(ctx, req.InitContext)
+		return b.initialize(req.InitContext)
 	case corewire.Stage_STAGE_START:
 		b.mu.Lock()
 		defer b.mu.Unlock()
@@ -114,32 +102,11 @@ func (b *Bot) OnStage(ctx context.Context, req *corewire.StageRequest) error {
 	}
 }
 
-func (b *Bot) initialize(ctx context.Context, init *corewire.InitContext) error {
+func (b *Bot) initialize(init *corewire.InitContext) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.life != nil || b.stopped || b.core == nil || b.api == nil || init == nil || init.Grants == nil {
+	if b.life != nil || b.stopped || b.api == nil || init == nil || init.Grants == nil {
 		return errors.New("invalid INIT or missing helpers/grants")
-	}
-	if !allows(init.Grants.CoreCapabilities, "core.config.read", map[string]string{}, false) {
-		return errors.New("core.config.read grant required")
-	}
-	raw, err := b.core.GetConfig(ctx)
-	if err != nil {
-		return err
-	}
-	if raw == nil {
-		return errors.New("module config required")
-	}
-	decoder := json.NewDecoder(bytes.NewReader(raw.Json))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&b.config); err != nil {
-		return errors.New("invalid module config")
-	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		return errors.New("module config must contain one JSON object")
-	}
-	if !snowflake(b.config.GuildID) || !snowflake(b.config.ChannelID) {
-		return errors.New("guild_id and channel_id must be Discord snowflakes")
 	}
 	var grants []*corewire.CapabilityGrant
 	for _, backend := range init.Grants.Backends {
@@ -147,9 +114,8 @@ func (b *Bot) initialize(ctx context.Context, init *corewire.InitContext) error 
 			grants = append(grants, backend.Capabilities...)
 		}
 	}
-	scope := map[string]string{"guild_id": b.config.GuildID, "channel_id": b.config.ChannelID}
-	if !allows(grants, "discord.event.MESSAGE_CREATE", scope, true) || !allows(grants, "discord.rest.ChannelMessageSendComplex", scope, false) {
-		return errors.New("scoped MESSAGE_CREATE and ChannelMessageSendComplex grants required")
+	if !hasGrant(grants, "discord.event.MESSAGE_CREATE") || !hasGrant(grants, "discord.rest.ChannelMessageSendComplex") {
+		return errors.New("MESSAGE_CREATE and ChannelMessageSendComplex grants required")
 	}
 	b.life, b.cancel = context.WithCancel(context.Background())
 	b.changed = make(chan struct{})
@@ -157,33 +123,10 @@ func (b *Bot) initialize(ctx context.Context, init *corewire.InitContext) error 
 	return nil
 }
 
-// Event preflight permits constraints on future event fields (such as the
-// authenticated author). Only the host authorizes delivery against the complete
-// event scope. Helper grants must match the complete known mutation destination.
-func allows(grants []*corewire.CapabilityGrant, name string, known map[string]string, event bool) bool {
+func hasGrant(grants []*corewire.CapabilityGrant, name string) bool {
 	for _, grant := range grants {
-		if grant == nil || grant.Name != name {
-			continue
-		}
-		for _, scope := range grant.ResourceScopes {
-			if scope.GetAllResources() {
-				return true
-			}
-			selector := scope.GetSelector()
-			if selector == nil || (len(selector.ResourceIds) == 0 && len(known) != 0) {
-				continue
-			}
-			match := true
-			for key, value := range selector.ResourceIds {
-				actual, present := known[key]
-				if (!present && !event) || (present && actual != value) {
-					match = false
-					break
-				}
-			}
-			if match {
-				return true
-			}
+		if grant.GetName() == name && len(grant.GetResourceScopes()) != 0 {
+			return true
 		}
 	}
 	return false
@@ -221,7 +164,7 @@ func (b *Bot) OnEvent(ctx context.Context, event *corewire.EventEnvelope) error 
 		return errors.New("event outside RUNNING")
 	}
 	b.active++
-	life, config := b.life, b.config
+	life := b.life
 	b.mu.Unlock()
 	defer func() {
 		b.mu.Lock()
@@ -243,14 +186,17 @@ func (b *Bot) OnEvent(ctx context.Context, event *corewire.EventEnvelope) error 
 		return nil
 	}
 	message := created.Message.GetValue()
-	if message == nil || message.GuildId.GetValue() != config.GuildID || message.ChannelId.GetValue() != config.ChannelID {
+	if message == nil || !snowflake(message.GuildId.GetValue()) || !snowflake(message.ChannelId.GetValue()) {
 		return nil
 	}
 	author := message.Author.GetValue()
 	if author == nil || author.Bot.GetValue() || !snowflake(author.Id.GetValue()) || strings.TrimSpace(message.Content.GetValue()) != "!ping" {
 		return nil
 	}
-	_, err = b.api.ChannelMessageSendComplex(bounded, config.ChannelID, &discord.MessageSendView{Content: "pong"})
+	_, err = b.api.ChannelMessageSendComplex(bounded, message.ChannelId.GetValue(), &discord.MessageSendView{Content: "pong"})
+	if status.Code(err) == codes.PermissionDenied {
+		return nil
+	}
 	return err
 }
 

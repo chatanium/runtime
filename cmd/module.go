@@ -1,13 +1,10 @@
 package cmd
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
@@ -39,12 +36,7 @@ func moduleInstallCommand() *cobra.Command {
 	flags.StringVar(&grantFile, "approval", "", "canonical absolute proposed core-v2 grants JSON path")
 	budget := flags.Int64("budget-bytes", install.DefaultBudgetBytes, "maximum installation-owned bytes on first setup")
 	limitsFile := flags.String("limits-file", "", "complete portable preparation limits JSON")
-	var discord moduleDiscordInput
-	flags.StringVar(&discord.guild, "discord-guild-id", "", "Discord starter's only approved guild")
-	flags.StringVar(&discord.channel, "discord-channel-id", "", "Discord starter's only approved channel")
-	flags.StringVar(&discord.application, "discord-application-id", "", "application ID for a new host Discord backend")
-	flags.StringVar(&discord.bot, "discord-bot-user-id", "", "bot user ID for a new host Discord backend")
-	flags.StringVar(&discord.tokenFile, "discord-token-file", "", "owner-only file containing the new host Discord bot token")
+	tokenFile := flags.String("discord-token-file", "", "owner-only file containing the host Discord bot token")
 	approvalFlag(cmd)
 	jsonOutputFlag(cmd)
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
@@ -108,7 +100,7 @@ func moduleInstallCommand() *cobra.Command {
 		m, err := install.InstallModule(cmd.Context(), install.ModuleInstallOptions{
 			Archive: args[0], BudgetBytes: *budget, Limits: limits, Module: module,
 			Settings: func(info install.ModuleInstallInfo) (install.ModuleInstallSettings, error) {
-				return discord.settings(info, view, input, stdin, interactive)
+				return moduleDiscordSettings(info, view, stdin, interactive, *tokenFile)
 			},
 		}, confirm)
 		if errors.Is(err, errSetupDeclined) {
@@ -128,75 +120,25 @@ func moduleInstallCommand() *cobra.Command {
 	return cmd
 }
 
-type moduleDiscordInput struct {
-	guild, channel, application, bot, tokenFile string
-}
-
-func (d moduleDiscordInput) settings(info install.ModuleInstallInfo, view terminalView, input *bufio.Reader, stdin *os.File, interactive bool) (install.ModuleInstallSettings, error) {
+func moduleDiscordSettings(info install.ModuleInstallInfo, view terminalView, stdin *os.File, interactive bool, tokenFile string) (install.ModuleInstallSettings, error) {
 	if !info.DiscordStarter {
-		if d != (moduleDiscordInput{}) {
-			return install.ModuleInstallSettings{}, errors.New("Discord setup flags are only for images declaring the Discord starter capabilities")
+		if tokenFile != "" {
+			return install.ModuleInstallSettings{}, errors.New("a Discord token is only needed when setting up the Discord backend")
 		}
 		return install.ModuleInstallSettings{}, nil
 	}
-	if info.Discord != nil && (d.application != "" || d.bot != "" || d.tokenFile != "") {
-		return install.ModuleInstallSettings{}, errors.New("Discord backend is already configured; install will not replace its credentials or settings")
-	}
-	if interactive {
-		if err := view.log(logInfo, fmt.Sprintf("Configure Discord for %q (%s).", info.Declaration.Name, info.Declaration.Version)); err != nil {
-			return install.ModuleInstallSettings{}, err
-		}
-		if info.Discord == nil {
-			if err := view.indented("Enable GUILDS, GUILD_MESSAGES and the privileged MESSAGE_CONTENT intent for this bot."); err != nil {
-				return install.ModuleInstallSettings{}, err
-			}
-		}
-	}
-	ask := func(value, label, flag string) (string, error) {
-		if value != "" {
-			return value, nil
-		}
-		if !interactive {
-			return "", fmt.Errorf("Discord setup requires --%s outside an interactive terminal", flag)
-		}
-		if _, err := fmt.Fprintf(view.out, "      %s: ", label); err != nil {
-			return "", err
-		}
-		line, err := input.ReadSlice('\n')
-		if err != nil && !errors.Is(err, io.EOF) {
-			return "", err
-		}
-		value = strings.TrimSpace(string(line))
-		if value == "" {
-			return "", fmt.Errorf("%s is required", label)
-		}
-		return value, nil
-	}
-	guild, err := ask(d.guild, "Guild ID", "discord-guild-id")
-	if err != nil {
-		return install.ModuleInstallSettings{}, err
-	}
-	channel, err := ask(d.channel, "Channel ID", "discord-channel-id")
-	if err != nil {
-		return install.ModuleInstallSettings{}, err
-	}
-	settings := install.ModuleInstallSettings{GuildID: guild, ChannelID: channel}
 	if info.Discord != nil {
-		return settings, nil
-	}
-	application, err := ask(d.application, "Application ID", "discord-application-id")
-	if err != nil {
-		return install.ModuleInstallSettings{}, err
-	}
-	bot, err := ask(d.bot, "Bot user ID", "discord-bot-user-id")
-	if err != nil {
-		return install.ModuleInstallSettings{}, err
+		if tokenFile != "" {
+			return install.ModuleInstallSettings{}, errors.New("Discord backend is already configured; install will not replace its token")
+		}
+		return install.ModuleInstallSettings{}, nil
 	}
 	var token []byte
-	if d.tokenFile != "" {
-		token, err = install.ReadDiscordTokenFile(d.tokenFile)
+	var err error
+	if tokenFile != "" {
+		token, err = install.ReadDiscordTokenFile(tokenFile)
 	} else if interactive {
-		if _, err := fmt.Fprint(view.out, "      Bot token (input hidden): "); err != nil {
+		if _, err := fmt.Fprint(view.out, "      Discord bot token (input hidden): "); err != nil {
 			return install.ModuleInstallSettings{}, err
 		}
 		token, err = term.ReadPassword(stdin.Fd())
@@ -209,6 +151,5 @@ func (d moduleDiscordInput) settings(info install.ModuleInstallInfo, view termin
 		clear(token)
 		return install.ModuleInstallSettings{}, err
 	}
-	settings.Discord = &install.DiscordSetup{ApplicationID: application, BotUserID: bot, Token: token}
-	return settings, nil
+	return install.ModuleInstallSettings{DiscordToken: token}, nil
 }

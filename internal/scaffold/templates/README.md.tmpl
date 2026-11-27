@@ -2,7 +2,7 @@
 
 {{if .Discord -}}
 This Chatanium v2 starter replies `pong` when a non-bot user types `!ping` in
-the configured Discord guild and text channel.
+channels allowed by the runtime.
 {{- else}}
 This Chatanium v2 starter exercises the core lifecycle. It requests no
 capabilities and needs no backend or configuration.
@@ -29,13 +29,13 @@ Before installing, create a Discord bot, enable its privileged **Message Content
 Intent**, and add it to your guild with permission to view and send messages in
 the chosen text channel.
 
-On first use, `module install` prompts for the host's Discord bot details. It
-also asks for the guild and text-channel IDs for this module. Review the proposed
-grants before confirming. Grant `core.config.read` and scope Discord message
-delivery and sends to that guild and channel. Do not grant module network
-egress. The host uses the bot token; the module never sees it.
+On first use, enter the Discord bot token and review the permissions. The host
+looks up the bot identity and keeps the token private. Installation grants no
+server or channel access.
 
-With the host serving, send `!ping` in that channel to check the reply.
+With the host serving, run `./bin/chatanium acl set {{.Name}}` in another
+terminal. Choose servers or channels by name and approve the change. Send
+`!ping` in an allowed channel to check the reply.
 {{- else}}
 
 Review the installation and type `y` to approve it. The module becomes ready
