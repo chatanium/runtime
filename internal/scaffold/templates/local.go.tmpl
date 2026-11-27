@@ -1,0 +1,97 @@
+package main
+
+import (
+	"context"
+	_ "embed"
+	"fmt"
+	"os"
+	"sync"
+
+	"github.com/hashicorp/go-plugin"
+	wire "github.com/thirdscam/chatanium/proto/core-v2"
+	core "github.com/thirdscam/chatanium/shared/core-v2"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/protobuf/encoding/protojson"
+)
+
+//go:embed manifest.json
+var manifestJSON []byte
+
+type localCheck struct {
+	mu    sync.Mutex
+	stage wire.Stage
+}
+
+func (m *localCheck) GetManifest(ctx context.Context) (*wire.ModuleManifest, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	manifest := new(wire.ModuleManifest)
+	if err := protojson.Unmarshal(manifestJSON, manifest); err != nil {
+		return nil, err
+	}
+	return manifest, nil
+}
+
+func (m *localCheck) GetStatus(ctx context.Context) (*wire.Status, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	readiness := wire.Readiness_READINESS_NOT_READY
+	if m.stage == wire.Stage_STAGE_INIT || m.stage == wire.Stage_STAGE_START {
+		readiness = wire.Readiness_READINESS_READY
+	}
+	return &wire.Status{Readiness: readiness}, nil
+}
+
+func (m *localCheck) OnStage(ctx context.Context, req *wire.StageRequest) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	next := req.GetStage()
+	switch next {
+	case wire.Stage_STAGE_INIT:
+		if m.stage != wire.Stage_STAGE_UNSPECIFIED {
+			return core.NewError(codes.FailedPrecondition, core.ReasonInvalidStage)
+		}
+	case wire.Stage_STAGE_START:
+		if m.stage != wire.Stage_STAGE_INIT {
+			return core.NewError(codes.FailedPrecondition, core.ReasonInvalidStage)
+		}
+	case wire.Stage_STAGE_DRAIN:
+		if m.stage == wire.Stage_STAGE_STOP {
+			return core.NewError(codes.FailedPrecondition, core.ReasonInvalidStage)
+		}
+	case wire.Stage_STAGE_STOP:
+	default:
+		return core.NewError(codes.InvalidArgument, core.ReasonInvalidStage)
+	}
+	m.stage = next
+	return nil
+}
+
+func (*localCheck) OnEvent(ctx context.Context, _ *wire.EventEnvelope) error {
+	return ctx.Err() // This module subscribes to no events.
+}
+
+func main() {
+	// The SDK performs the handshake, but this module does not use helper RPCs.
+	bind := func(ctx context.Context, _ grpc.ClientConnInterface) error { return ctx.Err() }
+	p, err := core.NewModulePlugin(context.Background(), new(localCheck), bind, core.TransportLimits{
+		MaxReceiveBytes: 4 << 20,
+		MaxSendBytes:    4 << 20,
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "module bootstrap failed:", err)
+		os.Exit(1)
+	}
+	defer p.Close()
+	plugin.Serve(p.ServeConfig())
+}
+
+var _ core.ModuleHooks = (*localCheck)(nil)

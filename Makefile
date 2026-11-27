@@ -6,6 +6,7 @@ HOST_GOARCH := $(subst aarch64,arm64,$(subst x86_64,amd64,$(shell uname -m)))
 GOARCH ?= $(HOST_GOARCH)
 CGO_ENABLED ?= 0
 BUILD_JOBS ?= 2
+MODULE_EXPLICIT := $(if $(filter undefined,$(origin MODULE)),0,1)
 MODULE ?= examples/general-bot
 DISABLE_VOICE ?= $(if $(filter build-dev-worker run-legacy-dev,$(MAKECMDGOALS)),0,1)
 DEV_MODE ?= 0
@@ -33,7 +34,7 @@ GENERATED_FILES := $(GENERATED_EXPECTED_FILES)
 export GENERATED_FILES GENERATED_EXPECTED_FILES BUILD_OUTPUTS
 
 MAKE_COMMAND_TARGETS := tools prepare-sdk build build-runtime build-dev-worker build-module build-native build-integration buf buf-check clean run run-legacy-dev \
-	sqlc serve new_module list-module image-module image-media check-offline check-sandbox check-sandbox-policy smoke-discord smoke-voice
+	modules sqlc serve new_module list-module image-module image-media check-offline check-sandbox check-sandbox-policy smoke-discord smoke-voice
 .PHONY: $(MAKE_COMMAND_TARGETS)
 
 # Make has no positional arguments: consume exactly one otherwise-unrecognized
@@ -82,6 +83,14 @@ build: build-runtime
 
 build-module:
 	@GOOS=linux bash tools/build.sh module "$$MODULE_BUILD_DIRECTORY"
+
+# Build installable Linux OCI archives without Docker.
+modules:
+	@if [ "$(MODULE_EXPLICIT)" = 1 ]; then \
+		GOOS=linux bash tools/build.sh archive "$$MODULE"; \
+	else \
+		GOOS=linux bash tools/build.sh archive; \
+	fi
 
 # Inspect canonical manifests only; no compiler, native runtime or SDK is needed.
 list-module:
@@ -132,7 +141,7 @@ buf-check:
 	@bash tools/generate.sh check
 
 # Remove fixed host binaries and directory-derived module artifacts only.
-# Native work/source/license archives and OCI images are intentionally retained.
+# Native work/source/license archives and other OCI evidence are retained.
 clean:
 	@bash tools/build.sh clean
 

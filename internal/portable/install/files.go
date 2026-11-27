@@ -99,6 +99,19 @@ func checkMetadataBudget(i *Installation, addition int64) error {
 		return store.ErrBudgetExceeded
 	}
 	changes := addition + reservedUploadBytes + reservedDiscordBytes
+	for _, path := range [...]string{"app/" + discordTokenLeaf, "app/.writing-" + discordTokenLeaf} {
+		info, err := i.Root.Lstat(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if !safeEntry(info) || !info.Mode().IsRegular() || info.Size() > discordTokenMaxBytes {
+			return errors.New("invalid managed Discord credential file")
+		}
+		changes += info.Size()
+	}
 	file, err := i.Root.Open(".")
 	if err != nil {
 		return err

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -14,6 +15,7 @@ import (
 	"github.com/thirdscam/chatanium/internal/portable/process"
 	"github.com/thirdscam/chatanium/internal/portable/sandbox"
 	"github.com/thirdscam/chatanium/internal/portable/store"
+	"github.com/thirdscam/chatanium/internal/runtime"
 )
 
 const restoreReceiptName = "restore-inventory.json"
@@ -201,8 +203,28 @@ func (i *Installation) verifyRestoreRoot() error {
 			return err
 		}
 	}
-	if err := checkPurgeNamespace(i.Root, "app", func(name string) bool { return name == "uploads" || name == "discord" }); err != nil {
+	cfg, err := runtime.DecodeConfig(i.Manifest.Config)
+	if err != nil {
 		return err
+	}
+	managedToken := cfg.Backends["discord"].SecretSources["bot_token"] == i.discordTokenSource()
+	if err := checkPurgeNamespace(i.Root, "app", func(name string) bool {
+		return name == "uploads" || name == "discord" || managedToken && name == discordTokenLeaf
+	}); err != nil {
+		return err
+	}
+	if managedToken {
+		if _, err := i.Root.Lstat("app/" + discordTokenLeaf); !errors.Is(err, fs.ErrNotExist) {
+			if err != nil {
+				return err
+			}
+			file := filepath.Join(i.Path, "app", discordTokenLeaf)
+			token, err := readDiscordTokenFile(file, false)
+			clear(token)
+			if err != nil {
+				return err
+			}
+		}
 	}
 	for _, name := range []string{"app", "app/uploads", "app/discord", "ipc"} {
 		if err := process.CheckPrivateDir(filepath.Join(i.Path, filepath.FromSlash(name))); err != nil {

@@ -69,6 +69,10 @@ func (i *Installation) generateConfig(options GenerateOptions) (Candidate, error
 	if err != nil {
 		return Candidate{}, err
 	}
+	return i.candidateForModule(cfg, g, options, false)
+}
+
+func (i *Installation) candidateForModule(cfg runtime.Config, g images.Generation, options GenerateOptions, appendOnly bool) (Candidate, error) {
 	var value any
 	if err := gvxcontract.DecodeStrict(options.ModuleConfig, cfg.Limits.ConfigMaxBytes, 64, &value); err != nil {
 		return Candidate{}, errors.New("invalid bounded module config JSON")
@@ -85,7 +89,9 @@ func (i *Installation) generateConfig(options GenerateOptions) (Candidate, error
 	if grant.ResourceClass == wire.ResourceClass_RESOURCE_CLASS_MEDIA {
 		class = "media"
 	}
-	cfg.ResourceProfiles[class] = runtime.ResourceProfile{CPUMillicores: profile.CpuMillicores, MemoryBytes: profile.MemoryBytes, MaxPids: profile.MaxPids, PersistentBytes: profile.PersistentBytes, ScratchBytes: profile.ScratchBytes}
+	if !appendOnly {
+		cfg.ResourceProfiles[class] = runtime.ResourceProfile{CPUMillicores: profile.CpuMillicores, MemoryBytes: profile.MemoryBytes, MaxPids: profile.MaxPids, PersistentBytes: profile.PersistentBytes, ScratchBytes: profile.ScratchBytes}
+	}
 	entrypoint, args := g.Entrypoint, g.Cmd
 	if len(entrypoint) == 0 {
 		entrypoint, args = args, nil
@@ -103,6 +109,9 @@ func (i *Installation) generateConfig(options GenerateOptions) (Candidate, error
 	if index == -1 {
 		cfg.Modules = append(cfg.Modules, spec)
 	} else {
+		if appendOnly {
+			return Candidate{}, fmt.Errorf("module %q is already installed", spec.ModuleID)
+		}
 		spec.CredentialBindings = cfg.Modules[index].CredentialBindings
 		cfg.Modules[index] = spec
 	}
@@ -116,10 +125,12 @@ func (i *Installation) generateConfig(options GenerateOptions) (Candidate, error
 		options.Network.Mode = store.NetworkNone
 	}
 	p.Network[options.ModuleID] = options.Network
-	cfg.Host.Network.Profile = host.NetworkNone
-	for _, spec := range cfg.Modules {
-		if spec.Approval.EgressPolicy == wire.EgressPolicy_EGRESS_POLICY_PUBLIC_INTERNET {
-			cfg.Host.Network.Profile = host.NetworkPublicV4
+	if !appendOnly {
+		cfg.Host.Network.Profile = host.NetworkNone
+		for _, spec := range cfg.Modules {
+			if spec.Approval.EgressPolicy == wire.EgressPolicy_EGRESS_POLICY_PUBLIC_INTERNET {
+				cfg.Host.Network.Profile = host.NetworkPublicV4
+			}
 		}
 	}
 	p.Config, err = runtime.EncodePortableConfig(cfg)
@@ -249,12 +260,36 @@ func Configure(ctx context.Context, path string, p Candidate, confirm Confirm) (
 	return i.configure(ctx, p, confirm)
 }
 
-func (i *Installation) configure(ctx context.Context, p Candidate, confirm Confirm) (_ Manifest, resultErr error) {
+func (i *Installation) configure(ctx context.Context, p Candidate, confirm Confirm) (Manifest, error) {
 	if i.Manifest.State != store.Initializing && i.Manifest.State != store.Ready {
 		return Manifest{}, store.ErrState
 	}
 	if err := i.VerifyBundle(ctx); err != nil {
 		return Manifest{}, err
+	}
+	if confirm == nil {
+		return Manifest{}, errors.New("configure requires exact PlanDigest and per-module ReviewDigest approval")
+	}
+	return i.configureCandidate(ctx, p, func(config configurationApproval, modules []Module) error {
+		if err := confirm("Approve publishing this stopped configuration revision (PlanDigest)", config, config.Plan.PlanDigest); err != nil {
+			return err
+		}
+		for _, module := range modules {
+			if err := confirm("Approve exact launch, grants, resources and network for "+module.ID+" (ReviewDigest)", approvalForModule(module), module.Approval.ReviewDigest); err != nil {
+				return err
+			}
+		}
+		return nil
+	}, nil)
+}
+
+func approvalForModule(module Module) moduleApproval {
+	return moduleApproval{module.ID, module.Generation.SourceDigest, module.Generation.ManifestDigest, module.AcquisitionJSON, module.Generation.Declaration, module.ReviewJSON, module.Approval.ReviewDigest}
+}
+
+func (i *Installation) configureCandidate(ctx context.Context, p Candidate, review func(configurationApproval, []Module) error, publishCredential func() error) (_ Manifest, resultErr error) {
+	if i.Manifest.State != store.Initializing && i.Manifest.State != store.Ready {
+		return Manifest{}, store.ErrState
 	}
 	if p.Format != Format {
 		return Manifest{}, ErrLegacy
@@ -290,17 +325,11 @@ func (i *Installation) configure(ctx context.Context, p Candidate, confirm Confi
 	}
 	m.Revision = configuration.Revision
 	m.ConfigPlanDigest = plan.PlanDigest
-	if confirm == nil {
-		return Manifest{}, errors.New("configure requires exact PlanDigest and per-module ReviewDigest approval")
-	}
-	if err := confirm("Approve publishing this stopped configuration revision (PlanDigest)", configurationApproval{Plan: plan, Config: configDoc, display: &cfg}, plan.PlanDigest); err != nil {
+	if err := review(configurationApproval{Plan: plan, Config: configDoc, display: &cfg}, m.Modules); err != nil {
 		return Manifest{}, err
 	}
-	for _, module := range m.Modules {
-		value := moduleApproval{module.ID, module.Generation.SourceDigest, module.Generation.ManifestDigest, module.AcquisitionJSON, module.Generation.Declaration, module.ReviewJSON, module.Approval.ReviewDigest}
-		if err := confirm("Approve exact launch, grants, resources and network for "+module.ID+" (ReviewDigest)", value, module.Approval.ReviewDigest); err != nil {
-			return Manifest{}, err
-		}
+	if err := ctx.Err(); err != nil {
+		return Manifest{}, err
 	}
 	db, err := i.Store(ctx)
 	if err != nil {
@@ -337,6 +366,11 @@ func (i *Installation) configure(ctx context.Context, p Candidate, confirm Confi
 	}
 	if err := i.stageManifest(m); err != nil {
 		return Manifest{}, err
+	}
+	if publishCredential != nil {
+		if err := publishCredential(); err != nil {
+			return Manifest{}, err
+		}
 	}
 	if err := i.publishReviewed(ctx, db, epoch, m.Modules); err != nil {
 		return Manifest{}, err
@@ -443,9 +477,25 @@ func (i *Installation) reviewModule(cfg runtime.Config, spec runtime.ModuleSpec,
 	if !modulePattern.MatchString(id) {
 		return Module{}, errors.New("invalid portable module ID")
 	}
-	receipt, err := i.readReceipt(imageID)
-	if err != nil {
-		return Module{}, err
+	var receipt preparedReceipt
+	index := slices.IndexFunc(i.Manifest.Modules, func(old Module) bool {
+		return old.ID == id && old.Generation.ID == imageID
+	})
+	if index >= 0 {
+		old := i.Manifest.Modules[index]
+		if err := gvxcontract.DecodeStrict(old.AcquisitionJSON, maxDocument, 64, &receipt.Acquisition); err != nil {
+			return Module{}, err
+		}
+		if err := verifyAcquisition(i.Manifest, i.Path, old.Generation, receipt.Acquisition); err != nil {
+			return Module{}, err
+		}
+		receipt.Generation = old.Generation
+	} else {
+		var err error
+		receipt, err = i.readReceipt(imageID)
+		if err != nil {
+			return Module{}, err
+		}
 	}
 	g := receipt.Generation
 	if spec.ImageDigest != "record:"+g.Digest {

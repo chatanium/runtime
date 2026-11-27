@@ -1,0 +1,53 @@
+package main
+
+import (
+	"context"
+	"testing"
+
+	wire "github.com/thirdscam/chatanium/proto/core-v2"
+)
+
+func TestLocalCheckLifecycle(t *testing.T) {
+	ctx := context.Background()
+	module := new(localCheck)
+	manifest, err := module.GetManifest(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.ProtocolMajor != 2 || len(manifest.RequiredCapabilities) != 0 || len(manifest.OptionalCapabilities) != 0 || len(manifest.BackendRequirements) != 0 {
+		t.Fatalf("unexpected local manifest: %v", manifest)
+	}
+	assertReadiness := func(want wire.Readiness) {
+		t.Helper()
+		status, err := module.GetStatus(ctx)
+		if err != nil || status.GetReadiness() != want {
+			t.Fatalf("GetStatus() = %v, %v; want %v", status, err, want)
+		}
+	}
+	assertReadiness(wire.Readiness_READINESS_NOT_READY)
+	start := &wire.StageRequest{Stage: wire.Stage_STAGE_START}
+	if err := module.OnStage(ctx, start); err == nil {
+		t.Fatal("START before INIT succeeded")
+	}
+	for _, tc := range []struct {
+		stage wire.Stage
+		want  wire.Readiness
+	}{
+		{wire.Stage_STAGE_INIT, wire.Readiness_READINESS_READY},
+		{wire.Stage_STAGE_START, wire.Readiness_READINESS_READY},
+		{wire.Stage_STAGE_DRAIN, wire.Readiness_READINESS_NOT_READY},
+		{wire.Stage_STAGE_STOP, wire.Readiness_READINESS_NOT_READY},
+	} {
+		req := &wire.StageRequest{Stage: tc.stage}
+		if tc.stage == wire.Stage_STAGE_INIT {
+			req.InitContext = &wire.InitContext{}
+		}
+		if err := module.OnStage(ctx, req); err != nil {
+			t.Fatalf("%v: %v", tc.stage, err)
+		}
+		assertReadiness(tc.want)
+	}
+	if err := module.OnStage(ctx, start); err == nil {
+		t.Fatal("START after STOP succeeded")
+	}
+}

@@ -482,7 +482,9 @@ func (i *Installation) collectPurge(ctx context.Context, db *store.Store) (purge
 		{"instances", func(string) bool { return false }},
 		{"preparations", func(string) bool { return false }},
 		{"ipc", func(string) bool { return false }},
-		{"app", func(s string) bool { return s == "uploads" || s == "discord" }},
+		{"app", func(s string) bool {
+			return s == "uploads" || s == "discord" || s == discordTokenLeaf || s == ".writing-"+discordTokenLeaf
+		}},
 		{"app/uploads", func(s string) bool {
 			return s == ".owner" || strings.HasPrefix(s, "file-") && generationPattern.MatchString(strings.TrimPrefix(s, "file-"))
 		}},

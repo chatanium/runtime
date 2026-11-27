@@ -30,7 +30,7 @@ func activateInitial(ctx context.Context, path string, m Manifest, first *FirstM
 		}
 		return nil
 	}
-	i, err := lockPath(path, check)
+	i, err := lockPath(path, func(locked *Installation) error { return check(&locked.Manifest) })
 	if err != nil {
 		return Manifest{}, err
 	}

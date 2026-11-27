@@ -10,12 +10,13 @@ Chatanium v2 integrates the module system from
 [Chatanium FlexModule](https://github.com/chatanium/flexmodule).
 Modules run as independent executables in immutable OCI images under the bundled
 original `rungv` (gVisor), with authenticated bidirectional gRPC, explicitly
-approved capabilities, resource scopes and finite limits. Docker is build-only.
+approved capabilities, resource scopes and finite limits. The local module
+workflow does not require Docker.
 
 **Clean cutover:** the old standard-library `plugin.Open`/`.so` loader, symbol
 lookup and direct `discordgo.Session` callback interfaces are removed. There is
-no native-plugin fallback, directory-scanning loader, dynamic installer or
-automatic production hot reload. Development-only image replacement requires
+no native-plugin fallback, directory-scanning loader, or automatic production
+hot reload. Development-only image replacement requires
 explicit opt-in; `hashicorp/go-plugin` remains the authenticated v2 transport
 inside the sandbox runner, not the removed Go standard-library plugin mechanism.
 Modules use typed v2 events/helpers, not the host's Session or bot token.
@@ -176,6 +177,7 @@ Commit the SQL changes together with all three generated Go files
 | `make build-runtime GOOS=linux GOARCH=amd64` | Build the offline portable launcher, target-matched original GVX and worker, Linux guest bridge/preparer and their provenance |
 | `make build-runtime GOOS=windows GOARCH=arm64` | Cross-build a Windows arm64 artifact on the Linux build host; this is not a WHPX execution test |
 | `make build` | Build the portable runtime plus direct v2 module directories under `modules/` |
+| `make modules` | Build and package ordinary modules under `modules/` as `bin/modules/<name>/module.oci.tar`. Use `MODULE=<name>` to select one. |
 | `make build-module music-bot` | Build only `modules/music-bot` into `bin/modules/music-bot/module`; any module folder name works without editing the Makefile |
 | `make build-module examples/general-bot` | Explicitly build the root-module example into `bin/examples/general-bot/module` |
 | `make build-native BUILD_JOBS=2` | Independent native C++/ABI/loader/license gate; `.tools/native/prefix` and `.tools/native/bundle`, no application Go compilation or `bin/voice-runtime` publication |
@@ -303,71 +305,51 @@ embedding. Native build success does not prove encrypted Discord interoperabilit
 
 ## Create a v2 module
 
-The root CLI exposes lifecycle commands plus `generate-config` and `new`; use
-Cobra's **double-hyphen** long flags. Run `./bin/chatanium --help` or a subcommand's
-`--help` for its interface. `new` preserves the interactive name prompt when
-`--name` is omitted. It creates source, not a running installation.
-
-From this Chatanium checkout, with the pinned compiler installed as above:
+From this checkout, build the launcher and create a module:
 
 ```sh
-make prepare-sdk
-make build
-SDK_CHECKOUT="$PWD"
-MODULE_OUTPUT="${MODULE_OUTPUT:?set an absolute new module directory}"
-./bin/chatanium new \
-  --name ping-bot \
-  --output "$MODULE_OUTPUT" \
-  --module-path example.com/ping-bot \
-  --sdk-path "$SDK_CHECKOUT"
-
-# Use the actual pinned compiler path if it is installed elsewhere.
-GO="$SDK_CHECKOUT/.tools/go/bin/go"
-(
-  cd "$MODULE_OUTPUT"
-  env -u GOROOT GOTOOLCHAIN=local "$GO" mod tidy
-  env -u GOROOT GOTOOLCHAIN=local "$GO" test ./...
-  env -u GOROOT GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    "$GO" build -trimpath -o module .
-)
+make build-runtime
+./bin/chatanium new
 ```
 
-`--output` defaults to `modules/<name>`; `--module-path` defaults to
-`example.com/<name>`; `--sdk-path` defaults to the current directory and must be
-this v2 Chatanium checkout. Use your actual Go module import path before
-publishing. The generated `go.mod` explicitly replaces both Chatanium and
-DiscordGo with this checkout and its prepared SDK. No published v2 release or
-sibling checkout is assumed. If moving the SDK, update both replacements, and
-do not race direct builds against SDK preparation. Commit the resolved `go.sum`.
+Choose **Local check** to try the module lifecycle without a bot account or
+network access. Choose **Discord bot** for a scoped `!ping` example. Enter a
+module name and check the output path before creating source. Press Escape to
+cancel. An existing source directory is never overwritten.
 
-The generated module replies `pong` to a human's `!ping` only in its configured
-guild text channel; it ignores DMs, bot messages, other channels and other
-commands. The generated **`main_test.go`** exercises INIT/GetStatus at the actual
-uint64 Snowflake business boundary, accepting the largest valid ID and refusing
-overflow. It is not a live Discord test.
+For a module named `hello`, build the archive, install it, and start the runtime:
 
-Set real approved `guild_id` and `channel_id` values in private module JSON using
-`config.example.json`. Approve resource-free `core.config.read`, Discord major 2,
-`discord.event.MESSAGE_CREATE` and
-`discord.rest.ChannelMessageSendComplex` at that exact guild/channel. Do not
-constrain the send-helper grant to an unknown user/message ID. The manifest's
-all-resource requests are ceilings, not approvals. The host bot requires
-**guild-message and message-content Gateway intents** (enable privileged message
-content in the Discord developer configuration as applicable), plus channel
-**View Channel** and **Send Messages** permissions. Runtime grants do not replace
-those checks. The generated example needs no voice, uploads, routes or network
-egress authority.
+```sh
+make modules MODULE=hello
+./bin/chatanium module install ./bin/modules/hello/module.oci.tar
+./bin/chatanium serve
+```
 
-Follow the generated README's complete image procedure: build its static
-`module` executable, validate the canonical embedded `manifest.json` using this
-checkout's `tools/build/manifest`, and build the supplied scratch Dockerfile
-with the exact manifest bytes and SHA-256 labels. `make image-module` below
-packages the repository's general-bot/sandbox fixtures, **not** arbitrary output
-from `new`. Publish the generated image through your approved registry workflow,
-obtain its real immutable `registry/repository@sha256:...` RepoDigest, then prepare
-that digest through explicit `chatanium prepare-image` and the approval flow below.
-Copying a binary into `modules/` does not install it. There is no implicit
-production hot reload; development reload remains a separate opt-in path.
+`make modules` builds all ordinary modules when you omit `MODULE`. To select
+one outside `modules/`, use its checkout-relative path, such as
+`MODULE=examples/general-bot`. Use `make image-media` for the native media modules.
+
+`module install` checks the archive in an isolated guest. On a fresh system
+it asks you to approve the runtime location and disk limit first. Review the
+module's settings, permissions, and resource limits, then answer `y` to install.
+Installation does not run the module. If Chatanium is already running, stop it
+before installing. A module name already in use is not overwritten.
+
+The archive digest identifies the bytes you selected. It does not authenticate
+the publisher. For other modules with deployment-specific settings, pass a
+settings file with `--module-config` and proposed grants with `--approval`.
+
+For the Discord starter, supply a real guild and text channel. Configure the
+host bot if it is not already set up. The bot needs the Message Content
+privileged intent enabled in Discord and **View Channel** and **Send Messages**
+in the chosen channel. Chatanium grants the module access to that guild and
+channel, not the host bot token or general network access.
+
+For scripts, use `new --name hello` with `--template local` or `--template discord`.
+`--output` defaults to `modules/<name>`. `--module-path` defaults to
+`example.com/<name>`. `--sdk-path` defaults to this checkout. The generated
+`go.mod` references this SDK. The Discord starter also uses the maintained
+DiscordGo checkout.
 
 ### Module images
 
@@ -469,6 +451,10 @@ keep the existing JSON (newline-delimited events for `serve`). Use `--json`
 to request that format in a terminal. `generate-config` and `inspect-config`
 always emit JSON documents on stdout.
 
+To install a downloaded OCI module archive, run `chatanium module install
+./module.oci.tar`, review the module, then run `chatanium serve`. No separate
+configuration command is needed for the starter modules.
+
 ```sh
 # To configure and start a first module from an offline OCI archive instead:
 ./chatanium serve \
@@ -485,7 +471,7 @@ this switches setup prompts to exact digests; `reset` always asks `y/N` before
 deletion. Standalone `prepare-image`, `configure`, `update` and `purge` always
 require exact digests, even when showing a terminal summary. Use repeatable
 `--approve` values in prompt order to supply those digests from a script.
-To stage an installation or add another module separately:
+For registry images or an advanced configuration you want to prepare and review separately:
 
 1. Run `init` instead of `serve` to set up an installation without starting it.
    Inspect the location and disk budget, then answer `y`.
@@ -531,6 +517,10 @@ This is not an image importer. It verifies the restored snapshot and volume
 contents before binding their new native file identities. The exact command
 can be retried before the first activation. The receipt and config are retained;
 this command cannot rebind volumes from an ordinary installation.
+
+Backups do not contain host credentials. If the restored Discord configuration
+references `app/discord-bot-token`, restore the correct token separately to
+that owner-only file before running `serve`. Do not include a trailing newline.
 
 No raw ext4 image import: GVX opens an existing volume before host lockdown.
 Only this installation's recorded volume with the expected native file

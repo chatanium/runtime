@@ -47,7 +47,7 @@ func commandArea(cmd *cobra.Command) string {
 		return "INIT"
 	case "reset":
 		return "RESET"
-	case "new":
+	case "new", "module", "install":
 		return "MODULE"
 	case "prepare-image":
 		return "IMAGE"

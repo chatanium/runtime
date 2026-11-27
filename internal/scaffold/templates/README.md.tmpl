@@ -1,116 +1,52 @@
 # {{.Name}}
 
-An independent Chatanium v2 module. In its configured guild text channel, a
-non-bot user's `!ping` receives `pong`. Other channels, DMs, bot messages and
-other commands are ignored. There is no host token, direct Discord session,
-host runtime import or native shared-library entry point.
+{{if .Discord -}}
+This Chatanium v2 starter replies `pong` when a non-bot user types `!ping` in
+the configured Discord guild and text channel.
+{{- else}}
+This Chatanium v2 starter exercises the core lifecycle. It requests no
+capabilities and needs no backend or configuration.
+{{- end}}
 
-## SDK checkout and executable
+## Build, install, and run
 
-The generated `go.mod` uses an explicit local Chatanium v2 checkout, including
-its prepared DiscordGo patch stack. No published v2 release is assumed. It does
-not reference any sibling repository. If moving the checkout, update both
-`replace` directives. Set your real repository's module path before publishing.
-
-From this module directory, with Go 1.27.0 available:
-
-```sh
-SDK_CHECKOUT={{.SDKPath}}
-(cd "$SDK_CHECKOUT" && make prepare-sdk)
-go mod tidy
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o module .
-```
-
-The artifact is a static independent Linux AMD64 executable named `module`,
-not a `.so`. Commit `go.sum` after dependency resolution. Direct SDK Go commands
-must not race another process replacing `.tools/deps/discordgo`; follow the
-checkout's SDK lease/revalidation guidance when building concurrently.
-
-## Canonical manifest and OCI image
-
-`manifest.json` is the single protobuf-JSON manifest source, embedded unchanged
-by `main.go`. Do not maintain a second manifest in image metadata. Rebuild the
-executable after changing it. The image declaration must carry those exact
-bytes in `org.chatanium.flexmodule.manifest.v2`; the runtime compares it with
-the authenticated module response. The image's executable entrypoint remains
-`/opt/flexmodule/module`; `/opt/flexmodule/manifest.json` contains the source.
-The ordinary scratch image needs no media tools, network egress, storage mounts
-or host credentials.
-
-Build from this directory after building the executable:
+Run these commands from the Chatanium SDK checkout used by `chatanium new`.
+You do not need Docker or a registry.
+{{- if not .BuildTarget}}
+Keep this module in a directory under the checkout, such as
+`modules/{{.Name}}`. The `MODULE` argument and archive path must match that
+repo-relative directory.
+{{- end}}
 
 ```sh
-export MODULE_IMAGE=your-registry.example/your-project/{{.Name}}:0.1.0
-MODULE_DIR="$PWD"
-(cd "$SDK_CHECKOUT" && go run ./tools/build/manifest "$MODULE_DIR/manifest.json")
-python3 - "$MODULE_IMAGE" <<'PY'
-import hashlib
-import json
-from pathlib import Path
-import subprocess
-import sys
-
-raw = Path('manifest.json').read_bytes()
-manifest = raw.decode('utf-8')
-json.loads(manifest)
-subprocess.run([
-    'docker', 'build', '--platform', 'linux/amd64', '--network=none',
-    '--label', 'org.chatanium.flexmodule.manifest.v2=' + manifest,
-    '--label', 'org.chatanium.flexmodule.manifest.sha256=' + hashlib.sha256(raw).hexdigest(),
-    '-t', sys.argv[1], '.',
-], check=True)
-metadata = json.loads(subprocess.check_output(['docker', 'image', 'inspect', sys.argv[1]]))[0]
-if metadata['Config']['Labels']['org.chatanium.flexmodule.manifest.v2'] != manifest:
-    raise SystemExit('image manifest label differs from canonical source')
-PY
+make modules MODULE={{if .BuildTarget}}{{.BuildTarget}}{{else}}modules/{{.Name}}{{end}}
+./bin/chatanium module install ./bin/{{if .BuildTarget}}{{.BuildTarget}}{{else}}modules/{{.Name}}{{end}}/module.oci.tar
+./bin/chatanium serve
 ```
+{{- if .Discord}}
 
-Use your approved registry publishing workflow, then obtain the real immutable
-registry `RepoDigest`. A local image ID or mutable tag is not an installation
-identity. Prepare the exact image explicitly with `chatanium prepare-image`;
-configuration inspection uses only its committed immutable record and never
-executes the module. `chatanium new` does not install or run generated code.
+Before installing, create a Discord bot, enable its privileged **Message Content
+Intent**, and add it to your guild with permission to view and send messages in
+the chosen text channel.
 
-## Operator configuration and approval
+On first use, `module install` prompts for the host's Discord bot details. It
+also asks for the guild and text-channel IDs for this module. Review the proposed
+grants before confirming. Grant `core.config.read` and scope Discord message
+delivery and sends to that guild and channel. Do not grant module network
+egress. The host uses the bot token; the module never sees it.
 
-Copy `config.example.json` to private operator configuration and replace both
-empty strings with the actual approved Discord guild and text-channel IDs.
-The empty example is deliberately not an invented runnable installation.
-Supply this JSON as the module's ordinary Core.GetConfig value, not as token
-or environment variables. The host alone loads its Discord credential.
+With the host serving, send `!ping` in that channel to check the reply.
+{{- else}}
 
-INIT requires these actual immutable installation grants:
+Review the installation and type `y` to approve it. The module becomes ready
+when the host runs INIT. START, DRAIN, and STOP exercise the rest of the
+lifecycle without making external calls.
+{{- end}}
 
-- `core.config.read` with the resource-free selector `{}`.
-- Discord backend protocol major 2.
-- `discord.event.MESSAGE_CREATE` scoped to the configured `guild_id` and
-  `channel_id`. An additional approved author constraint can narrow delivery.
-- `discord.rest.ChannelMessageSendComplex` scoped to the same guild/channel.
-  Do not constrain this helper grant to an unknown user or message ID: its
-  destination request does not contain those resources.
+## Change the module
 
-The two Discord entries in the manifest are optional all-resource **request
-ceilings**, not grants. This permits operator-specific narrow approvals without
-embedding private deployment IDs in the image. INIT still fails readiness if
-either configured operation is unavailable. Do not approve all resources merely
-because the declaration requests that ceiling. Runtime delivery and helper
-authorization enforce the complete actual event/request scopes. The host also
-needs Discord guild-message/message-content intents and view/send permissions
-for that channel. This module does not need uploads, routes, files, network or
-voice authority. Choose the ordinary sandbox resource profile and no egress
-under the host operator configuration; derive that configuration with
-`chatanium generate-config` after explicit stopped `prepare-image --operator`.
-Bootstrap the host first with `chatanium init`, then review and commit the
-generated module configuration with `chatanium configure --config PATH`.
-
-## Lifecycle
-
-The SDK establishes the authenticated bidirectional gRPC helper connection.
-INIT validates helpers, ordinary config and actual grants before readiness;
-START enables command handling. Every reply has a ten-second deadline bounded
-by the event context. DRAIN rejects new events, cancels helper work and waits
-only for already-active handlers, using the supplied lifecycle deadline. STOP
-does the same and prevents restart. No Discord REST call is made at build time
-or by a local native loader. Offline compilation does not prove image approval,
-sandbox isolation or actual Discord delivery; those require operator-authorized
-integration checks.
+Edit `manifest.json` to change the module declaration. The Go executable embeds
+that file, and `make modules` puts the same declaration in the OCI archive.
+Rebuild the archive after changing the manifest or Go code. The generated
+`go.mod` points at the local SDK checkout. Update its replacement
+{{- if .Discord}} paths{{else}} path{{end}} if you move the checkout.

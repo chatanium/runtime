@@ -231,6 +231,10 @@ func writeNew(root *os.Root, name string, data []byte) error {
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
+	return writeAtomic(root, name, data)
+}
+
+func writeAtomic(root *os.Root, name string, data []byte) error {
 	// The caller owns the private directory and writer lock. A crash can
 	// leave an incomplete temporary file, but never a partial final record.
 	temp := ".writing-" + name

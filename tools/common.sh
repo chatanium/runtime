@@ -59,6 +59,18 @@ module_go_directory() {
     printf '.\n'
 }
 
+uses_prepared_sdk() {
+    run "$GO_BINARY" -C "$ROOT/$1" mod edit -json | python3 -c '
+import json, os, sys
+owned = os.path.join(sys.argv[1], ".tools/deps/discordgo")
+print("yes" if any(
+    item["Old"]["Path"] == "github.com/bwmarrin/discordgo"
+    and os.path.abspath(os.path.join(sys.argv[2], item["New"]["Path"])) == owned
+    for item in json.load(sys.stdin).get("Replace") or ()
+) else "no")
+' "$ROOT" "$ROOT/$1"
+}
+
 list_module_directories() {
     local directory resolved
     local -a directories=()

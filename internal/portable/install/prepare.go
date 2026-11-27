@@ -101,24 +101,17 @@ func PrepareImage(ctx context.Context, path string, request ImageInput, confirm 
 	return i.prepareImage(ctx, request, confirm, "", "")
 }
 
-func (i *Installation) prepareImage(ctx context.Context, request ImageInput, confirm Confirm, initDigest, approvedImagePlan string) (_ images.Generation, resultErr error) {
+func (i *Installation) prepareImage(ctx context.Context, request ImageInput, confirm Confirm, initDigest, approvedImagePlan string) (images.Generation, error) {
 	if i.Manifest.State != store.Initializing && i.Manifest.State != store.Ready {
 		return images.Generation{}, store.ErrState
 	}
 	if err := i.VerifyBundle(ctx); err != nil {
 		return images.Generation{}, err
 	}
-	_, enginePath, engineErr := i.program(bundle.Rungv)
-	_, preparerPath, prepErr := i.program(bundle.Preparer)
-	_, compilerPath, compilerErr := i.program(bundle.GuestRungv)
-	if err := errors.Join(engineErr, prepErr, compilerErr); err != nil {
-		return images.Generation{}, err
-	}
 	plan, err := planImage(i.Manifest, i.Path, request)
 	if err != nil {
 		return images.Generation{}, err
 	}
-	p := plan.ImagePlan
 	if approvedImagePlan == "" {
 		if confirm == nil {
 			return images.Generation{}, errors.New("preparation requires exact PlanDigest approval")
@@ -129,19 +122,32 @@ func (i *Installation) prepareImage(ctx context.Context, request ImageInput, con
 	} else if i.Manifest.PlanDigest != initDigest || plan.PlanDigest != approvedImagePlan {
 		return images.Generation{}, store.ErrApprovalMismatch
 	}
+	return i.prepareImagePlan(ctx, plan, nil, approvedImagePlan != "")
+}
+
+func (i *Installation) prepareImagePlan(ctx context.Context, plan imagePlan, archive *os.File, reuse bool) (_ images.Generation, resultErr error) {
+	_, enginePath, engineErr := i.program(bundle.Rungv)
+	_, preparerPath, prepErr := i.program(bundle.Preparer)
+	_, compilerPath, compilerErr := i.program(bundle.GuestRungv)
+	if err := errors.Join(engineErr, prepErr, compilerErr); err != nil {
+		return images.Generation{}, err
+	}
+	p := plan.ImagePlan
 	db, err := i.Store(ctx)
 	if err != nil {
 		return images.Generation{}, err
 	}
 	defer func() { resultErr = errors.Join(resultErr, db.Close()) }()
-	if approvedImagePlan != "" {
+	if reuse {
 		g, err := i.findStagedImage(ctx, db, plan)
 		if err != nil || g.ID != "" {
 			return g, err
 		}
 	}
 	var input io.Reader
-	if plan.Archive != "" {
+	if archive != nil {
+		input = archive
+	} else if plan.Archive != "" {
 		file, err := OpenInput(plan.Archive, false)
 		if err != nil {
 			return images.Generation{}, err

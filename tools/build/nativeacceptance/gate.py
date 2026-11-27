@@ -3,9 +3,7 @@
 import argparse
 import asyncio
 import ctypes
-import gzip
 import hashlib
-import io
 import ipaddress
 import json
 import os
@@ -15,11 +13,15 @@ import re
 import socket
 import stat
 import subprocess
-import tarfile
+import sys
 import tempfile
 import uuid
 
 HERE = Path(__file__).resolve().parent
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(HERE.parent))
+from module_oci import pack
+
 ROOT = HERE.parents[2]
 LOCK = ROOT / 'internal/bundle/portable-release-lock.json'
 PROMPT = re.compile(rb'Type (sha256:[0-9a-f]{64}) to approve: ')
@@ -48,10 +50,6 @@ def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(',', ':')).encode()
 
 
-def checksum(data):
-    return 'sha256:' + hashlib.sha256(data).hexdigest()
-
-
 def file_hash(path):
     with path.open('rb') as file:
         return 'sha256:' + hashlib.file_digest(file, 'sha256').hexdigest()
@@ -60,49 +58,6 @@ def file_hash(path):
 def document(path, value):
     path.write_bytes(canonical(value) + b'\n')
     return path
-
-
-def pack(arch, program, path):
-    contents = {}
-    oci = 'application/vnd.oci.image.'
-
-    def blob(media, data):
-        digest = checksum(data)
-        contents['blobs/sha256/' + digest[7:]] = data
-        return {'mediaType': oci + media, 'digest': digest, 'size': len(data)}
-
-    def entry(archive, name, data, mode):
-        info = tarfile.TarInfo(name)
-        info.mode = mode
-        if data is None:
-            info.type = tarfile.DIRTYPE
-            archive.addfile(info)
-        else:
-            info.size = len(data)
-            archive.addfile(info, io.BytesIO(data))
-
-    layer = io.BytesIO()
-    with tarfile.open(fileobj=layer, mode='w', format=tarfile.USTAR_FORMAT) as tar:
-        for name in ('bin', 'dev', 'etc', 'proc', 'sys', 'tmp', 'var', 'var/lib', 'var/lib/flexmodule',
-                     'var/lib/flexmodule/data', 'var/lib/flexmodule/scratch', 'work'):
-            entry(tar, name, None, 0o1777 if name == 'tmp' else 0o755)
-        entry(tar, 'bin/probe', program.read_bytes(), 0o555)
-    raw = layer.getvalue()
-    layers = [blob('layer.v1.tar+gzip', gzip.compress(raw, mtime=0))]
-    config = blob('config.v1+json', canonical({'architecture': arch, 'os': 'linux',
-        'rootfs': {'type': 'layers', 'diff_ids': [checksum(raw)]}, 'config': {
-            'User': '1000:1000', 'WorkingDir': '/work', 'Entrypoint': ['/bin/probe'],
-            'Labels': {'org.chatanium.flexmodule.manifest.v2': (HERE / 'fixture/manifest.json').read_text(),
-                       'org.chatanium.flexmodule.resources.v2': 'portable-v2'},
-        }}))
-    manifest = blob('manifest.v1+json', canonical({'schemaVersion': 2, 'mediaType': oci + 'manifest.v1+json',
-                                                   'config': config, 'layers': layers}))
-    manifest['platform'] = {'architecture': arch, 'os': 'linux'}
-    contents['oci-layout'] = canonical({'imageLayoutVersion': '1.0.0'})
-    contents['index.json'] = canonical({'schemaVersion': 2, 'mediaType': oci + 'index.v1+json', 'manifests': [manifest]})
-    with tarfile.open(path, 'x', format=tarfile.USTAR_FORMAT) as tar:
-        for name, data in sorted(contents.items()):
-            entry(tar, name, data, 0o444)
 
 
 def files(directory, target):
@@ -496,7 +451,8 @@ def main():
     verification.add_argument('gh')
     args = parser.parse_args()
     if args.command == 'pack':
-        pack(args.arch, args.probe, args.output)
+        pack(args.arch, args.probe, HERE / 'fixture/manifest.json', args.output,
+             executable='probe', include_manifest=False)
     elif args.command == 'qualify':
         asyncio.run(qualify(args.candidate.resolve(strict=True), args.target, args.image.resolve(strict=True)))
     else:

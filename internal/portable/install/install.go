@@ -214,7 +214,7 @@ func Lock(path string) (*Installation, error) {
 	return lockPath(path, nil)
 }
 
-func lockPath(path string, check func(*Manifest) error) (*Installation, error) {
+func lockPath(path string, check func(*Installation) error) (*Installation, error) {
 	parent, err := anchor(path, false)
 	if err != nil {
 		return nil, err
@@ -232,14 +232,14 @@ func lockInstallation(parent *os.Root, path string) (*Installation, error) {
 	return lockInstallationChecked(parent, path, nil)
 }
 
-func lockInstallationChecked(parent *os.Root, path string, check func(*Manifest) error) (*Installation, error) {
+func lockInstallationChecked(parent *os.Root, path string, check func(*Installation) error) (*Installation, error) {
 	i, err := openInstallation(parent, path)
 	if err != nil {
 		return nil, err
 	}
 	i.OwnerLock, err = process.Lock(filepath.Join(path, ownerLock))
 	if err == nil && check != nil {
-		err = check(&i.Manifest)
+		err = check(i)
 	}
 	if err == nil {
 		err = i.reconcile(context.Background())
