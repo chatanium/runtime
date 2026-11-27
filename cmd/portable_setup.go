@@ -11,7 +11,7 @@ import (
 )
 
 func initCommand() *cobra.Command {
-	cmd := &cobra.Command{Use: "init", Short: "Set up a stopped runtime or confirm resetting an existing installation", Args: cobra.NoArgs}
+	cmd := &cobra.Command{Use: "init", Aliases: []string{"reset"}, Short: "Set up a stopped runtime or confirm resetting an existing installation", Args: cobra.NoArgs}
 	cmd.SetFlagErrorFunc(legacyFlagError)
 	budget, firstModule := setupFlags(cmd)
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {

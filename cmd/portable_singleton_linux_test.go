@@ -27,7 +27,7 @@ func TestPortableCommandsUseSingleInstallation(t *testing.T) {
 	})
 
 	for _, name := range []string{
-		"doctor", "init", "prepare-image", "generate-config", "configure", "inspect-config",
+		"doctor", "init", "reset", "prepare-image", "generate-config", "configure", "inspect-config",
 		"serve", "stop", "update", "uninstall", "purge", "bind-restored-volumes",
 	} {
 		rootCmd.SetArgs([]string{name, "--installation-id=old"})
@@ -39,7 +39,7 @@ func TestPortableCommandsUseSingleInstallation(t *testing.T) {
 			t.Fatalf("%s still advertises --installation-id", name)
 		}
 		switch name {
-		case "init", "generate-config":
+		case "init", "reset", "generate-config":
 			if command.Flags().Lookup("module-id") == nil {
 				t.Fatalf("%s no longer accepts --module-id", name)
 			}
