@@ -5,7 +5,10 @@ __debug_bin
 /src/__debug
 **/__debug*
 .vscode/**/*
-/modules/MusicBot
+/modules/*
+!/modules/audio-player/
+!/modules/music-bot/
+/local-modules/
 *.so
 *.pcm
 *.dca

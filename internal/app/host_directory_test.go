@@ -19,11 +19,11 @@ func TestBackendOwnershipDirectoryCannotOverlapModuleMounts(t *testing.T) {
 	if err := os.Symlink(mount, alias); err != nil {
 		t.Fatal(err)
 	}
-	if !isolatedHostDirectory(private, mount) {
+	if !IsolatedHostDirectory(private, mount) {
 		t.Fatal("separate private host directory rejected")
 	}
 	for _, path := range []string{mount, filepath.Join(mount, "nested"), filepath.Join(alias, "nested")} {
-		if isolatedHostDirectory(path, mount) {
+		if IsolatedHostDirectory(path, mount) {
 			t.Fatal("lexical or symlink-resolved module directory accepted as host-only ownership storage")
 		}
 	}

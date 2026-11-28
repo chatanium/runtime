@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
-# Reuse the build system's canonical discovery, normalization and manifest parser.
+# Preserve source matching for the explicitly selected legacy installation.
 set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/../common.sh"
 case "${1:-}" in
     sources)
         declare -A seen=()
-        discovered=$(list_module_directories)
         directories=()
-        if [[ -n "$discovered" ]]; then mapfile -t directories <<< "$discovered"; fi
+        safe_path modules
+        for directory in modules/*; do
+            [[ -d "$directory" && ! -L "$directory" && -f "$directory/manifest.json" ]] || continue
+            directories+=("$(resolve_module_directory "$directory")")
+        done
         if [[ -n "${MODULE:-}" ]]; then directories+=("$(resolve_module_directory "$MODULE")"); fi
         for directory in "${directories[@]}"; do
             [[ -z "${seen[$directory]:-}" ]] || continue

@@ -10,7 +10,7 @@ import (
 	discordbackend "github.com/thirdscam/chatanium/internal/backend/discord"
 )
 
-const voiceEnabled = false
+const VoiceEnabled = false
 
 func attachVoice(_ context.Context, _ *discordbackend.Backend, raw json.RawMessage, _ int) error {
 	if len(raw) != 0 {

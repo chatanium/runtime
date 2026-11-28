@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/thirdscam/chatanium/cmd"
+	"github.com/thirdscam/chatanium/internal/cli"
 	"github.com/thirdscam/chatanium/internal/portable/process"
 )
 
@@ -16,5 +16,5 @@ func main() {
 		}
 		return
 	}
-	cmd.Execute()
+	cli.Execute()
 }

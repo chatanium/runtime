@@ -119,6 +119,7 @@ class ChangeTests(TemporaryTree):
         self.assertFalse(runtime)
         self.assertEqual(affected, {self.source.directory})
         self.assertEqual(watch.classify({'modules/uninstalled/main.go'}, [self.source]), (False, set()))
+        self.assertEqual(watch.classify({'local-modules/uninstalled/main.go'}, [self.source]), (False, set()))
 
     def test_runtime_shared_dependency_native_embed_inputs(self):
         for path in ['shared/core-v2/x.go', 'proto/core-v2/x.proto', 'go.mod',
@@ -127,9 +128,11 @@ class ChangeTests(TemporaryTree):
                 runtime, affected = watch.classify({path}, [self.source])
                 self.assertTrue(runtime)
                 self.assertEqual(affected, {self.source.directory})
-        self.assertEqual(watch.classify({'database/query.sql'}, [self.source]),
+        self.assertEqual(watch.classify({'internal/legacy/recording/query.sql'}, [self.source]),
                          (True, {self.source.directory}))
         self.assertEqual(watch.classify({'internal/runtime/manager.go'}, [self.source]), (True, set()))
+        self.assertEqual(watch.classify({'internal/legacy/recording/message.go'}, [self.source]),
+                         (True, set()))
 
 
 class BindingTests(TemporaryTree):

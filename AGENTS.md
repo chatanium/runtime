@@ -6,15 +6,15 @@ Read [CONCEPT.md](CONCEPT.md) before designing or implementing changes. Plan bef
 
 | Path | Responsibility |
 | --- | --- |
-| `main.go`, `cmd/` | Launcher and user-facing CLI: `serve`, setup, review, diagnostics and maintenance. Also contains separate worker and guest helper entry points. |
-| `internal/portable/` | User-local installation, verified image preparation, process supervision, IPC, sandbox policy and SQLite lifecycle ledger. |
-| `internal/app/`, `internal/runtime/`, `internal/backend/` | Worker composition, backend-neutral module lifecycle and optional chat-provider adapters. |
+| `main.go`, `internal/cli/`, `cmd/` | Root launcher, operator commands, and separate worker and guest helper executables. |
+| `internal/portable/` | User-local installation, worker startup, verified images, process supervision, IPC, sandbox policy and the SQLite lifecycle ledger. |
+| `internal/app/`, `internal/runtime/`, `internal/host/`, `internal/backend/` | Shared worker composition, backend-neutral module lifecycle, sandbox contracts and chat-provider adapters. |
 | `internal/discordacl/`, `internal/discordsetup/` | Discord access policy types and host-only discovery for setup and ACL review. |
-| `internal/bundle/`, `internal/releasepayload/`, `tools/build/` | Target-specific release packaging, GVX pins, embedded payload and native release qualification. |
-| `internal/bootstrap/`, Linux host service code in `internal/host/`, `tools/dev/` | Legacy Linux administration and development paths. Shared runtime contracts remain in `internal/host/`; keep the privileged paths out of portable startup. |
+| `internal/bundle/`, `internal/releasepayload/`, `tools/build/`, `tools/buildlib/` | Release packaging, GVX pins, embedded payload, native qualification and shared build tooling. |
+| `internal/legacy/`, `tools/dev/` | Legacy Linux worker, Discord recording and SQL generation, privileged host administration and development. Keep these operations out of portable startup. |
 | `proto/`, `shared/` | Public v2 protocol and module SDK. Provider-specific Discord types are separate from `core-v2`. |
-| `examples/`, `modules/`, `internal/scaffold/` | Example and bundled modules, plus scaffolding for independent modules. |
-| `tests/integration/`, `tools/build/nativeacceptance/` | Integration fixtures and native release checks. |
+| `examples/`, `modules/`, `internal/scaffold/`, `local-modules/` | Examples, bundled modules, scaffolding and ignored local module source. |
+| `tests/integration/legacy/`, `tools/build/nativeacceptance/` | Legacy integration fixtures and portable native release checks. |
 | `docs/proposal/` | Design proposals, named by their `CHAT-N` IDs. |
 
 ## Runtime Rules

@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	discordhttp "github.com/thirdscam/chatanium/internal/backend/discord/http"
+	"github.com/thirdscam/chatanium/internal/backend/discord/discordhttp"
 	runtime "github.com/thirdscam/chatanium/internal/runtime"
 )
 

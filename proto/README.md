@@ -109,7 +109,7 @@ env -u GOROOT .tools/go/bin/go run -mod=readonly ./tools/protocol/extract-source
   -sdk github.com/bwmarrin/discordgo -out tools/protocol/inventory/source-extracted.json
 python3 tools/protocol/refresh-inventory.py
 python3 tools/protocol/emit-domain.py
-python3 tools/protocol/generate_events.py
+python3 tools/protocol/generate-events.py
 python3 tools/protocol/generate-api.py
 make buf
 python3 tools/protocol/generate-conversions.py
@@ -144,7 +144,7 @@ not run Buf, formatters, builds or tests.
 |---|---|
 | `extract-source.go`, `refresh-inventory.py` | Current SDK declarations plus reviewed source policy to refreshed API/event/type inventories; historical audits are not overwritten |
 | `emit-domain.py` | Domain schema and `domain-mapping.json` from the reviewed type inventory |
-| `generate_events.py` | Event schema, typed event registry and `event-mapping.json` |
+| `generate-events.py` | Event schema, typed event registry and `event-mapping.json` |
 | `generate-api.py` | Helper schema, operation registry and `api-mapping.json` |
 | `generate-conversions.py` | Safe views, conversions, ingress/projection support and conversion coverage from mappings and generated message shapes |
 | `generate-client.py` | Typed SDK calls, explicit aliases and client coverage using the canonical API mapping and safe converter types |

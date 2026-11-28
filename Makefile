@@ -49,7 +49,7 @@ $(error Use exactly: make build-module <directory>)
 endif
 MODULE_BUILD_DIRECTORY := $(word 2,$(MAKECMDGOALS))
 ifneq ($(filter $(MAKE_COMMAND_TARGETS),$(MODULE_BUILD_DIRECTORY)),)
-$(error Module directory conflicts with a Make command; use modules/<name> explicitly)
+$(error Module directory conflicts with a Make command; use its repo-relative path)
 endif
 export MODULE_BUILD_DIRECTORY
 .DEFAULT:
@@ -77,7 +77,7 @@ build-dev-worker:
 		bash tools/build/voice.sh voice; \
 	fi
 
-# Build every direct, non-symlink v2 module, without a per-module target catalog.
+# Build the portable runtime and the bundled module executables.
 build: build-runtime
 	@GOOS=linux bash tools/build.sh modules
 
@@ -101,7 +101,7 @@ list-module:
 
 # Permanent ordinary/no-voice integration caller; no runtime execution.
 build-integration:
-	@CGO_ENABLED=0 bash tools/build.sh build .:./tests/integration:bin/flexmodule-integration
+	@CGO_ENABLED=0 bash tools/build.sh build .:./tests/integration/legacy:bin/flexmodule-integration
 
 # Native C++/ABI/loader/license gate only; independent of unfinished app Go.
 build-native:
@@ -160,9 +160,12 @@ run-legacy-dev:
 
 # Existing Chatanium database generation remains separate from protocol generation.
 sqlc:
-	@sqlc generate -f database/sqlc.yaml
+	@sqlc generate -f internal/legacy/recording/sqlc.yaml
 
 serve: run
 
 new_module:
-	@/usr/local/bin/chatanium new
+	@launcher="$${RUNTIME:-$(PORTABLE_LOCAL)}"; \
+		case "$$launcher" in /*) ;; *) launcher="./$$launcher" ;; esac; \
+		test -x "$$launcher" || { echo 'Set RUNTIME to a launcher path or run build-runtime first' >&2; exit 1; }; \
+		"$$launcher" new

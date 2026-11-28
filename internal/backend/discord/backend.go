@@ -10,7 +10,7 @@ import (
 	"sync"
 
 	"github.com/bwmarrin/discordgo"
-	discordhttp "github.com/thirdscam/chatanium/internal/backend/discord/http"
+	"github.com/thirdscam/chatanium/internal/backend/discord/discordhttp"
 	runtime "github.com/thirdscam/chatanium/internal/runtime"
 	corewire "github.com/thirdscam/chatanium/proto/core-v2"
 	wire "github.com/thirdscam/chatanium/proto/discord-v2"

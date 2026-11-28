@@ -8,8 +8,8 @@ import sys
 import tarfile
 import zipfile
 
-sys.path.insert(0, '/source/tools/build')
-from artifacts import capture, checkout, digest, elf_closure, fetch, inventory, run, write_json
+sys.path.insert(0, '/source/tools')
+from buildlib.artifacts import capture, checkout, digest, elf_closure, fetch, inventory, run, write_json
 
 source, work = Path('/source'), Path('/work')
 lock = json.loads((source / 'tools/media/tool-lock.json').read_text())
@@ -172,7 +172,7 @@ write_json(provenance / 'builder-source-sha256.json', {
     path: digest(source / path) for path in [
         'tools/media/build.py', 'tools/media/Builder.Dockerfile',
         'tools/media/Tools.Dockerfile', 'tools/media/Module.Dockerfile',
-        'tools/build/artifacts.py', 'tools/build/images.py',
+        'tools/buildlib/__init__.py', 'tools/buildlib/artifacts.py', 'tools/build/images.py',
     ]
 })
 write_json(provenance / 'elf-closure.json', closure)

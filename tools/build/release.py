@@ -20,7 +20,8 @@ import urllib.request
 import zipfile
 
 sys.dont_write_bytecode = True
-from artifacts import canonical_json, capture, digest, run, write_json
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from buildlib.artifacts import canonical_json, capture, digest, run, write_json
 
 ROOT = Path(__file__).resolve().parents[2]
 LOCK = ROOT / 'internal/bundle/portable-release-lock.json'

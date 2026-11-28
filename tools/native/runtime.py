@@ -13,8 +13,8 @@ import shutil
 import subprocess
 import sys
 sys.dont_write_bytecode = True
-sys.path.insert(0, '/source/tools/build')
-from artifacts import capture, digest, fetch, inventory, run, write_json
+sys.path.insert(0, '/source/tools')
+from buildlib.artifacts import capture, digest, fetch, inventory, run, write_json
 
 source = Path('/source')
 parser = argparse.ArgumentParser(description=__doc__)

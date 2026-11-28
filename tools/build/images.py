@@ -8,11 +8,10 @@ import shutil
 import sys
 import tempfile
 
-from artifacts import capture, digest, inventory, run, write_json
-
 root = Path(__file__).resolve().parents[2]
 os.chdir(root)
 sys.path.insert(0, str(root / 'tools'))
+from buildlib.artifacts import capture, digest, inventory, run, write_json
 from sdk import resolve as resolve_sdk
 if not str(root).startswith('/home/'):
     raise RuntimeError('Image build workspace must be on /home, never /tmp or Docker build layers')
@@ -49,7 +48,7 @@ label_key = 'org.chatanium.flexmodule.manifest.v2'
 resource_label = 'org.chatanium.flexmodule.resources.v2'
 portable_module_recipes = {
     'examples/general-bot': 'tools/build/Module.Dockerfile',
-    'tests/integration/fixtures/sandbox': 'tools/build/Module.Dockerfile',
+    'tests/integration/legacy/fixtures/sandbox': 'tools/build/Module.Dockerfile',
     'modules/audio-player': 'tools/media/Module.Dockerfile',
     'modules/music-bot': 'tools/media/Module.Dockerfile',
 }

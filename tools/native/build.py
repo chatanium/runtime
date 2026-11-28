@@ -11,9 +11,8 @@ import sys
 # /source is read-only, including imported build helpers.
 sys.dont_write_bytecode = True
 
-sys.path.insert(0, '/source/tools/build')
-from artifacts import capture, checkout, check_elf_versions, digest, elf_closure, inventory, run, write_json
 sys.path.insert(0, '/source/tools')
+from buildlib.artifacts import capture, checkout, check_elf_versions, digest, elf_closure, inventory, run, write_json
 from sdk import provenance as sdk_provenance, resolve as resolve_sdk
 
 source = Path('/source')
@@ -170,7 +169,8 @@ write_json(provenance / 'compiler-inputs.json', {
 write_json(provenance / 'builder-source-sha256.json', {
     path: digest(source / path) for path in [
         'tools/native/build.py', 'tools/native/Builder.Dockerfile',
-        'tools/native/repositories.repo', 'tools/build/artifacts.py', 'tools/build/voice.sh',
+        'tools/native/repositories.repo', 'tools/build/voice.sh',
+        'tools/buildlib/__init__.py', 'tools/buildlib/artifacts.py',
         'tools/native/check_abi.py', 'tools/native/runtime.py',
         'tools/native/runtime-packages.lock.json', 'tools/sdk.py', 'tools/versions.mk',
     ]

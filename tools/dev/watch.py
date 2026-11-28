@@ -317,11 +317,15 @@ def classify(paths, sources):
             affected.update(source.directory for source in owners)
             continue
         # An uninstalled module tree is not a runtime dependency or an approval.
-        if path.startswith(('modules/', 'examples/')):
+        if path.startswith(('modules/', 'local-modules/', 'examples/')):
             continue
         runtime = True
         # Shared inputs and Go dependency/build changes can affect every module.
-        if path.startswith(('shared/', 'proto/', 'third_party/', 'tools/', 'database/')) or path in {'go.mod', 'go.sum', 'go.work', 'go.work.sum', '.go-version', 'Makefile'}:
+        if path.startswith(('shared/', 'proto/', 'third_party/', 'tools/')) or path in {
+            'go.mod', 'go.sum', 'go.work', 'go.work.sum', '.go-version', 'Makefile',
+            'internal/legacy/recording/schema.sql', 'internal/legacy/recording/query.sql',
+            'internal/legacy/recording/sqlc.yaml', 'internal/legacy/recording/schema.vuerd.json',
+        }:
             affected.update(source.directory for source in sources)
         for source in sources:
             if source.go_directory != '.' and path.startswith(source.go_directory + '/'):

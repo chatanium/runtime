@@ -2,7 +2,7 @@ package discordbackend
 
 import (
 	"github.com/bwmarrin/discordgo"
-	discordhttp "github.com/thirdscam/chatanium/internal/backend/discord/http"
+	"github.com/thirdscam/chatanium/internal/backend/discord/discordhttp"
 	runtime "github.com/thirdscam/chatanium/internal/runtime"
 	"github.com/thirdscam/chatanium/internal/runtime/upload"
 	"google.golang.org/grpc/codes"

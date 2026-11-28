@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"math"
-	"net/netip"
-	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -205,12 +203,33 @@ func (c *Config) applyDefaults() {
 	}
 }
 
-var imagePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9.:-]*/[a-zA-Z0-9][a-zA-Z0-9._/-]*@sha256:[a-f0-9]{64}$`)
+func defaultConfig(id, bundleDigest, storageRoot, ipcRoot string) Config {
+	config := Config{
+		SchemaVersion: 2,
+		Host: HostConfig{RuntimeInstallationID: id, BundleDigest: bundleDigest,
+			ManagementDirectory: filepath.Join(storageRoot, "app"), StorageRoot: storageRoot, IPCRoot: ipcRoot,
+			Network: NetworkConfig{Profile: host.NetworkNone}},
+		Backends: map[string]BackendConfig{},
+		Limits: Limits{TerminationDeadline: Duration(15 * time.Second), HostOperationDeadline: Duration(10 * time.Second),
+			HookRPCDeadline: Duration(5 * time.Second), ReadinessPollInterval: Duration(100 * time.Millisecond),
+			ControlMessageMaxBytes: 1 << 20, ConfigMaxBytes: 64 << 10, ControlRPCsPerInstance: 32,
+			CredentialRefsPerInstance: 128, CredentialRefMaxTTL: Duration(10 * time.Minute), LogBufferBytes: 8 << 20,
+			LogFileMaxBytes: 16 << 20, LogRetainedFiles: 4,
+			UploadFileNameMaxBytes: 256, UploadContentTypeMaxBytes: 256, UploadDeadline: Duration(time.Minute)},
+		Modules: []ModuleSpec{},
+	}
+	config.applyDefaults()
+	return config
+}
+
+func (n NetworkConfig) hasLegacySettings() bool {
+	return n.IPv4 || n.IPv6 || n.FirewallBackend != "" || n.IPv4Pool != "" || n.IPv6Pool != "" ||
+		n.InventoryRevision != "" || n.Uplink4 != "" || n.Uplink6 != "" || n.Source4 != "" || n.Source6 != "" ||
+		len(n.Resolvers)+len(n.HostPublicAddresses)+len(n.InternalPrefixes)+len(n.InfrastructurePrefixes)+len(n.MetadataDestinations) != 0
+}
+
 var recordImagePattern = regexp.MustCompile(`^record:sha256:[a-f0-9]{64}$`)
 var bundleDigestPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
-var interfacePattern = regexp.MustCompile(`^[a-zA-Z0-9_.-]{1,15}$`)
-var ulaNetwork = netip.MustParsePrefix("fc00::/7")
-var publicIPv6Network = netip.MustParsePrefix("2000::/3")
 
 func cleanAbsolute(s string) bool {
 	return s != "/" && filepath.IsAbs(s) && filepath.Clean(s) == s && !strings.ContainsRune(s, 0)
@@ -220,18 +239,6 @@ func (c Config) Validate() error {
 	h := c.Host
 	d := c.Defaults
 	if c.SchemaVersion != 2 || c.Backends == nil || l.TerminationDeadline <= 0 || l.HostOperationDeadline <= 0 || l.HookRPCDeadline <= 0 || l.ReadinessPollInterval <= 0 || l.CredentialRefMaxTTL <= 0 || l.ControlMessageMaxBytes <= 0 || l.ConfigMaxBytes <= 0 || l.ControlRPCsPerInstance <= 0 || l.CredentialRefsPerInstance <= 0 || l.LogBufferBytes <= 0 || l.LogFileMaxBytes <= 0 || l.LogRetainedFiles <= 0 || l.UploadRecordsPerInstance <= 0 || l.UploadRecordsPerHost <= 0 {
-		return invalidConfig()
-	}
-	switch h.Format {
-	case "":
-		if h.QuotaBackend != "xfs-project" || l.PersistentInodeLimit <= 0 || l.ScratchInodeLimit <= 0 {
-			return invalidConfig()
-		}
-	case PortableFormat:
-		if h.QuotaBackend != "" || l.PersistentInodeLimit != 0 || l.ScratchInodeLimit != 0 || !c.validPortableBudgets() {
-			return invalidConfig()
-		}
-	default:
 		return invalidConfig()
 	}
 	if l.UploadFileNameMaxBytes <= 0 || l.UploadContentTypeMaxBytes <= 0 || l.UploadDeadline <= 0 || l.UploadFileNameMaxBytes > math.MaxInt32 || l.UploadContentTypeMaxBytes > math.MaxInt32 {
@@ -255,7 +262,7 @@ func (c Config) Validate() error {
 	if l.LogBufferBytes <= 3*int64(l.ControlMessageMaxBytes)+65536+4096+256 {
 		return invalidConfig()
 	}
-	if h.RuntimeInstallationID == "" || strings.TrimSpace(h.RuntimeInstallationID) != h.RuntimeInstallationID || strings.ContainsAny(h.RuntimeInstallationID, "/\x00") || !bundleDigestPattern.MatchString(h.BundleDigest) || h.Format == PortableFormat && strings.ContainsAny(h.RuntimeInstallationID, "\\\r\n") {
+	if h.RuntimeInstallationID == "" || strings.TrimSpace(h.RuntimeInstallationID) != h.RuntimeInstallationID || strings.ContainsAny(h.RuntimeInstallationID, "/\x00") || !bundleDigestPattern.MatchString(h.BundleDigest) {
 		return invalidConfig()
 	}
 	if h.ManagementDirectory != h.AppDirectory() {
@@ -274,60 +281,17 @@ func (c Config) Validate() error {
 			}
 		}
 	}
-	n := h.Network
-	if n.Profile == host.NetworkNone || h.Format == PortableFormat {
-		if h.Format == PortableFormat && n.Profile != host.NetworkNone && n.Profile != host.NetworkPublicV4 {
+	switch h.Format {
+	case "":
+		if !c.validLegacyHost() {
 			return invalidConfig()
 		}
-		if n.IPv4 || n.IPv6 || n.FirewallBackend != "" || n.IPv4Pool != "" || n.IPv6Pool != "" || n.InventoryRevision != "" || n.Uplink4 != "" || n.Uplink6 != "" || n.Source4 != "" || n.Source6 != "" || len(n.Resolvers)+len(n.HostPublicAddresses)+len(n.InternalPrefixes)+len(n.InfrastructurePrefixes)+len(n.MetadataDestinations) != 0 {
+	case PortableFormat:
+		if !c.validPortableHost() {
 			return invalidConfig()
 		}
-	} else {
-		if (n.Profile != host.NetworkPublicV4 && n.Profile != host.NetworkPublicDual) || (n.Profile == host.NetworkPublicDual) != n.IPv6 {
-			return invalidConfig()
-		}
-		if n.FirewallBackend != "iptables" || !n.IPv4 || len(n.Resolvers) == 0 || n.HostPublicAddresses == nil || n.InternalPrefixes == nil || n.InfrastructurePrefixes == nil || n.MetadataDestinations == nil {
-			return invalidConfig()
-		}
-		pool4, poolErr := netip.ParsePrefix(n.IPv4Pool)
-		source4, sourceErr := netip.ParseAddr(n.Source4)
-		if poolErr != nil || !pool4.Addr().Is4() || pool4 != pool4.Masked() || pool4.Bits() < 8 || pool4.Bits() > 30 || n.InventoryRevision == "" || !interfacePattern.MatchString(n.Uplink4) || sourceErr != nil || !source4.Is4() || !source4.IsGlobalUnicast() || len(n.HostPublicAddresses) == 0 || len(n.MetadataDestinations) == 0 {
-			return invalidConfig()
-		}
-		if n.IPv6 {
-			pool6, err := netip.ParsePrefix(n.IPv6Pool)
-			source6, sourceErr := netip.ParseAddr(n.Source6)
-			if err != nil || !pool6.Addr().Is6() || pool6 != pool6.Masked() || pool6.Bits() < 48 || pool6.Bits() > 126 || !ulaNetwork.Contains(pool6.Addr()) || !interfacePattern.MatchString(n.Uplink6) || sourceErr != nil || !publicIPv6Network.Contains(source6) {
-				return invalidConfig()
-			}
-		} else if n.IPv6Pool != "" || n.Uplink6 != "" || n.Source6 != "" {
-			return invalidConfig()
-		}
-		resolver4, resolver6 := false, false
-		for group, addresses := range [][]string{n.Resolvers, n.HostPublicAddresses} {
-			for _, s := range addresses {
-				a, e := netip.ParseAddr(s)
-				if e != nil || a.Is4In6() || !a.IsGlobalUnicast() || a.IsPrivate() || a.IsLoopback() || a.IsLinkLocalUnicast() || (!n.IPv6 && a.Is6()) {
-					return invalidConfig()
-				}
-				if group == 0 {
-					resolver4 = resolver4 || a.Is4()
-					resolver6 = resolver6 || a.Is6()
-				}
-			}
-		}
-		if !resolver4 || (n.IPv6 && !resolver6) {
-			return invalidConfig()
-		}
-		for _, ss := range [][]string{n.InternalPrefixes, n.InfrastructurePrefixes, n.MetadataDestinations} {
-			for _, s := range ss {
-				if _, e := netip.ParsePrefix(s); e != nil {
-					if _, e = netip.ParseAddr(s); e != nil {
-						return invalidConfig()
-					}
-				}
-			}
-		}
+	default:
+		return invalidConfig()
 	}
 	for id, b := range c.Backends {
 		if id == "" || b.Major == 0 || !utf8.Valid(b.Config) || !json.Valid(b.Config) || len(bytes.TrimSpace(b.Config)) == 0 || bytes.TrimSpace(b.Config)[0] != '{' {
@@ -357,20 +321,14 @@ func (c Config) Validate() error {
 	return nil
 }
 func (c Config) validateSpec(s ModuleSpec) error {
-	imageOK := imagePattern.MatchString(s.ImageDigest) || recordImagePattern.MatchString(s.ImageDigest)
-	pathOK := false
-	if len(s.Entrypoint) > 0 {
-		if c.Host.Format == PortableFormat {
-			entry := s.Entrypoint[0]
-			pathOK = entry != "/" && path.IsAbs(entry) && path.Clean(entry) == entry && !strings.ContainsAny(entry, "\\\x00\r\n")
-		} else {
-			pathOK = cleanAbsolute(s.Entrypoint[0])
-		}
-	}
-	if c.Host.Format == PortableFormat && (!recordImagePattern.MatchString(s.ImageDigest) || len(s.ModuleID) > 256 || strings.TrimSpace(string(s.ModuleID)) != string(s.ModuleID) || strings.ContainsAny(string(s.ModuleID), "\x00\r\n") || s.UID == ^uint32(0) || s.GID == ^uint32(0)) {
+	if strings.TrimSpace(string(s.ModuleID)) == "" || s.UID == 0 || s.GID == 0 || len(s.Entrypoint) == 0 || s.Approval == nil {
 		return invalidConfig()
 	}
-	if strings.TrimSpace(string(s.ModuleID)) == "" || !imageOK || s.UID == 0 || s.GID == 0 || !pathOK || s.Approval == nil {
+	if c.Host.Format == PortableFormat {
+		if !s.validPortableTarget() {
+			return invalidConfig()
+		}
+	} else if !s.validLegacyTarget() {
 		return invalidConfig()
 	}
 	if s.DiscordACLRequired {

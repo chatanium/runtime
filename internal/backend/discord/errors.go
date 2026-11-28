@@ -3,7 +3,7 @@ package discordbackend
 import (
 	"context"
 	"errors"
-	discordhttp "github.com/thirdscam/chatanium/internal/backend/discord/http"
+	"github.com/thirdscam/chatanium/internal/backend/discord/discordhttp"
 	corewire "github.com/thirdscam/chatanium/proto/core-v2"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

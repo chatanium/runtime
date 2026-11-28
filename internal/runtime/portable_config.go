@@ -3,7 +3,8 @@ package runtime
 import (
 	"encoding/json"
 	"math"
-	"path/filepath"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/thirdscam/chatanium/internal/host"
@@ -15,31 +16,31 @@ import (
 const PortableFormat = "portable-v2"
 
 func DefaultPortableConfig(id, bundleDigest, storageRoot, ipcRoot string) Config {
-	config := Config{
-		SchemaVersion: 2,
-		Host: HostConfig{Format: PortableFormat, RuntimeInstallationID: id, BundleDigest: bundleDigest,
-			ManagementDirectory: filepath.Join(storageRoot, "app"), StorageRoot: storageRoot, IPCRoot: ipcRoot,
-			Network: NetworkConfig{Profile: host.NetworkNone}},
-		Backends: map[string]BackendConfig{},
-		Limits: Limits{TerminationDeadline: Duration(15 * time.Second), HostOperationDeadline: Duration(10 * time.Second),
-			HookRPCDeadline: Duration(5 * time.Second), ReadinessPollInterval: Duration(100 * time.Millisecond),
-			ControlMessageMaxBytes: 1 << 20, ConfigMaxBytes: 64 << 10, ControlRPCsPerInstance: 32,
-			CredentialRefsPerInstance: 128, CredentialRefMaxTTL: Duration(10 * time.Minute), LogBufferBytes: 8 << 20,
-			LogFileMaxBytes: 16 << 20, LogRetainedFiles: 4, UploadRecordsPerInstance: 1, UploadRecordsPerHost: 1,
-			UploadFileNameMaxBytes: 256, UploadContentTypeMaxBytes: 256, UploadDeadline: Duration(time.Minute)},
-		Modules: []ModuleSpec{},
-	}
-	config.applyDefaults()
+	config := defaultConfig(id, bundleDigest, storageRoot, ipcRoot)
+	config.Host.Format = PortableFormat
+	config.Limits.UploadRecordsPerInstance = 1
+	config.Limits.UploadRecordsPerHost = 1
 	return config
 }
 
-func (c Config) validPortableBudgets() bool {
-	l, d := c.Limits, c.Defaults
+func (c Config) validPortableHost() bool {
+	h, l, d := c.Host, c.Limits, c.Defaults
+	n := h.Network
 	const maxDeadline = Duration(10 * time.Minute)
-	return len(c.Modules) <= 512 && l.UploadRecordsPerInstance == 1 && l.UploadRecordsPerHost == 1 &&
+	return h.QuotaBackend == "" && l.PersistentInodeLimit == 0 && l.ScratchInodeLimit == 0 &&
+		!strings.ContainsAny(h.RuntimeInstallationID, "\\\r\n") &&
+		(n.Profile == host.NetworkNone || n.Profile == host.NetworkPublicV4) && !n.hasLegacySettings() &&
+		len(c.Modules) <= 512 && l.UploadRecordsPerInstance == 1 && l.UploadRecordsPerHost == 1 &&
 		l.ControlMessageMaxBytes <= 8<<20 && d.StartupDeadline <= maxDeadline &&
 		d.DrainDeadline <= maxDeadline && l.TerminationDeadline <= maxDeadline && l.HostOperationDeadline <= maxDeadline &&
 		l.HookRPCDeadline <= maxDeadline && l.UploadDeadline <= maxDeadline && l.CredentialRefMaxTTL <= Duration(24*time.Hour)
+}
+
+func (s ModuleSpec) validPortableTarget() bool {
+	entry, id := s.Entrypoint[0], string(s.ModuleID)
+	return recordImagePattern.MatchString(s.ImageDigest) && len(id) <= 256 && strings.TrimSpace(id) == id &&
+		!strings.ContainsAny(id, "\x00\r\n") && s.UID != ^uint32(0) && s.GID != ^uint32(0) &&
+		entry != "/" && path.IsAbs(entry) && path.Clean(entry) == entry && !strings.ContainsAny(entry, "\\\x00\r\n")
 }
 
 func (p ResourceProfile) validPortable() bool {

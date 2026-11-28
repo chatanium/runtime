@@ -3,6 +3,9 @@ package scaffold
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -21,6 +24,97 @@ func fixtureSDK(t *testing.T) string {
 		}
 	}
 	return dir
+}
+
+func TestDefaultDestination(t *testing.T) {
+	checkout := t.TempDir()
+	t.Chdir(checkout)
+	dir, err := Destination("ping-bot", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(checkout, "local-modules", "ping-bot"); dir != want {
+		t.Fatalf("destination = %q, want %q", dir, want)
+	}
+	if got := BuildTarget(checkout, dir); got != "local-modules/ping-bot" {
+		t.Fatalf("build target = %q, want local-modules/ping-bot", got)
+	}
+}
+
+func TestCreateGoReplacements(t *testing.T) {
+	sdk := fixtureSDK(t)
+	t.Run("in checkout", func(t *testing.T) {
+		dir := filepath.Join(sdk, "local-modules", "ping-bot")
+		_, err := Create(Options{Name: "ping-bot", Directory: dir, SDKPath: sdk, Template: Discord})
+		if err != nil {
+			t.Fatal(err)
+		}
+		contents, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{
+			`replace github.com/thirdscam/chatanium => "../.."`,
+			`replace github.com/bwmarrin/discordgo => "../../.tools/deps/discordgo"`,
+		} {
+			if !strings.Contains(string(contents), want+"\n") {
+				t.Errorf("go.mod is missing %s", want)
+			}
+		}
+	})
+	t.Run("outside checkout", func(t *testing.T) {
+		dir := filepath.Join(filepath.Dir(sdk), "ping-bot")
+		_, err := Create(Options{Name: "ping-bot", Directory: dir, SDKPath: sdk, Template: Discord})
+		if err != nil {
+			t.Fatal(err)
+		}
+		contents, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{
+			`replace github.com/thirdscam/chatanium => ` + strconv.Quote(filepath.ToSlash(sdk)),
+			`replace github.com/bwmarrin/discordgo => "../sdk checkout/.tools/deps/discordgo"`,
+		} {
+			if !strings.Contains(string(contents), want+"\n") {
+				t.Errorf("go.mod is missing %s", want)
+			}
+		}
+	})
+}
+
+func TestCreateViaSymlinkOutsideCheckout(t *testing.T) {
+	sdk := fixtureSDK(t)
+	outside := filepath.Join(filepath.Dir(sdk), "outside")
+	if err := os.Mkdir(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(sdk, "local-modules")
+	if err := os.Symlink(outside, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("cannot create a directory symlink: %v", err)
+		}
+		t.Fatal(err)
+	}
+	dir, err := Create(Options{Name: "ping-bot", Directory: filepath.Join(link, "missing", "ping-bot"), SDKPath: sdk, Template: Discord})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := BuildTarget(sdk, dir); got != "" {
+		t.Errorf("outside module has a checkout build target: %s", got)
+	}
+	contents, err := os.ReadFile(filepath.Join(outside, "missing", "ping-bot", "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`replace github.com/thirdscam/chatanium => ` + strconv.Quote(filepath.ToSlash(sdk)),
+		`replace github.com/bwmarrin/discordgo => "../../../sdk checkout/.tools/deps/discordgo"`,
+	} {
+		if !strings.Contains(string(contents), want+"\n") {
+			t.Errorf("go.mod is missing %s", want)
+		}
+	}
 }
 
 func TestCreateRefusesOverwrite(t *testing.T) {

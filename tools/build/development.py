@@ -11,8 +11,8 @@ import stat
 import sys
 import tarfile
 sys.dont_write_bytecode = True
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from artifacts import canonical_json as canonical, digest
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from buildlib.artifacts import canonical_json as canonical, digest
 
 MAX_BYTES = 4 << 30
 MAX_FILES = 4096

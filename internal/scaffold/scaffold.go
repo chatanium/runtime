@@ -42,9 +42,22 @@ func Destination(name, directory string) (string, error) {
 		return "", errors.New("module name must be 1–50 lowercase letters, digits or hyphens, starting with a letter")
 	}
 	if directory == "" {
-		directory = filepath.Join("modules", name)
+		directory = filepath.Join("local-modules", name)
 	}
 	return filepath.Abs(directory)
+}
+
+func resolveOutputPath(path string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	parent := filepath.Dir(path)
+	if !errors.Is(err, os.ErrNotExist) || parent == path {
+		return resolved, err
+	}
+	resolved, err = resolveOutputPath(parent)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(resolved, filepath.Base(path)), nil
 }
 
 // BuildTarget returns the repo-relative path for make modules, or "" if it
@@ -53,10 +66,22 @@ func BuildTarget(sdk, directory string) string {
 	if sdk == "" {
 		sdk = "."
 	}
-	root, err := filepath.Abs(sdk)
+	root, err := filepath.EvalSymlinks(sdk)
 	if err != nil {
 		return ""
 	}
+	root, err = filepath.Abs(root)
+	if err != nil {
+		return ""
+	}
+	dir, err := resolveOutputPath(directory)
+	if err != nil {
+		return ""
+	}
+	return buildTarget(root, dir)
+}
+
+func buildTarget(root, directory string) string {
 	relative, err := filepath.Rel(root, directory)
 	if err != nil {
 		return ""
@@ -66,6 +91,17 @@ func BuildTarget(sdk, directory string) string {
 		return ""
 	}
 	return target
+}
+
+func goReplacementPath(from, to string) string {
+	if relative, err := filepath.Rel(from, to); err == nil {
+		path := filepath.ToSlash(relative)
+		if path != ".." && !strings.HasPrefix(path, "../") {
+			return "./" + path
+		}
+		return path
+	}
+	return filepath.ToSlash(to)
 }
 
 // Create refuses an existing destination rather than replacing user sources.
@@ -105,24 +141,30 @@ func Create(opts Options) (string, error) {
 	if _, err := os.Stat(filepath.Join(sdk, "shared", "core-v2", "plugin.go")); err != nil {
 		return "", fmt.Errorf("SDK checkout lacks the public v2 module transport: %w", err)
 	}
+	root, err := filepath.EvalSymlinks(sdk)
+	if err != nil {
+		return "", fmt.Errorf("resolve SDK checkout: %w", err)
+	}
+	output, err := resolveOutputPath(dir)
+	if err != nil {
+		return "", fmt.Errorf("resolve module output: %w", err)
+	}
+	sdkPath := filepath.ToSlash(sdk)
+	if relative, err := filepath.Rel(root, output); err == nil && filepath.IsLocal(relative) {
+		sdkPath = goReplacementPath(output, root)
+	}
 	discordPath := ""
 	if opts.Template == Discord {
-		discordPath = filepath.Join(sdk, ".tools", "deps", "discordgo")
-		if relative, err := filepath.Rel(dir, discordPath); err == nil {
-			discordPath = filepath.ToSlash(relative)
-			if !strings.HasPrefix(discordPath, "../") {
-				discordPath = "./" + discordPath
-			}
-		}
+		discordPath = goReplacementPath(output, filepath.Join(root, ".tools", "deps", "discordgo"))
 	}
 	data := struct {
 		Name, ModulePath, SDKPath, DiscordPath, BuildTarget string
 		Discord                                           bool
 	}{
 		Name: opts.Name, ModulePath: opts.ModulePath,
-		SDKPath:     strconv.Quote(filepath.ToSlash(sdk)),
-		DiscordPath: strconv.Quote(filepath.ToSlash(discordPath)),
-		BuildTarget: BuildTarget(sdk, dir),
+		SDKPath:     strconv.Quote(sdkPath),
+		DiscordPath: strconv.Quote(discordPath),
+		BuildTarget: buildTarget(root, output),
 		Discord:     opts.Template == Discord,
 	}
 	main, tests := "local.go.tmpl", "local_test.go.tmpl"

@@ -81,18 +81,18 @@ Current entry points:
 
 | Path | Responsibility |
 |---|---|
-| `main.go`, `cmd/`, `internal/portable/install/` | User-local doctor, initialization, review, foreground start/stop, offline update, uninstall and purge |
-| `internal/app/`, `cmd/chatanium-worker/` | Separately compiled nonroot worker, optional backend/voice composition |
-| `internal/configgen/` | Configuration generation from explicitly prepared image records |
+| `main.go`, `internal/cli/`, `internal/portable/install/` | Launcher, operator commands, setup, configuration review, and maintenance |
+| `cmd/chatanium-worker/`, `internal/portable/worker/`, `internal/app/` | Worker entry point, portable startup, and shared backend composition |
+| `internal/host/`, `internal/legacy/` | Shared sandbox contracts and the distinct legacy Linux worker, privileged host, and recording implementation |
 | `internal/portable/{engine,process,service,session,sandbox,images,store}/` | Native child lifetime, authenticated controls, guest grants, verified images and the installation ledger |
 | `internal/runtime/`, `internal/runtime/upload/` | Backend-neutral instance lifecycle, grants, admission and file ownership |
 | `proto/core-v2/`, `shared/core-v2/` | Lifecycle, configuration, file transfer and authenticated transport |
 | `proto/discord-v2/`, `shared/discord-v2/`, `internal/backend/discord/` | Typed Discord domain/events/helpers and host adapter |
-| `internal/backend/discord/http/` | Host-only HTTP transport (package `http`, imported as `discordhttp`) |
+| `internal/backend/discord/discordhttp/` | Host-only Discord HTTP transport |
 | `internal/backend/discord/voicejobs/` | Optional bounded voice jobs; native DAVE bridge is supplied by the [maintained SDK patch stack](third_party/discordgo/README.md) |
 | `shared/media/opus/` | Module-side bounded FFmpeg/Opus processing, not a core service |
 | `examples/general-bot/`, `modules/music-bot/`, `modules/audio-player/` | Ordinary bot example and independent optional media modules |
-| `tests/integration/` | Integration runner (`main.go`), `sandbox-policy.py` observer and `fixtures/sandbox/` |
+| `tests/integration/legacy/`, `tools/build/nativeacceptance/` | Legacy Linux integration runner and fixtures, and portable native release qualification |
 | [Original FlexModule archive](https://github.com/thirdscam/chatanium-flexmodule/tree/main/docs/archive) | Historical voice design/implementation records; not copied into this checkout |
 
 The old v1 wrappers/schema, legacy utility conversion path and experimental
@@ -105,26 +105,19 @@ manifest identity, operator-assigned ModuleIDs, OCI labels or module grants.
 
 ### Host application state and output
 
-`internal/app` owns runtime startup, lifecycle and cleanup behind the root Cobra
-commands. With Discord enabled, the existing `src/Database` and `src/Guild`
-recording handlers attach to the **same** host `discordgo.Session` before it is
-opened. There is no second Gateway connection or legacy backend running beside
-v2. Trusted host lookups do not impersonate a module principal; modules never
-receive the raw Session, bot token or direct DB access.
+The portable worker does not open a Discord recording database. The legacy
+Linux worker attaches the handlers from `internal/legacy/recording/` to the
+same host `discordgo.Session` before opening it. Modules do not receive that
+session, the bot token, or database access.
 
-The host retains the SQLite/sqlc data model and `:memory:` behavior. Its single
-connection pool (`MaxOpenConns=1`, `MaxIdleConns=1`) keeps schema creation and
-concurrent guild/message callbacks on the same in-memory database. Data is not
-newly persisted across restarts. This is distinct from explicitly approved
-module-owned persistent storage. Shutdown cancels and joins host recording work
-and closes the database along with the backend lifecycle.
+The legacy recording database lives in memory. Its single connection keeps
+schema creation and concurrent Gateway callbacks on the same SQLite database.
+The worker waits for callbacks to finish before closing it. This database is
+separate from the portable installation ledger and module-owned volumes.
 
-Human startup/diagnostic logs go to **stderr**; runtime observations and generated
-configuration JSON go to **stdout**. Disk logging under the working directory's
-`logs/` is optional. An unavailable working directory or unwritable log location
-produces a warning and falls back to stderr instead of preventing startup.
-`LOG_MODE=production` is the default; `development` enables verbose logging.
-Use canonical absolute operator paths rather than relying on a writable cwd.
+Human diagnostics go to stderr. Worker observations and generated configuration
+JSON use stdout. Use canonical absolute operator paths rather than relying on a
+writable working directory.
 
 ## Pinned builds and independent artifacts
 
@@ -156,10 +149,10 @@ make buf
 make buf-check
 ```
 
-The host database bindings in `src/Database/Internal/` are checked in, so an
-ordinary build or startup does not require sqlc or leftover generated files.
-After editing `database/schema.sql` or `database/query.sql`, regenerate with
-**sqlc v1.30.0**:
+The legacy recording package checks in its generated bindings under
+`internal/legacy/recording/internal/sqlcgen/`. Ordinary builds and startup do
+not require sqlc. After editing `schema.sql` or `query.sql` in
+`internal/legacy/recording/`, regenerate with sqlc v1.30.0:
 
 ```sh
 sqlc version # v1.30.0
@@ -173,18 +166,19 @@ Commit the SQL changes together with all three generated Go files
 | Command | Artifact or scope |
 |---|---|
 | `make prepare-sdk` | Download the pinned upstream DiscordGo module, verify its original checksums and apply the maintained patches; no application/native compilation |
-| `make list-module` | Display detailed manifest blocks with name/version, author, description, backend protocols and grouped capability names; no Go/native/SDK preparation, module build or runtime query |
+| `make list-module` | Inspect the bundled module manifests; no compiler, build, or runtime query |
 | `make build-runtime GOOS=linux GOARCH=amd64` | Build the offline portable launcher, target-matched original GVX and worker, Linux guest bridge/preparer and their provenance |
 | `make build-runtime GOOS=windows GOARCH=arm64` | Cross-build a Windows arm64 artifact on the Linux build host; this is not a WHPX execution test |
-| `make build` | Build the portable runtime plus direct v2 module directories under `modules/` |
-| `make modules` | Build and package ordinary modules under `modules/` as `bin/modules/<name>/module.oci.tar`. Use `MODULE=<name>` to select one. |
-| `make build-module music-bot` | Build only `modules/music-bot` into `bin/modules/music-bot/module`; any module folder name works without editing the Makefile |
+| `make build` | Build the portable runtime and bundled module executables |
+| `make modules MODULE=local-modules/hello` | Package the selected local module as `bin/local-modules/hello/module.oci.tar`. Without `MODULE`, consider only bundled modules and skip modules that need native media tools. |
+| `make build-module music-bot` | Build `modules/music-bot` into `bin/modules/music-bot/module` |
+| `make new_module` | Run `new` with the built portable launcher, or with the launcher selected by `RUNTIME` |
 | `make build-module examples/general-bot` | Explicitly build the root-module example into `bin/examples/general-bot/module` |
 | `make build-native BUILD_JOBS=2` | Independent native C++/ABI/loader/license gate; `.tools/native/prefix` and `.tools/native/bundle`, no application Go compilation or `bin/voice-runtime` publication |
 | `make buf` / `make buf-check` | Transactional owned protobuf publication / non-mutating generation comparison; see [protocol maintenance](proto/README.md) |
-| `make build-integration` | `bin/flexmodule-integration` from `tests/integration`; CGO=0, no runtime/test execution |
-| `make build-module tests/integration/fixtures/sandbox` | Explicitly build the backendless integration fixture into `bin/tests/integration/fixtures/sandbox/module` |
-| `make check-offline` | Focused SDK-preparation tests, Buf schema/generation comparison and bounded ordinary tests in the prepared SDK, root and discovered local Go modules; no live Discord or native build |
+| `make build-integration` | Build the legacy runner `bin/flexmodule-integration`; does not run it |
+| `make build-module tests/integration/legacy/fixtures/sandbox` | Build the legacy sandbox fixture into `bin/tests/integration/legacy/fixtures/sandbox/module` |
+| `make check-offline` | Check SDK preparation and protobuf generation, then test the prepared SDK, root Go module, and bundled Go modules; no live Discord or native build |
 | `make clean` | Owned runtime/integration binaries and directory-derived module outputs only; no native bundle deletion or Docker prune |
 
 Portable bundles currently have no native voice closure. `doctor` reports the
@@ -192,13 +186,11 @@ capability of the embedded bundle, not the capabilities of another target or an
 old installation. The native/media build instructions below concern those
 separate artifacts, not portable installation prerequisites.
 
-Module discovery uses each direct `modules/<name>/manifest.json`, not a fixed
-module list. Symlinks and non-v2 entries such as the old `modules/MusicBot`
-checkout are not discovered. Examples and integration fixtures outside
-`modules/` are built only when selected explicitly. A selected directory uses
-its nearest enclosing `go.mod`, so both independent modules and packages in the
-root Go module work. The current independent modules require `github.com/bwmarrin/discordgo`
-`v0.29.1-0.20260214123928-f43dd94faaac`, upstream commit
+Default module discovery selects the bundled sources in `modules/`. Use an
+explicit checkout-relative path for local modules, examples, and integration
+fixtures. A selected source directory uses its nearest `go.mod`, so independent
+modules and packages in the root Go module both work. The bundled modules require
+`github.com/bwmarrin/discordgo` `v0.29.1-0.20260214123928-f43dd94faaac`, upstream commit
 `f43dd94faaacd5b163e9e783f14b5bd8be639fc9`. The root `go.mod` is the version
 authority and replaces that module with `./.tools/deps/discordgo`; each nested
 module uses `../../.tools/deps/discordgo` and a local Chatanium root
@@ -320,13 +312,12 @@ cancel. An existing source directory is never overwritten.
 For a module named `hello`, build the archive, install it, and start the runtime:
 
 ```sh
-make modules MODULE=hello
-./bin/chatanium module install ./bin/modules/hello/module.oci.tar
+make modules MODULE=local-modules/hello
+./bin/chatanium module install ./bin/local-modules/hello/module.oci.tar
 ./bin/chatanium serve
 ```
 
-`make modules` builds all ordinary modules when you omit `MODULE`. To select
-one outside `modules/`, use its checkout-relative path, such as
+Select local modules and examples by checkout-relative path, such as
 `MODULE=examples/general-bot`. Use `make image-media` for the native media modules.
 
 `module install` checks the archive in an isolated guest. On a fresh system
@@ -353,10 +344,10 @@ filters events using its old module settings; rebuild it to use the new
 template.
 
 For scripts, use `new --name hello` with `--template local` or `--template discord`.
-`--output` defaults to `modules/<name>`. `--module-path` defaults to
-`example.com/<name>`. `--sdk-path` defaults to this checkout. The generated
-`go.mod` references this SDK. The Discord starter also uses the maintained
-DiscordGo checkout.
+`--output` defaults to `local-modules/<name>`, which Git ignores.
+`--module-path` defaults to `example.com/<name>`. `--sdk-path` defaults to this
+checkout. The generated `go.mod` references this SDK. The Discord starter also
+uses the maintained DiscordGo checkout.
 
 ### Module images
 
@@ -365,7 +356,7 @@ Set these variables to real writable OCI repository/tag names before invoking:
 ```sh
 make image-module MODULE=examples/general-bot \
   MODULE_IMAGE="${MODULE_IMAGE:?set an ordinary module image tag}"
-make image-module MODULE=tests/integration/fixtures/sandbox \
+make image-module MODULE=tests/integration/legacy/fixtures/sandbox \
   MODULE_IMAGE="${SANDBOX_IMAGE:?set a sandbox fixture image tag}"
 make image-media \
   MUSIC_IMAGE="${MUSIC_IMAGE:?set a music module image tag}" \
@@ -885,14 +876,14 @@ release acceptance; those remain pending.
 
 ### Development-only hot reload
 
-Ordinary `make run` and `chatanium start` do not expose a reload controller.
-Enable the watched workflow explicitly:
+Portable `make run` does not expose a reload controller. For an existing legacy
+Linux installation, enable the watcher explicitly:
 
 ```sh
-DEV_MODE=1 \
+LEGACY_RUNTIME="${LEGACY_RUNTIME:?use the original installed v1 launcher}" \
 DEV_RUNTIME_USER="${DEV_RUNTIME_USER:?set the approved installed non-root, non-Docker App account}" \
 INSTALLATION_ID="${INSTALLATION_ID:?set approved product installation ID}" \
-make run
+make run-legacy-dev
 ```
 
 `DISABLE_VOICE=1` remains the voice opt-out. The self-managed installation and
@@ -912,12 +903,11 @@ committed configuration changes and rechecks before replacing a healthy runtime.
 It never accepts a separate development config path or copies, chmods or chowns
 the protected configuration. The worker receives configuration through private INIT.
 
-The watcher binds installed module IDs to unique local source manifest names,
-using the same module discovery as `make build`. It never auto-installs an
-unconfigured module or invents approvals. Module-only changes build an overlay
-from the existing immutable image, preserving its tooling/environment, push a
-new tag to the same repository, resolve its real RepoDigest, explicitly prepare
-that candidate through root management, and only then request nonroot dev reload.
+The watcher binds installed module IDs to unique source manifest names. It never
+auto-installs a module or invents approvals. For module-only changes, it builds
+an overlay from the existing immutable image, preserving its tools and environment.
+It pushes a new tag to the same repository, resolves its RepoDigest, and prepares
+that candidate through root management before requesting a nonroot reload.
 Development rebuilds replace only the nonroot worker and native closure after
 positive cleanup. They never promote a developer-built privileged launcher,
 stage, preparer, engine or root helper; those require the normal verified release update.
@@ -1043,22 +1033,23 @@ Their pre-cutover descriptions of "current v1" are historical motivation, not
 instructions to use removed sources. This README describes current source
 interfaces, not a claim that every proposal acceptance case has passed.
 
-The bounded validation entry points are:
+Run `make check-offline` for offline verification. The following scenarios use
+an existing legacy Linux installation, not portable v2. Build the integration
+runner with `make build-integration` and supply the protected installed path:
 
 ```sh
-make check-offline CHECK_DEADLINE=1800s TEST_TIMEOUT=120s
-make check-sandbox CONFIG="${RUNTIME_CONFIG:?}" INSTALLATION_ID="${INSTALLATION_ID:?}" \
-  RUNTIME=/usr/local/bin/chatanium CHECK_DEADLINE=120s OBSERVE=15s
-make smoke-discord CONFIG="${RUNTIME_CONFIG:?}" INSTALLATION_ID="${INSTALLATION_ID:?}" \
-  RUNTIME=/usr/local/bin/chatanium CHECK_DEADLINE=180s OBSERVE=60s
-make smoke-voice CONFIG="${RUNTIME_CONFIG:?}" INSTALLATION_ID="${INSTALLATION_ID:?}" \
-  RUNTIME=/usr/local/bin/chatanium CHECK_DEADLINE=180s OBSERVE=60s
+make check-sandbox CONFIG="${RUNTIME_CONFIG:?}" RUNTIME="${LEGACY_RUNTIME:?}" \
+  INTEGRATION="${INTEGRATION:?}" CHECK_DEADLINE=120s OBSERVE=15s
+make smoke-discord CONFIG="${RUNTIME_CONFIG:?}" RUNTIME="${LEGACY_RUNTIME:?}" \
+  INTEGRATION="${INTEGRATION:?}" CHECK_DEADLINE=180s OBSERVE=60s
+make smoke-voice CONFIG="${RUNTIME_CONFIG:?}" RUNTIME="${LEGACY_RUNTIME:?}" \
+  INTEGRATION="${INTEGRATION:?}" CHECK_DEADLINE=180s OBSERVE=60s
 ```
 
 Scenario configs must match the selected ordinary/sandbox/media image and actual
 approvals. `smoke-voice` needs the separately built voice artifact.
-`tests/integration` launches the real runtime through the real supervisor, never
-an unsandboxed module fallback. Its per-case JSON distinguishes observations from
+The legacy runner starts modules through the installed supervisor, never as
+unsandboxed subprocesses. Its per-case JSON distinguishes observations from
 `NOT_RUN`; activation alone does not prove moderation, attachment delivery,
 network isolation or encrypted audio. Missing full sandbox-policy or interactive
 Discord/participant proof remains nonpassing, not an invented success.

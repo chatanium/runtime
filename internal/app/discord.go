@@ -12,7 +12,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	discordbackend "github.com/thirdscam/chatanium/internal/backend/discord"
-	discordhttp "github.com/thirdscam/chatanium/internal/backend/discord/http"
+	"github.com/thirdscam/chatanium/internal/backend/discord/discordhttp"
 	"github.com/thirdscam/chatanium/internal/portable/process"
 	runtime "github.com/thirdscam/chatanium/internal/runtime"
 	"github.com/thirdscam/chatanium/internal/runtime/upload"
@@ -20,7 +20,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-type discordOperatorConfig struct {
+type DiscordOperatorConfig struct {
 	ApplicationID          string           `json:"application_id"`
 	BotUserID              string           `json:"bot_user_id"`
 	OwnershipDirectory     string           `json:"ownership_directory"`
@@ -59,7 +59,7 @@ type discordOperatorConfig struct {
 	Voice json.RawMessage `json:"voice"`
 }
 
-func hostSecret(secrets map[string]string, name string) (string, error) {
+func HostSecret(secrets map[string]string, name string) (string, error) {
 	value, ok := secrets[name]
 	if !ok || value == "" || strings.ContainsAny(value, "\r\n\x00") {
 		return "", errors.New("required host secret binding unavailable")
@@ -67,19 +67,19 @@ func hostSecret(secrets map[string]string, name string) (string, error) {
 	return value, nil
 }
 
-func newDiscordBackend(ctx context.Context, config runtime.Config, backend runtime.BackendConfig, c *discordOperatorConfig, files *upload.UploadStore, secretsInput map[string]string, onError func(error)) (*discordbackend.Backend, error) {
+func NewDiscordBackend(ctx context.Context, config runtime.Config, backend runtime.BackendConfig, c *DiscordOperatorConfig, files *upload.UploadStore, secretsInput map[string]string, onError func(error)) (*discordbackend.Backend, error) {
 	portable := config.Host.Format == runtime.PortableFormat
 	if portable {
 		if c.OwnershipDirectory != filepath.Join(config.Host.ManagementDirectory, "discord") || process.CheckPrivateDir(c.OwnershipDirectory) != nil {
 			return nil, errors.New("portable Discord requires the private installation app/discord directory")
 		}
-	} else if !isolatedHostDirectory(c.OwnershipDirectory, config.Host.ModuleMountRoots()...) {
+	} else if !IsolatedHostDirectory(c.OwnershipDirectory, config.Host.ModuleMountRoots()...) {
 		return nil, errors.New("Discord ownership directory must be private and outside module mounts")
 	}
 	if len(backend.SecretSources) != len(c.ProvisionedSecrets)+1 {
 		return nil, errors.New("unexpected Discord secret bindings")
 	}
-	token, err := hostSecret(secretsInput, "discord:bot_token")
+	token, err := HostSecret(secretsInput, "discord:bot_token")
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +93,7 @@ func newDiscordBackend(ctx context.Context, config runtime.Config, backend runti
 		if id == "bot_token" {
 			return nil, errors.New("bot credential cannot be provisioned to modules")
 		}
-		value, e := hostSecret(secretsInput, "discord:"+id)
+		value, e := HostSecret(secretsInput, "discord:"+id)
 		if e != nil {
 			return nil, e
 		}
@@ -153,7 +153,7 @@ func newDiscordBackend(ctx context.Context, config runtime.Config, backend runti
 	return b, nil
 }
 
-func strictJSON(raw []byte, out any) error {
+func StrictJSON(raw []byte, out any) error {
 	if rejectDuplicateJSON(raw) != nil {
 		return errors.New("invalid JSON document")
 	}
@@ -237,12 +237,12 @@ func containsSecretJSON(raw []byte, secrets []string) bool {
 	}
 }
 
-func canonicalPath(path string) bool {
+func CanonicalPath(path string) bool {
 	return filepath.IsAbs(path) && filepath.Clean(path) == path && path != filepath.VolumeName(path)+string(filepath.Separator)
 }
 
-func isolatedHostDirectory(path string, mounts ...string) bool {
-	if !canonicalPath(path) {
+func IsolatedHostDirectory(path string, mounts ...string) bool {
+	if !CanonicalPath(path) {
 		return false
 	}
 	resolved, err := filepath.EvalSymlinks(path)

@@ -12,14 +12,14 @@ import (
 	"github.com/thirdscam/chatanium/internal/backend/discord/voicejobs"
 )
 
-const voiceEnabled = true
+const VoiceEnabled = true
 
 func attachVoice(ctx context.Context, b *discordbackend.Backend, raw json.RawMessage, maxMessageBytes int) error {
 	if len(raw) == 0 {
 		return nil
 	}
 	var config voicejobs.Config
-	if strictJSON(raw, &config) != nil || config.Validate() != nil || config.MaxGRPCMessageBytes != maxMessageBytes {
+	if StrictJSON(raw, &config) != nil || config.Validate() != nil || config.MaxGRPCMessageBytes != maxMessageBytes {
 		return errors.New("invalid finite voice configuration")
 	}
 	service, err := voicejobs.New(ctx, voicejobs.Options{Config: config, Session: b.HostSession(), ResolveChannel: b.ResolveVoiceChannel})

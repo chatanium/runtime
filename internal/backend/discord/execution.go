@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	discordhttp "github.com/thirdscam/chatanium/internal/backend/discord/http"
+	"github.com/thirdscam/chatanium/internal/backend/discord/discordhttp"
 	"github.com/thirdscam/chatanium/internal/discordacl"
 	"github.com/thirdscam/chatanium/internal/runtime/upload"
 	corewire "github.com/thirdscam/chatanium/proto/core-v2"

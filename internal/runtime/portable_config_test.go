@@ -31,6 +31,11 @@ func TestPortableConfigCarriesExt4liteApprovalsWithoutLegacyLimits(t *testing.T)
 	if err != nil || launch.Resources.PersistentBytes != 1<<30 || launch.Resources.ScratchBytes != 256<<20 || launch.Resources.PersistentInodes != 0 || launch.Resources.ScratchInodes != 0 || launch.InstanceID != "" {
 		t.Fatalf("portable launch policy changed granted image maximums or minted a lease: %+v (%v)", launch, err)
 	}
+	public := decoded
+	public.Host.Network.Profile = host.NetworkPublicV4
+	if _, err := EncodePortableConfig(public); err != nil {
+		t.Fatalf("portable public profile required legacy network settings: %v", err)
+	}
 	for _, bad := range []struct {
 		name   string
 		mutate func(*Config)

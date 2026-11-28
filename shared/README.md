@@ -45,10 +45,10 @@ These source boundaries do not change OCI manifests, ModuleIDs or grant checks.
 
 ## Transport and lifecycle
 
-The privileged supervisor launches immutable module images through Docker/runsc.
-The unprivileged runtime's manager uses the authenticated go-plugin
-AutoMTLS/multiplex transport; modules are not launched directly as host
-subprocesses. Each instance has a primary Hook connection and **one fixed reverse
+Portable Chatanium launches each module from a verified immutable image in its
+own GVX guest. The module manager uses authenticated go-plugin AutoMTLS and
+multiplexing; it never launches a module directly on the host.
+Each instance has a primary Hook connection and **one fixed reverse
 helper connection**, broker ID 1, shared by core/file and registered backends.
 The reverse-helper allowance is lifetime-scoped, not reset for each operation,
 service or reconnect. Losing that transport fails the instance. An SDK helper

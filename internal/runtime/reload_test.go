@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/thirdscam/chatanium/internal/host"
+	legacyhost "github.com/thirdscam/chatanium/internal/legacy/host"
 	wire "github.com/thirdscam/chatanium/proto/core-v2"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc/codes"
@@ -26,7 +27,7 @@ import (
 var reloadOldImage = "registry.example/modules/test@sha256:" + strings.Repeat("a", 64)
 var reloadNewImage = "registry.example/modules/test@sha256:" + strings.Repeat("b", 64)
 
-// Exercise the real host.Client wire boundary, not an injected manager launch
+// Exercise the real legacy host client boundary, not an injected manager launch
 // or cleanup hook. This supervisor peer owns no actual sandbox/storage claims.
 // Acquire deliberately rejects activation so these isolated tests need neither
 // root, a sandbox engine nor a substitute module transport.
@@ -55,7 +56,7 @@ func (h *reloadHost) recorded() []reloadHostRequest {
 	return append([]reloadHostRequest(nil), h.requests...)
 }
 
-func reloadSupervisor(t *testing.T, override func(reloadHostRequest, <-chan struct{}) *reloadHostResponse) (*host.Client, *reloadHost) {
+func reloadSupervisor(t *testing.T, override func(reloadHostRequest, <-chan struct{}) *reloadHostResponse) (*legacyhost.Client, *reloadHost) {
 	t.Helper()
 	// Subtest declaration names can exceed sockaddr_un's short path bound.
 	directory, err := os.MkdirTemp("", "runtime-reload-")
@@ -144,7 +145,7 @@ func reloadSupervisor(t *testing.T, override func(reloadHostRequest, <-chan stru
 		_ = listener.Close()
 		workers.Wait()
 	})
-	client, err := host.Dial(context.Background(), host.ClientConfig{SocketPath: path, SupervisorUID: uint32(os.Geteuid()), MaxMessageBytes: 65536, OperationTimeout: 3 * time.Second})
+	client, err := legacyhost.Dial(context.Background(), legacyhost.ClientConfig{SocketPath: path, SupervisorUID: uint32(os.Geteuid()), MaxMessageBytes: 65536, OperationTimeout: 3 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +153,7 @@ func reloadSupervisor(t *testing.T, override func(reloadHostRequest, <-chan stru
 	return client, h
 }
 
-func reloadFixture(t *testing.T, client *host.Client) (*Manager, *Instance, *Instance) {
+func reloadFixture(t *testing.T, client *legacyhost.Client) (*Manager, *Instance, *Instance) {
 	t.Helper()
 	m := regressionManager()
 	m.options.DevelopmentMode = true

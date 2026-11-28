@@ -10,17 +10,14 @@ capabilities and needs no backend or configuration.
 
 ## Build, install, and run
 
+{{if .BuildTarget -}}
 Run these commands from the Chatanium SDK checkout used by `chatanium new`.
 You do not need Docker or a registry.
-{{- if not .BuildTarget}}
-Keep this module in a directory under the checkout, such as
-`modules/{{.Name}}`. The `MODULE` argument and archive path must match that
-repo-relative directory.
-{{- end}}
+If `./bin/chatanium` is missing, run `make build-runtime` first.
 
 ```sh
-make modules MODULE={{if .BuildTarget}}{{.BuildTarget}}{{else}}modules/{{.Name}}{{end}}
-./bin/chatanium module install ./bin/{{if .BuildTarget}}{{.BuildTarget}}{{else}}modules/{{.Name}}{{end}}/module.oci.tar
+make modules MODULE={{.BuildTarget}}
+./bin/chatanium module install ./bin/{{.BuildTarget}}/module.oci.tar
 ./bin/chatanium serve
 ```
 {{- if .Discord}}
@@ -42,11 +39,26 @@ Review the installation and type `y` to approve it. The module becomes ready
 when the host runs INIT. START, DRAIN, and STOP exercise the rest of the
 lifecycle without making external calls.
 {{- end}}
+{{- else}}
+{{if .Discord}}
+Run `make prepare-sdk` from the Chatanium SDK checkout first.
+{{- end}}
+
+From this module's directory:
+
+```sh
+go test ./...
+go build .
+```
+
+To package an OCI archive with `make modules`, put the module under the SDK
+checkout (for example, in `local-modules/{{.Name}}`), update the replacements
+in `go.mod`, and pass its checkout-relative path as `MODULE`.
+{{- end}}
 
 ## Change the module
 
 Edit `manifest.json` to change the module declaration. The Go executable embeds
-that file, and `make modules` puts the same declaration in the OCI archive.
-Rebuild the archive after changing the manifest or Go code. The generated
-`go.mod` points at the local SDK checkout. Update its replacement
-{{- if .Discord}} paths{{else}} path{{end}} if you move the checkout.
+it, and `make modules` copies it into the OCI archive. Rebuild after changing
+the manifest or Go code. If the module and SDK move independently, update the
+replacements in `go.mod`.
