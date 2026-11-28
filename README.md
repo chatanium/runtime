@@ -21,14 +21,6 @@ explicit opt-in; `hashicorp/go-plugin` remains the authenticated v2 transport
 inside the sandbox runner, not the removed Go standard-library plugin mechanism.
 Modules use typed v2 events/helpers, not the host's Session or bot token.
 
-The independent `modules/MusicBot` checkout is not scanned, loaded or migrated by
-the runtime. Its old binary does not become a v2 module by moving or renaming it.
-Use the migrated `modules/music-bot` and `modules/audio-player` implementations
-and rebuild their approved images. Historical application modules include
-[thirdscam/chatanium-musicbot](https://github.com/thirdscam/chatanium-musicbot)
-and [thirdscam/chatanium-snowflake](https://github.com/thirdscam/chatanium-snowflake);
-those links describe earlier modules, not unchanged-binary compatibility.
-
 ## Architecture
 
 ![Chatanium Design Architecture](https://github.com/user-attachments/assets/cef88e8c-6689-4a08-8231-ec80d43bbea2)
@@ -91,7 +83,7 @@ Current entry points:
 | `internal/backend/discord/discordhttp/` | Host-only Discord HTTP transport |
 | `internal/backend/discord/voicejobs/` | Optional bounded voice jobs; native DAVE bridge is supplied by the [maintained SDK patch stack](third_party/discordgo/README.md) |
 | `shared/media/opus/` | Module-side bounded FFmpeg/Opus processing, not a core service |
-| `examples/general-bot/`, `modules/music-bot/`, `modules/audio-player/` | Ordinary bot example and independent optional media modules |
+| `examples/general-bot/`, `modules/` | Tracked bot example and ignored workspace for independently owned modules |
 | `tests/integration/legacy/`, `tools/build/nativeacceptance/` | Legacy Linux integration runner and fixtures, and portable native release qualification |
 | [Original FlexModule archive](https://github.com/thirdscam/chatanium-flexmodule/tree/main/docs/archive) | Historical voice design/implementation records; not copied into this checkout |
 
@@ -166,42 +158,38 @@ Commit the SQL changes together with all three generated Go files
 | Command | Artifact or scope |
 |---|---|
 | `make prepare-sdk` | Download the pinned upstream DiscordGo module, verify its original checksums and apply the maintained patches; no application/native compilation |
-| `make list-module` | Inspect the bundled module manifests; no compiler, build, or runtime query |
+| `make list-module` | Inspect source manifests under `modules/`; no compiler, build, or runtime query |
 | `make build-runtime GOOS=linux GOARCH=amd64` | Build the offline portable launcher, target-matched original GVX and worker, Linux guest bridge/preparer and their provenance |
 | `make build-runtime GOOS=windows GOARCH=arm64` | Cross-build a Windows arm64 artifact on the Linux build host; this is not a WHPX execution test |
-| `make build` | Build the portable runtime and bundled module executables |
-| `make modules MODULE=local-modules/hello` | Package the selected local module as `bin/local-modules/hello/module.oci.tar`. Without `MODULE`, consider only bundled modules and skip modules that need native media tools. |
-| `make build-module music-bot` | Build `modules/music-bot` into `bin/modules/music-bot/module` |
+| `make build` | Build the portable runtime only |
+| `make modules MODULE=modules/hello` | Package the selected source as `bin/modules/hello/module.oci.tar` |
+| `make build-module hello` | Build `modules/hello` into `bin/modules/hello/module` |
 | `make new_module` | Run `new` with the built portable launcher, or with the launcher selected by `RUNTIME` |
 | `make build-module examples/general-bot` | Explicitly build the root-module example into `bin/examples/general-bot/module` |
 | `make build-native BUILD_JOBS=2` | Independent native C++/ABI/loader/license gate; `.tools/native/prefix` and `.tools/native/bundle`, no application Go compilation or `bin/voice-runtime` publication |
 | `make buf` / `make buf-check` | Transactional owned protobuf publication / non-mutating generation comparison; see [protocol maintenance](proto/README.md) |
 | `make build-integration` | Build the legacy runner `bin/flexmodule-integration`; does not run it |
 | `make build-module tests/integration/legacy/fixtures/sandbox` | Build the legacy sandbox fixture into `bin/tests/integration/legacy/fixtures/sandbox/module` |
-| `make check-offline` | Check SDK preparation and protobuf generation, then test the prepared SDK, root Go module, and bundled Go modules; no live Discord or native build |
+| `make check-offline` | Check SDK preparation and protobuf generation, then test the prepared SDK and tracked runtime, SDK, and example packages |
 | `make clean` | Owned runtime/integration binaries and directory-derived module outputs only; no native bundle deletion or Docker prune |
 
 Portable bundles currently have no native voice closure. `doctor` reports the
 capability of the embedded bundle, not the capabilities of another target or an
-old installation. The native/media build instructions below concern those
-separate artifacts, not portable installation prerequisites.
+old installation. The native host build is not a portable installation prerequisite.
 
-Default module discovery selects the bundled sources in `modules/`. Use an
-explicit checkout-relative path for local modules, examples, and integration
-fixtures. A selected source directory uses its nearest `go.mod`, so independent
-modules and packages in the root Go module both work. The bundled modules require
-`github.com/bwmarrin/discordgo` `v0.29.1-0.20260214123928-f43dd94faaac`, upstream commit
-`f43dd94faaacd5b163e9e783f14b5bd8be639fc9`. The root `go.mod` is the version
-authority and replaces that module with `./.tools/deps/discordgo`; each nested
-module uses `../../.tools/deps/discordgo` and a local Chatanium root
-replacement. DiscordGo imports use `github.com/bwmarrin/discordgo`; the public
-SDK module path is `github.com/thirdscam/chatanium`. Preparation and pinned
-protobuf generation work from this checkout alone; no sibling FlexModule or
-DiscordGo checkout is required.
+This repository ignores `modules/`. Use it for module sources you own or check
+out from separate repositories. Select the module explicitly by name or
+checkout-relative path when building. The build uses the selected directory's
+nearest `go.mod`, so independent modules and packages in the root module both work.
+
+The root `go.mod` pins `github.com/bwmarrin/discordgo` and replaces it with
+`./.tools/deps/discordgo`. The public SDK module path is
+`github.com/thirdscam/chatanium`. Preparation and protobuf generation do not
+require a sibling checkout.
 
 Each manifest may set the optional `description` field to explain its module's
-purpose. `make list-module` uses the same `modules/` discovery as `make build`
-and displays backend protocol requirements and requested capability names grouped
+purpose. `make list-module` reads manifests under `modules/` and displays backend
+protocol requirements and requested capability names grouped
 by Core and backend, with required/optional totals. `Activated` is `N/A` because
 this offline listing does not query live runtime state. The footer's "installed
 locally" total counts discovered source directories, not configured, approved or
@@ -265,14 +253,11 @@ Module outputs mirror their repository-relative source directory:
 `modules/` needs no new target or executable-name mapping. Building a module
 does not install or activate it; OCI images and operator approvals remain separate.
 
-Native/media artifact builds require Linux/amd64, Docker Engine with BuildKit
-supporting `ADD --checksum` and `COPY --chmod`, Python 3.8+, GNU
-`readelf`, `ldd`, `timeout`, `flock`, `setsid`, and the target
+Native host builds require Linux/amd64, Docker Engine with BuildKit, Python 3.8+,
+GNU `readelf`, `ldd`, `timeout`, `flock`, `setsid`, and the target loader
 `/lib64/ld-linux-x86-64.so.2`. Keep the checkout and workspaces below `/home`.
-Large source/dependency/compiler/cache trees stay in `.tools/deps`,
-`.tools/native` or `.tools/media`, not host `/tmp` or Docker compiler layers.
-This repository's [`tools/native/native-lock.json`](tools/native/native-lock.json)
-and `tools/media/tool-lock.json` pin compiler bases, package inputs and sources.
+[`tools/native/native-lock.json`](tools/native/native-lock.json) pins the
+compiler base, package inputs, and sources.
 Native work, prefixes and bundles remain under `.tools/native`. Builds do not
 install host packages or prune/restart Docker.
 
@@ -312,13 +297,13 @@ cancel. An existing source directory is never overwritten.
 For a module named `hello`, build the archive, install it, and start the runtime:
 
 ```sh
-make modules MODULE=local-modules/hello
-./bin/chatanium module install ./bin/local-modules/hello/module.oci.tar
+make modules MODULE=modules/hello
+./bin/chatanium module install ./bin/modules/hello/module.oci.tar
 ./bin/chatanium serve
 ```
 
-Select local modules and examples by checkout-relative path, such as
-`MODULE=examples/general-bot`. Use `make image-media` for the native media modules.
+Select a module by name under `modules/` or by checkout-relative path, such as
+`MODULE=examples/general-bot`.
 
 `module install` checks the archive in an isolated guest. On a fresh system
 it asks you to approve the runtime location and disk limit first. Review the
@@ -344,65 +329,41 @@ filters events using its old module settings; rebuild it to use the new
 template.
 
 For scripts, use `new --name hello` with `--template local` or `--template discord`.
-`--output` defaults to `local-modules/<name>`, which Git ignores.
+`--output` defaults to `modules/<name>`, which this repository ignores.
 `--module-path` defaults to `example.com/<name>`. `--sdk-path` defaults to this
 checkout. The generated `go.mod` references this SDK. The Discord starter also
 uses the maintained DiscordGo checkout.
+Give a module its own repository to track it separately. If you move it away
+from this checkout, update its generated `go.mod` replacements.
 
 ### Module images
 
-Set these variables to real writable OCI repository/tag names before invoking:
+Set `MODULE_IMAGE` to the explicit local image tag:
 
 ```sh
 make image-module MODULE=examples/general-bot \
   MODULE_IMAGE="${MODULE_IMAGE:?set an ordinary module image tag}"
 make image-module MODULE=tests/integration/legacy/fixtures/sandbox \
   MODULE_IMAGE="${SANDBOX_IMAGE:?set a sandbox fixture image tag}"
-make image-media \
-  MUSIC_IMAGE="${MUSIC_IMAGE:?set a music module image tag}" \
-  PLAYER_IMAGE="${PLAYER_IMAGE:?set a player module image tag}" BUILD_JOBS=2
 ```
 
-Ordinary images are static Go on `scratch`, without FFmpeg, yt-dlp, Deno or
-native DAVE. Media images share a pinned tools layer with fixed executables:
-`/opt/flexmodule/bin/ffmpeg`, `/opt/flexmodule/bin/ffprobe`,
-`/opt/flexmodule/bin/deno`, and the complete
-`/opt/flexmodule/yt-dlp/yt-dlp` onedir distribution. No host PATH lookup or runtime
-updater is used. DCA is not the v2 playback path.
+The generic image recipe packages a static Go module on `scratch`. If a module
+needs additional tools or libraries, build and package them in that module's
+own project.
 
-The host owns module temporary storage: it mounts scratch at
-`/var/lib/flexmodule/scratch` and injects `TMPDIR` at bootstrap. Module images
-must not declare `TMPDIR`, `FLEXMODULE_PLUGIN`, or any `PLUGIN_*` variable;
-the host rejects even matching image defaults before container creation.
-The media tools image defaults `HOME` to that scratch mount and `DENO_DIR` to
-its `deno` child, never `/scratch`. After authenticated INIT, media subprocesses
-explicitly use generated instance-owned scratch/cache children for HOME,
-TMPDIR, Deno cache and working directories rather than relying on image defaults.
-Builder-only `TMPDIR=/work/tmp` stays in the bind-mounted build workspace;
-it is not a permitted module-image runtime environment declaration.
-
-`make image-media` runs the complete build via `tools/build/images.sh media`
-and `tools/build/images.py`, including the pinned tool producer. Its completed
-tools-image context is `.tools/media/stage`, with payload in `stage/rootfs`;
-the tools layer is packaged with `tools/media/Tools.Dockerfile` before both
-module images inherit it through `tools/media/Module.Dockerfile`. For an
-image-environment-only correction, an operator can reuse a previously completed,
-verified staged payload and package it with the current Tools Dockerfile without
-recompiling unchanged tools. Do not reuse the stale staged `Dockerfile`;
-refresh changed source hashes in `opt/flexmodule/provenance/builder-source-sha256.json`
-and the payload inventory `files-sha256.json` under `stage/rootfs` before
-publication, retaining the actual tool-build provenance. Rebuild inheriting
-module images and record their new image IDs/registry digests; existing images
-do not acquire corrected environment declarations retroactively.
+The runtime supplies the scratch directory through `InitContext` and sets
+`TMPDIR` at bootstrap. Module images must not declare `TMPDIR`,
+`FLEXMODULE_PLUGIN`, or any `PLUGIN_*` variable. The host rejects even matching
+defaults before container creation.
 
 Each executable embeds its own canonical `manifest.json`; the builder strictly
 parses it and copies the exact bytes into
 `org.chatanium.flexmodule.manifest.v2`. The runtime compares the authenticated
 module manifest with that image declaration. Declarations are requirements,
-**not approvals**. `.tools/images/*-image.json` records local IDs separately from
-registry RepoDigests. Publish through your approved registry workflow and use the
-actual `registry/repository@sha256:...` RepoDigest in installation config; a local
-tag or image ID is not a substitute.
+**not approvals**. `.tools/images/<module-directory>/image.json` records a local
+image ID, not a registry RepoDigest. Publish through your approved registry
+workflow and use the resulting `registry/repository@sha256:...` in installation
+config.
 
 ## Run a portable installation
 
@@ -673,9 +634,8 @@ opaque refs; the bot token cannot be provisioned to a module.
 base and inspected image binding; it does not create a runtime epoch. Prepare
 two separate protected operator files:
 
-1. Module-scoped JSON matching the chosen [ordinary](examples/general-bot/README.md),
-   [music](modules/music-bot/README.md), or
-   [player](modules/audio-player/README.md) contract, containing approved real IDs.
+1. Module-scoped JSON matching the chosen module's contract, with approved
+   real IDs. See the [ordinary example](examples/general-bot/README.md).
 2. A strict protobuf-JSON `core-v2.Grants` approval with exact capabilities,
    resource scopes, resource profile and finite limits. Do not copy an image's
    requested `allResources` ceiling into approval to make initialization pass.
@@ -1001,9 +961,6 @@ cleanly reclaimed failed activation.
 [`general-bot`](examples/general-bot/README.md) demonstrates ordinary slash commands,
 forms, settings, guild/DM message events, streaming attachments, and explicitly
 approved member/role/channel moderation and audit operations.
-[`music-bot`](modules/music-bot/README.md) and
-[`audio-player`](modules/audio-player/README.md) are separate optional
-media examples, not the definition of a FlexModule module.
 
 Capabilities, actual resource scopes, Discord bot permissions, user command
 permissions and Gateway intents are separate checks. Required capability refusal
@@ -1070,13 +1027,12 @@ Its MPL-2.0 license is preserved verbatim in
 
 FlexModule-derived files in `proto/`, `shared/`,
 `internal/{runtime,host,backend,app}/`, `tools/`,
-`tests/integration/`, `examples/`, `modules/audio-player/`, and the copied
+`tests/integration/`, `examples/`, and the copied
 `Makefile` and maintained patch work retain the original MPL terms unless more
 specific existing notices apply. The HashiCorp notices in
 [`proto/buf.yaml`](proto/buf.yaml) and [`proto/buf.gen.yaml`](proto/buf.gen.yaml)
-remain MPL-2.0. [`modules/music-bot/LICENSE`](modules/music-bot/LICENSE) is
-independently MIT. Preserve original copyright, source provenance and
-dependency notices, including applicable MPL source-availability obligations.
+remain MPL-2.0. Preserve the notices shipped by each independent module and
+all applicable MPL source-availability obligations.
 
 Upstream dependencies retain their own licenses. The maintained
 [DiscordGo patch stack](third_party/discordgo/README.md#licensing-and-attribution)

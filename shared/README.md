@@ -193,10 +193,6 @@ download tools belong only inside approved media module images.
 
 - [`general-bot`](../examples/general-bot/README.md): ordinary management, settings,
   interactions, messages and uploads; builds `bin/test-module` without voice/media prerequisites.
-- [`music-bot`](../modules/music-bot/README.md): optional queue/provider
-  module with bounded media preparation; builds `bin/chatanium-musicbot`.
-- [`audio-player`](../modules/audio-player/README.md): optional bounded
-  attachment download/encoding and voice jobs; builds `bin/voice-player-module`.
 - [`../proto/README.md`](../proto/README.md): schema/generator inputs and ordering.
 - [`../README.md`](../README.md): pinned artifacts, privileged host preparation,
   private secret bindings, runtime configuration and evidence boundaries.

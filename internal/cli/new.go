@@ -71,7 +71,7 @@ var newCmd = &cobra.Command{
 
 func init() {
 	newCmd.Flags().String("name", "", "Module name (skip the interactive prompt)")
-	newCmd.Flags().String("output", "", "New module directory (default local-modules/<name>)")
+	newCmd.Flags().String("output", "", "New module directory (default modules/<name>)")
 	newCmd.Flags().String("sdk-path", ".", "Local Chatanium v2 SDK checkout (default current directory)")
 	newCmd.Flags().String("module-path", "", "Go module import path (default example.com/<name>)")
 	newCmd.Flags().String("template", string(scaffold.Local), "Starter template: local or discord")

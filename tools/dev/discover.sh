@@ -6,11 +6,8 @@ case "${1:-}" in
     sources)
         declare -A seen=()
         directories=()
-        safe_path modules
-        for directory in modules/*; do
-            [[ -d "$directory" && ! -L "$directory" && -f "$directory/manifest.json" ]] || continue
-            directories+=("$(resolve_module_directory "$directory")")
-        done
+        discovered=$(list_module_directories)
+        if [[ -n "$discovered" ]]; then mapfile -t directories <<< "$discovered"; fi
         if [[ -n "${MODULE:-}" ]]; then directories+=("$(resolve_module_directory "$MODULE")"); fi
         for directory in "${directories[@]}"; do
             [[ -z "${seen[$directory]:-}" ]] || continue

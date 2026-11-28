@@ -78,7 +78,7 @@
 | 볼륨과 예산 | 영구 볼륨의 소유 모듈, 식별자와 이미지 경로, 실행별 scratch 식별자, 각각의 승인된 이미지 최대 바이트, 점유 상태를 기록합니다. 준비, 캐시, 로그, 메타데이터, 백업의 동시 점유도 원장에서 관리합니다. |
 | 실행 저널 | 설치 세대(epoch), 인스턴스·엔진 식별자, 원하는 상태, 회수 중인 자원. 이그레스 세대는 추적하되 과거 `OPEN` 기록은 재기동 권한이 아닙니다. PID만으로 기존 자식을 채택하거나 죽이지 않습니다. |
 
-core-v2 `ResourceLimits`의 필드와 번호를 유지합니다. `max_pids = 3`과 이를 사용하는 `audio-player`의 워커 수 검사는 그대로 둡니다. `persistent_bytes = 4`와 `scratch_bytes = 5`는 `portable-v2`에서 **각 이미지 전체의 최대 바이트**를 뜻합니다. 메타데이터를 뺀 사용자 데이터 보장량으로 해석하던 설정이나 이미지는 묵시적으로 전환하지 않습니다. 새 의미를 선언한 이미지와 한도를 함께 승인하고 `INIT`에 같은 값을 보냅니다. QoS는 감독자가 승인한 네트워크 프로필에 저장합니다. 모듈 RPC에는 GVX 관리 권한을 추가하지 않습니다.
+core-v2 `ResourceLimits`의 필드와 번호를 유지합니다. `max_pids = 3`은 그대로 둡니다. `persistent_bytes = 4`와 `scratch_bytes = 5`는 `portable-v2`에서 **각 이미지 전체의 최대 바이트**를 뜻합니다. 메타데이터를 뺀 사용자 데이터 보장량으로 해석하던 설정이나 이미지는 묵시적으로 전환하지 않습니다. 새 의미를 선언한 이미지와 한도를 함께 승인하고 `INIT`에 같은 값을 보냅니다. QoS는 감독자가 승인한 네트워크 프로필에 저장합니다. 모듈 RPC에는 GVX 관리 권한을 추가하지 않습니다.
 
 ### 4.3 Core Logic
 
@@ -194,7 +194,7 @@ func (a *GVXAdapter) SetEgress(ctx context.Context, instanceID string, policy Eg
 ## 7. References
 
 - Chatanium: [당시 Linux 기동 인자](https://github.com/chatanium/runtime/blob/104342939447bbe74297a0646da0e506891a7a93/internal/host/gvx_platform_linux.go#L357-L392), [승인에서 `STAGE_INIT`까지](../../internal/runtime/manager.go#L338-L374), [당시 특수 목적 주소 목록](https://github.com/chatanium/runtime/blob/104342939447bbe74297a0646da0e506891a7a93/internal/host/network_policy.go#L75-L92)
-- 모듈: [core-v2 자원 필드](../../proto/core-v2/core.proto#L63-L84), [게스트 저장소 확인과 권한 전환](../../internal/gvxipc/bridge_linux.go#L187-L224), [`audio-player`의 한도 검사](../../modules/audio-player/config.go#L78-L85)
+- 모듈: [core-v2 자원 필드](../../proto/core-v2/core.proto#L63-L84), [게스트 저장소 확인과 권한 전환](../../internal/gvxipc/bridge_linux.go#L187-L224)
 - GVX 실행: [대상 OS와 ISA](https://github.com/gfire-sigs/gvx/blob/a90476e02630e7d35861e1da16d407e03e71e8b7/README.md), [CPU, RAM, PID](https://github.com/gfire-sigs/gvx/blob/a90476e02630e7d35861e1da16d407e03e71e8b7/docs/cli.md#L279-L289), [OCI 초기화와 lockdown 순서](https://github.com/gfire-sigs/gvx/blob/a90476e02630e7d35861e1da16d407e03e71e8b7/pkg/gvx/sandbox.go#L237-L279)
 - GVX 네트워크: [NAT 대역폭, 방화벽과 DNS](https://github.com/gfire-sigs/gvx/blob/a90476e02630e7d35861e1da16d407e03e71e8b7/docs/cli.md#L409-L473), [기본 IPv4 경로](https://github.com/gfire-sigs/gvx/blob/a90476e02630e7d35861e1da16d407e03e71e8b7/pkg/netbackend/nat_forwarder.go#L447-L492), [`gvx-ctrl/2` 인증과 RPC](https://github.com/gfire-sigs/gvx/blob/a90476e02630e7d35861e1da16d407e03e71e8b7/docs/control-protocol.md#L56-L150), [정책 교체와 연결 취소](https://github.com/gfire-sigs/gvx/blob/a90476e02630e7d35861e1da16d407e03e71e8b7/pkg/netbackend/nat_policy.go#L576-L596)
 - GVX 저장소: [볼륨 옵션과 체크포인트](https://github.com/gfire-sigs/gvx/blob/a90476e02630e7d35861e1da16d407e03e71e8b7/docs/cli.md#L241-L249), [그룹 확장과 호스트 할당](https://github.com/gfire-sigs/gvx/blob/a90476e02630e7d35861e1da16d407e03e71e8b7/docs/architecture.md#L640-L672), [게스트 마운트 순서](https://github.com/gfire-sigs/gvx/blob/a90476e02630e7d35861e1da16d407e03e71e8b7/pkg/gvx/boot_vfs.go#L391-L500), [게스트 바인드와 권한](https://github.com/gfire-sigs/gvx/blob/a90476e02630e7d35861e1da16d407e03e71e8b7/pkg/sentry/syscalls/linux/sys_mount.go#L26-L113)

@@ -5,14 +5,10 @@ __debug_bin
 /src/__debug
 **/__debug*
 .vscode/**/*
-/modules/*
-!/modules/audio-player/
-!/modules/music-bot/
-/local-modules/
+/modules/
 *.so
 *.pcm
 *.dca
-/.musicbot/
 /.*
 !/.gitignore
 !/.go-version

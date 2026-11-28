@@ -74,9 +74,7 @@ print("yes" if any(
 list_module_directories() {
     local directory resolved
     safe_path modules
-    # Only bundled modules are discovered by default. Other directories must
-    # be selected explicitly, even if they have a valid manifest.
-    for directory in modules/audio-player modules/music-bot; do
+    for directory in modules/*; do
         [[ -d "$directory" && ! -L "$directory" && -f "$directory/manifest.json" ]] || continue
         resolved=$(resolve_module_directory "$directory") || return
         printf '%s\n' "$resolved"

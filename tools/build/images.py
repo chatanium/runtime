@@ -19,23 +19,15 @@ work = root / '.tools/images'
 work.mkdir(parents=True, exist_ok=True)
 lockfile = (work / 'build.lock').open('w')
 fcntl.flock(lockfile, fcntl.LOCK_EX)
-mode = sys.argv[1]
 go = os.environ['GO_BINARY']
 arch = os.environ.get('GOARCH', 'amd64')
-if arch not in ('amd64', 'arm64') or (mode != 'module' and arch != 'amd64'):
-    raise RuntimeError('Module images support Linux amd64/arm64; pinned media tooling supports Linux amd64 only')
+if arch not in ('amd64', 'arm64'):
+    raise RuntimeError('Module images support Linux amd64/arm64 only')
 host_os, host_arch = capture(go, 'env', 'GOHOSTOS', 'GOHOSTARCH').splitlines()
 parser_env = dict(os.environ, GOOS=host_os, GOARCH=host_arch, CGO_ENABLED='0')
-if mode == 'module':
-    prefixes = ['MODULE']
-elif mode == 'media':
-    prefixes = ['MUSIC', 'PLAYER']
-else:
-    raise RuntimeError('Expected module or media image build')
 # Direct Python entrypoints enforce preparation too, before any compilation
 # (including the manifest parser) or image construction.
-sdk_modules = list(dict.fromkeys(
-    [root] + [root / os.environ[prefix + '_GO_DIRECTORY'] for prefix in prefixes]))
+sdk_modules = list(dict.fromkeys([root, root / os.environ['MODULE_GO_DIRECTORY']]))
 for module in sdk_modules:
     resolve_sdk(go, module)
 # A concurrent preparer cannot replace the go.mod alias while Go compiles the
@@ -46,15 +38,11 @@ for module in sdk_modules:
     resolve_sdk(go, module, prepare=False)
 label_key = 'org.chatanium.flexmodule.manifest.v2'
 resource_label = 'org.chatanium.flexmodule.resources.v2'
-portable_module_recipes = {
-    'examples/general-bot': 'tools/build/Module.Dockerfile',
-    'tests/integration/legacy/fixtures/sandbox': 'tools/build/Module.Dockerfile',
-    'modules/audio-player': 'tools/media/Module.Dockerfile',
-    'modules/music-bot': 'tools/media/Module.Dockerfile',
-}
+dockerfile = 'tools/build/Module.Dockerfile'
+portable_module_sources = {'examples/general-bot', 'tests/integration/legacy/fixtures/sandbox'}
 
 
-def build_image(module_dir, binary, image, dockerfile, base=None):
+def build_image(module_dir, binary, image):
     if not image or '@' in image or any(c.isspace() for c in image):
         raise RuntimeError('Explicit writable OCI tag required')
     manifest = root / module_dir / 'manifest.json'
@@ -66,7 +54,7 @@ def build_image(module_dir, binary, image, dockerfile, base=None):
     with open(os.devnull, 'w') as discard:
         run(go, 'run', '-mod=readonly', './tools/build/manifest', manifest, stdout=discard, env=parser_env)
     declaration = manifest.read_bytes().decode('utf-8')
-    resources = 'portable-v2' if portable_module_recipes.get(module_dir) == dockerfile else None
+    resources = 'portable-v2' if module_dir in portable_module_sources else None
     with tempfile.TemporaryDirectory(prefix='context-', dir=work) as directory:
         context = Path(directory)
         shutil.copy2(root / binary, context / 'module')
@@ -77,8 +65,6 @@ def build_image(module_dir, binary, image, dockerfile, base=None):
                 '--label', 'org.chatanium.flexmodule.manifest.sha256=' + digest(manifest)]
         if resources:
             args += ['--label', resource_label + '=' + resources]
-        if base:
-            args += ['--build-arg', 'MEDIA_BASE=' + base]
         run(*args, context)
         image_id = (context / 'image-id').read_text().strip()
         metadata = json.loads(capture('docker', 'image', 'inspect', image_id))[0]
@@ -90,7 +76,7 @@ def build_image(module_dir, binary, image, dockerfile, base=None):
         evidence = {'image_tag': image, 'local_image_id': image_id, 'registry_digest': None,
                     'registry_digest_note': 'Publish to a registry, then use its real RepoDigest for installation.',
                     'manifest_source': str(manifest.relative_to(root)), 'manifest_sha256': digest(manifest),
-                    'executable_sha256': digest(root / binary), 'media_base_local_tag': base,
+                    'executable_sha256': digest(root / binary),
                     'platform': 'linux/' + arch, 'build_context_sha256': inventory(context)}
         if resources:
             evidence['resource_format'] = resources
@@ -127,40 +113,7 @@ def publish_images(results):
         print(json.dumps(evidence, indent=2))
 
 
-if mode == 'module':
-    base = json.loads((root / 'tools/native/native-lock.json').read_text())['builder_base']
-    if f'FROM --platform=linux/amd64 {base} AS trust' not in (root / 'tools/build/Module.Dockerfile').read_text().splitlines():
-        raise RuntimeError('Module trust source must match tools/native/native-lock.json builder_base')
-    directory = os.environ['MODULE_DIRECTORY']
-    binary = os.environ['MODULE_BINARY']
-    publish_images([build_image(directory, binary, os.environ['MODULE_IMAGE'], 'tools/build/Module.Dockerfile')])
-elif mode == 'media':
-    jobs = os.environ.get('BUILD_JOBS', '2')
-    if not jobs.isdecimal() or int(jobs) < 1:
-        raise RuntimeError('BUILD_JOBS must be positive')
-    workspace = root / '.tools/media'
-    workspace.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix='builder-', dir=work) as directory:
-        iid = Path(directory) / 'image-id'
-        run('docker', 'build', '--platform', 'linux/amd64', '--iidfile', iid,
-            '-f', 'tools/media/Builder.Dockerfile', 'tools/media')
-        builder = iid.read_text().strip()
-        run('docker', 'run', '--rm', '--init', '--user', f'{os.getuid()}:{os.getgid()}',
-            '--mount', f'type=bind,src={root},dst=/source,readonly',
-            '--mount', f'type=bind,src={workspace},dst=/work',
-            '-e', 'BUILD_JOBS=' + jobs, '-e', 'TMPDIR=/work/tmp',
-            builder, 'python3', '/source/tools/media/build.py')
-        stage = workspace / 'stage'
-        shutil.copy2(root / 'tools/media/Tools.Dockerfile', stage / 'Dockerfile')
-        tools_id = Path(directory) / 'tools-id'
-        # This tag names a real local build result, not an invented registry digest.
-        base = 'flexmodule/media-tools:sha256-' + digest(stage / 'rootfs/opt/flexmodule/provenance/files-sha256.json')
-        (stage / 'rootfs/opt/flexmodule/provenance/builder-image-id.txt').write_text(builder + '\n')
-        run('docker', 'build', '--platform', 'linux/amd64', '--network=none', '--iidfile', tools_id, '-t', base, stage)
-        results = [
-            build_image(os.environ['MUSIC_DIRECTORY'], os.environ['MUSIC_BINARY'], os.environ['MUSIC_IMAGE'], 'tools/media/Module.Dockerfile', base),
-            build_image(os.environ['PLAYER_DIRECTORY'], os.environ['PLAYER_BINARY'], os.environ['PLAYER_IMAGE'], 'tools/media/Module.Dockerfile', base),
-        ]
-        publish_images(results)
-else:
-    raise RuntimeError('Expected module or media image build')
+base = json.loads((root / 'tools/native/native-lock.json').read_text())['builder_base']
+if f'FROM --platform=linux/amd64 {base} AS trust' not in (root / dockerfile).read_text().splitlines():
+    raise RuntimeError('Module trust source must match tools/native/native-lock.json builder_base')
+publish_images([build_image(os.environ['MODULE_DIRECTORY'], os.environ['MODULE_BINARY'], os.environ['MODULE_IMAGE'])])

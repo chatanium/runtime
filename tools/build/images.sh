@@ -1,42 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/../common.sh"
-mode=${1:?Expected module, media or build-media-modules}
-[[ $# == 1 ]] || fail 'Expected one image build mode'
+[[ $# == 0 ]] || fail 'Image build does not accept positional arguments'
 
 target="${GOOS:-linux}/${GOARCH:-amd64}"
-[[ "$target" == linux/amd64 || ( "$mode" == module && "$target" == linux/arm64 ) ]] ||
-    fail 'Module images support Linux amd64/arm64; pinned media tooling supports Linux amd64 only'
+[[ "$target" == linux/amd64 || "$target" == linux/arm64 ]] ||
+    fail 'Module images support Linux amd64/arm64 only'
 [[ "${CGO_ENABLED:-0}" == 0 ]] || fail 'Module images require static Go executables (CGO_ENABLED=0)'
 
-if [[ "$mode" == build-media-modules ]]; then
-    run env CGO_ENABLED=0 bash tools/build.sh module modules/music-bot
-    run env CGO_ENABLED=0 bash tools/build.sh module modules/audio-player
-    exit 0
-fi
-[[ "$mode" == module || "$mode" == media ]] || fail 'Expected module, media or build-media-modules'
-
-module_inputs() {
-    local prefix=$1 directory binary go_directory
-    directory=$(resolve_module_directory "$2")
-    binary=$(module_build_output "$directory")
-    go_directory=$(module_go_directory "$directory")
-    safe_file "$directory/manifest.json"
-    safe_file "$binary"
-    safe_file ".tools/images/$directory/image.json"
-    safe_file ".tools/images/$directory/image.json.partial"
-    export "${prefix}_DIRECTORY=$directory" "${prefix}_BINARY=$binary" "${prefix}_GO_DIRECTORY=$go_directory"
-}
-
+MODULE_DIRECTORY=$(resolve_module_directory "${MODULE:-examples/general-bot}")
+MODULE_BINARY=$(module_build_output "$MODULE_DIRECTORY")
+MODULE_GO_DIRECTORY=$(module_go_directory "$MODULE_DIRECTORY")
+safe_file "$MODULE_BINARY"
+safe_file ".tools/images/$MODULE_DIRECTORY/image.json"
+safe_file ".tools/images/$MODULE_DIRECTORY/image.json.partial"
+export MODULE_DIRECTORY MODULE_BINARY MODULE_GO_DIRECTORY
 safe_path .tools/images
 safe_file .tools/images/build.lock
-if [[ "$mode" == module ]]; then
-    module_inputs MODULE "${MODULE:-examples/general-bot}"
-else
-    safe_path .tools/media
-    module_inputs MUSIC modules/music-bot
-    module_inputs PLAYER modules/audio-player
-fi
 use_go
 export GO_BINARY
-run python3 tools/build/images.py "$mode"
+run python3 tools/build/images.py

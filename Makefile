@@ -14,7 +14,7 @@ DEV_SOCKET ?=
 DEV_RUNTIME_USER ?=
 LEGACY_RUNTIME ?=
 export GOOS GOARCH CGO_ENABLED GO_TOOLCHAIN BUF_VERSION PROTOC_GEN_GO_VERSION PROTOC_GEN_GO_GRPC_VERSION
-export BUILD_JOBS MODULE DISABLE_VOICE MODULE_IMAGE MUSIC_IMAGE PLAYER_IMAGE DEV_MODE DEV_SOCKET DEV_RUNTIME_USER LEGACY_RUNTIME
+export BUILD_JOBS MODULE DISABLE_VOICE MODULE_IMAGE DEV_MODE DEV_SOCKET DEV_RUNTIME_USER LEGACY_RUNTIME
 export CONFIG INSTALLATION_ID CHECK_DEADLINE TEST_TIMEOUT OBSERVE RUNTIME
 export INTEGRATION POLICY_PLAN POLICY_RUNNER EVIDENCE
 
@@ -34,7 +34,7 @@ GENERATED_FILES := $(GENERATED_EXPECTED_FILES)
 export GENERATED_FILES GENERATED_EXPECTED_FILES BUILD_OUTPUTS
 
 MAKE_COMMAND_TARGETS := tools prepare-sdk build build-runtime build-dev-worker build-module build-native build-integration buf buf-check clean run run-legacy-dev \
-	modules sqlc serve new_module list-module image-module image-media check-offline check-sandbox check-sandbox-policy smoke-discord smoke-voice
+	modules sqlc serve new_module list-module image-module check-offline check-sandbox check-sandbox-policy smoke-discord smoke-voice
 .PHONY: $(MAKE_COMMAND_TARGETS)
 
 # Make has no positional arguments: consume exactly one otherwise-unrecognized
@@ -77,20 +77,15 @@ build-dev-worker:
 		bash tools/build/voice.sh voice; \
 	fi
 
-# Build the portable runtime and the bundled module executables.
 build: build-runtime
-	@GOOS=linux bash tools/build.sh modules
 
 build-module:
 	@GOOS=linux bash tools/build.sh module "$$MODULE_BUILD_DIRECTORY"
 
 # Build installable Linux OCI archives without Docker.
 modules:
-	@if [ "$(MODULE_EXPLICIT)" = 1 ]; then \
-		GOOS=linux bash tools/build.sh archive "$$MODULE"; \
-	else \
-		GOOS=linux bash tools/build.sh archive; \
-	fi
+	@test "$(MODULE_EXPLICIT)" = 1 || { echo 'Set MODULE to a module name or checkout-relative path' >&2; exit 1; }
+	@GOOS=linux bash tools/build.sh archive "$$MODULE"
 
 # Inspect canonical manifests only; no compiler, native runtime or SDK is needed.
 list-module:
@@ -111,12 +106,7 @@ build-native:
 image-module:
 	@test -n "$(MODULE_IMAGE)" || { echo 'Set MODULE_IMAGE to an explicit writable OCI tag' >&2; exit 1; }
 	@GOOS=linux CGO_ENABLED=0 bash tools/build.sh module "$$MODULE"
-	@GOOS=linux CGO_ENABLED=0 bash tools/build/images.sh module
-
-image-media:
-	@test -n "$(MUSIC_IMAGE)" -a -n "$(PLAYER_IMAGE)" || { echo 'Set MUSIC_IMAGE and PLAYER_IMAGE to explicit writable OCI tags' >&2; exit 1; }
-	@GOOS=linux CGO_ENABLED=0 bash tools/build/images.sh build-media-modules
-	@GOOS=linux CGO_ENABLED=0 bash tools/build/images.sh media
+	@GOOS=linux CGO_ENABLED=0 bash tools/build/images.sh
 
 check-offline:
 	@bash tools/build/check-offline.sh

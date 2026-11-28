@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
-mode=${1:?Expected build, module, modules, archive or clean}
+mode=${1:?Expected build, module, archive or clean}
 shift
 : "${BUILD_OUTPUTS:?Run through make}"
 safe_file .tools/build.lock
@@ -45,12 +45,12 @@ archive_log() {
 
 targets=()
 case "$mode" in
-    module|modules|archive)
+    module|archive)
         module_mode=true
-        directories=()
+        [[ $# -eq 1 ]] || fail 'Expected one module name or checkout-relative path'
+        directory=$(resolve_module_directory "$1")
         if [[ "$mode" == archive ]]; then
             archive=true
-            [[ $# -le 1 ]] || fail 'Expected at most one MODULE name or repo-relative directory'
             [[ "${GOOS:-linux}/${GOARCH:-amd64}" == linux/amd64 ||
                 "${GOOS:-linux}/${GOARCH:-amd64}" == linux/arm64 ]] ||
                 fail 'Module archives support Linux amd64 and arm64 only'
@@ -60,42 +60,23 @@ case "$mode" in
                 archive_color=true
             fi
         fi
-        if [[ "$mode" == module || ( "$archive" == true && $# == 1 ) ]]; then
-            [[ $# == 1 ]] || fail 'Expected exactly one module directory'
-            directories+=("$(resolve_module_directory "$1")")
-        else
-            [[ $# == 0 ]] || fail 'Module discovery does not accept arguments'
-            discovered=$(list_module_directories)
-            if [[ -n "$discovered" ]]; then mapfile -t directories <<< "$discovered"; fi
+        if [[ "$archive" == true && "$directory" == voice-runtime/* ]]; then
+            fail "Module output conflicts with the native runtime: $directory"
         fi
-        for directory in "${directories[@]}"; do
-            if [[ "$archive" == true ]]; then
-                case "$directory" in
-                    modules/music-bot|modules/audio-player)
-                        if [[ $# == 1 ]]; then
-                            fail "$directory needs native media tooling; use make image-media"
-                        fi
-                        archive_log SKIP "$directory needs native media tooling; use make image-media"
-                        continue
-                        ;;
-                    voice-runtime/*) fail "Module output conflicts with the native runtime: $directory" ;;
-                esac
-            fi
-            module=$(module_go_directory "$directory")
-            output=$(module_build_output "$directory")
-            package=.
-            if [[ "$module" != "$directory" ]]; then
-                if [[ "$module" == . ]]; then package=./$directory; else package=./${directory#"$module"/}; fi
-            fi
-            if [[ "$archive" == true ]]; then
-                output=$output.oci.tar
-                safe_file "$output"
-                targets+=("$module:$package:$output:$directory")
-            else
-                targets+=("$module:$package:$output")
-                safe_file "$output"
-            fi
-        done
+        module=$(module_go_directory "$directory")
+        output=$(module_build_output "$directory")
+        package=.
+        if [[ "$module" != "$directory" ]]; then
+            if [[ "$module" == . ]]; then package=./$directory; else package=./${directory#"$module"/}; fi
+        fi
+        if [[ "$archive" == true ]]; then
+            output=$output.oci.tar
+            safe_file "$output"
+            targets+=("$module:$package:$output:$directory")
+        else
+            targets+=("$module:$package:$output")
+            safe_file "$output"
+        fi
         # Application modules and OCI payloads stay static regardless of the
         # runtime's native voice mode or inherited CGO settings.
         export CGO_ENABLED=0

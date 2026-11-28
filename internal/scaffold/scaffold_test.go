@@ -33,18 +33,18 @@ func TestDefaultDestination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join(checkout, "local-modules", "ping-bot"); dir != want {
+	if want := filepath.Join(checkout, "modules", "ping-bot"); dir != want {
 		t.Fatalf("destination = %q, want %q", dir, want)
 	}
-	if got := BuildTarget(checkout, dir); got != "local-modules/ping-bot" {
-		t.Fatalf("build target = %q, want local-modules/ping-bot", got)
+	if got := BuildTarget(checkout, dir); got != "modules/ping-bot" {
+		t.Fatalf("build target = %q, want modules/ping-bot", got)
 	}
 }
 
 func TestCreateGoReplacements(t *testing.T) {
 	sdk := fixtureSDK(t)
 	t.Run("in checkout", func(t *testing.T) {
-		dir := filepath.Join(sdk, "local-modules", "ping-bot")
+		dir := filepath.Join(sdk, "modules", "ping-bot")
 		_, err := Create(Options{Name: "ping-bot", Directory: dir, SDKPath: sdk, Template: Discord})
 		if err != nil {
 			t.Fatal(err)
@@ -89,7 +89,7 @@ func TestCreateViaSymlinkOutsideCheckout(t *testing.T) {
 	if err := os.Mkdir(outside, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	link := filepath.Join(sdk, "local-modules")
+	link := filepath.Join(sdk, "modules")
 	if err := os.Symlink(outside, link); err != nil {
 		if runtime.GOOS == "windows" {
 			t.Skipf("cannot create a directory symlink: %v", err)

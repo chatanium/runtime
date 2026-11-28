@@ -42,7 +42,7 @@ func Destination(name, directory string) (string, error) {
 		return "", errors.New("module name must be 1–50 lowercase letters, digits or hyphens, starting with a letter")
 	}
 	if directory == "" {
-		directory = filepath.Join("local-modules", name)
+		directory = filepath.Join("modules", name)
 	}
 	return filepath.Abs(directory)
 }

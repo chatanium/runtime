@@ -13,7 +13,7 @@ Read [CONCEPT.md](CONCEPT.md) before designing or implementing changes. Plan bef
 | `internal/bundle/`, `internal/releasepayload/`, `tools/build/`, `tools/buildlib/` | Release packaging, GVX pins, embedded payload, native qualification and shared build tooling. |
 | `internal/legacy/`, `tools/dev/` | Legacy Linux worker, Discord recording and SQL generation, privileged host administration and development. Keep these operations out of portable startup. |
 | `proto/`, `shared/` | Public v2 protocol and module SDK. Provider-specific Discord types are separate from `core-v2`. |
-| `examples/`, `modules/`, `internal/scaffold/`, `local-modules/` | Examples, bundled modules, scaffolding and ignored local module source. |
+| `examples/`, `internal/scaffold/`, `modules/` | Tracked examples, scaffolding, and independently owned module sources ignored by this repository. |
 | `tests/integration/legacy/`, `tools/build/nativeacceptance/` | Legacy integration fixtures and portable native release checks. |
 | `docs/proposal/` | Design proposals, named by their `CHAT-N` IDs. |
 

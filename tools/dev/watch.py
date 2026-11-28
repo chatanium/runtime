@@ -28,7 +28,7 @@ LABEL = 'org.chatanium.flexmodule.manifest.v2'
 IMAGE = re.compile(r'^([a-z0-9][a-z0-9._:/-]*)@sha256:[0-9a-f]{64}$')
 MAX_JSON = 16 << 20
 IGNORED = {'.git', '.tools', 'bin', 'logs', '__pycache__', 'node_modules',
-           'vendor', 'storage', 'runtime-storage', '.musicbot'}
+           'vendor', 'storage', 'runtime-storage'}
 # Compiler/build tools receive no application tokens or arbitrary inherited env.
 BUILD_ENV = {'PATH', 'HOME', 'USER', 'LOGNAME', 'TMPDIR', 'LANG', 'LC_ALL',
              'DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_CONFIG', 'DOCKER_CERT_PATH',
@@ -317,7 +317,7 @@ def classify(paths, sources):
             affected.update(source.directory for source in owners)
             continue
         # An uninstalled module tree is not a runtime dependency or an approval.
-        if path.startswith(('modules/', 'local-modules/', 'examples/')):
+        if path.startswith(('modules/', 'examples/')):
             continue
         runtime = True
         # Shared inputs and Go dependency/build changes can affect every module.

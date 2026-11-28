@@ -18,40 +18,13 @@ run timeout --signal=TERM --kill-after=10s "$CHECK_DEADLINE" bash -euo pipefail 
     python3 tools/sdk.py --go "$1"
     .tools/bin/buf build proto
     bash tools/generate.sh check
-    go_directories=(.)
-    declare -A seen=([.]=1)
-    declare -A sdk=([.]=yes)
-    discovered=$(list_module_directories)
-    if [[ -n "$discovered" ]]; then
-        while IFS= read -r directory; do
-            module=$(module_go_directory "$directory")
-            [[ -z "${seen[$module]:-}" ]] || continue
-            seen[$module]=1
-            go_directories+=("$module")
-            # Preparation may need the exclusive SDK lock, so do it before
-            # taking the shared lease for the complete offline test run.
-            sdk[$module]=$(uses_prepared_sdk "$module")
-            if [[ "${sdk[$module]}" == yes ]]; then
-                python3 tools/sdk.py --go "$1" --module-dir "$module"
-            fi
-        done <<< "$discovered"
-    fi
     safe_file .tools/deps/discordgo.lock
     exec 8<.tools/deps/discordgo.lock
     flock -s 8
     python3 tools/sdk.py --go "$1" --verify-only
     printf "Checking offline patched SDK\n"
     CGO_ENABLED=0 "$1" -C .tools/deps/discordgo test -mod=readonly -tags= -count=1 -timeout "$TEST_TIMEOUT" .
-    for module in "${go_directories[@]}"; do
-        printf "Checking offline module %s\n" "$module"
-        if [[ "$module" == . ]]; then
-            "$1" test -mod=readonly -tags= -count=1 -timeout "$TEST_TIMEOUT" \
-                . ./cmd/... ./examples/... ./internal/... ./proto/... ./shared/... ./tests/... ./tools/...
-            continue
-        fi
-        if [[ "${sdk[$module]}" == yes ]]; then
-            python3 tools/sdk.py --go "$1" --module-dir "$module" --verify-only
-        fi
-        "$1" -C "$module" test -mod=readonly -tags= -count=1 -timeout "$TEST_TIMEOUT" ./...
-    done
+    printf "Checking offline runtime and SDK packages\n"
+    "$1" test -mod=readonly -tags= -count=1 -timeout "$TEST_TIMEOUT" \
+        . ./cmd/... ./examples/... ./internal/... ./proto/... ./shared/... ./tests/... ./tools/...
 ' bash "$GO_BINARY"
